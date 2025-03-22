@@ -1,0 +1,50 @@
+{
+  "name": "node-yara-x",
+  "version": "0.1.0",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "node-yara-x",
+    "triples": {
+      "additional": [
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc"
+      ]
+    }
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.4",
+    "@types/node": "^22.13.10"
+  },
+  "engines": {
+    "node": ">= 20"
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "prepublishOnly": "napi prepublish -t npm",
+    "universal": "napi universal",
+    "version": "napi version",
+    "test": "node --test __test__/index.spec.mjs",
+    "benchmark": "node __test__/benchmark.mjs"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "npm/**/*"
+  ],
+  "keywords": [
+    "yara",
+    "yara-x",
+    "malware",
+    "detection",
+    "napi-rs",
+    "rust"
+  ]
+}
+
