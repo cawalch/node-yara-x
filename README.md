@@ -396,3 +396,14 @@ On a MacBook Pro with an M3 Max / 36GB RAM
 ### validateYaraRules
 
 - `validateYaraRules(rules: string, options?: ScannerOptions)` - Validate YARA rules without executing them
+
+## Licenses
+
+This project incorporates code under two distinct licenses:
+
+- **MIT License:**
+  - The node.js bindings and other code specific to this module are licensed under the MIT license.
+  - See `LICENSE-MIT` for the full text.
+- **BSD-3-Clause License:**
+  - The included YARA-X library is licensed under the BSD-3-Clause license.
+  - See `LICENSE-BSD-3-Clause` for the full text.
