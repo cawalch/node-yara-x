@@ -7,6 +7,13 @@ permissions:
   contents: write
   id-token: write
 'on':
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to npm'
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - main
@@ -18,9 +25,14 @@ permissions:
       - '**/*.gitignore'
       - .editorconfig
       - docs/**
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - 'examples/**'
   pull_request: null
 jobs:
   build:
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, 'Merge pull request')
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -63,7 +75,16 @@ jobs:
             ~/.cargo/git/db/
             .cargo-cache
             target/
-          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
+          key: ${{ matrix.settings.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.settings.target }}-cargo-
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
       - uses: goto-bus-stop/setup-zig@v2
         if: ${{ matrix.settings.target == 'armv7-unknown-linux-gnueabihf' || matrix.settings.target == 'armv7-unknown-linux-musleabihf' }}
         with:
@@ -102,7 +123,12 @@ jobs:
           name: bindings-${{ matrix.settings.target }}
           path: ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
+          retention-days: 1
   test-macOS-windows-binding:
+    if: |
+      !contains(github.event.head_commit.message, 'ci skip') &&
+      !contains(github.event.head_commit.message, 'skip ci') &&
+      github.event_name != 'push' || !contains(github.event.head_commit.message, 'Merge pull request')
     name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
     needs:
       - build
@@ -116,7 +142,6 @@ jobs:
             target: x86_64-pc-windows-msvc
         node:
           - '20'
-          - '22'
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
