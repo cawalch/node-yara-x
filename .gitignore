@@ -197,6 +197,4 @@ Cargo.lock
 *.node
 
 # distribution files
-index.js
-index.d.ts
 npm

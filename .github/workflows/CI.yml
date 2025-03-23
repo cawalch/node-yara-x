@@ -47,7 +47,7 @@ jobs:
         if: ${{ !matrix.settings.docker }}
         with:
           node-version: 20
-          cache: 'npm' # Changed from yarn to npm
+          cache: 'npm'
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
@@ -74,16 +74,16 @@ jobs:
         shell: bash
       - name: Setup node x86
         if: matrix.settings.target == 'i686-pc-windows-msvc'
-        run: npm config set arch ia32 # Changed from yarn config
+        run: npm config set arch ia32
         shell: bash
       - name: Install dependencies
-        run: npm install # Changed from yarn install
+        run: npm install
       - name: Setup node x86
         uses: actions/setup-node@v4
         if: matrix.settings.target == 'i686-pc-windows-msvc'
         with:
           node-version: 20
-          cache: 'npm' # Changed from yarn to npm
+          cache: 'npm'
           architecture: x86
       - name: Build in docker
         uses: addnab/docker-run-action@v3
@@ -115,8 +115,8 @@ jobs:
           - host: windows-latest
             target: x86_64-pc-windows-msvc
         node:
-          - '18'
           - '20'
+          - '22'
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
@@ -124,10 +124,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: 'npm' # Changed from yarn to npm
+          cache: 'npm'
           architecture: x64
       - name: Install dependencies
-        run: npm install # Changed from yarn install
+        run: npm install
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -137,7 +137,7 @@ jobs:
         run: ls -R .
         shell: bash
       - name: Test bindings
-        run: npm test # Changed from yarn test
+        run: npm test
   test-linux-x64-gnu-binding:
     name: Test bindings on Linux-x64-gnu - node@${{ matrix.node }}
     needs:
@@ -155,9 +155,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: 'npm' # Changed from yarn to npm
+          cache: 'npm'
       - name: Install dependencies
-        run: npm install # Changed from yarn install
+        run: npm install
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -167,7 +167,7 @@ jobs:
         run: ls -R .
         shell: bash
       - name: Test bindings
-        run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-slim npm test # Changed from yarn test
+        run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-slim npm test
   publish:
     name: Publish
     runs-on: ubuntu-latest
@@ -180,15 +180,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm' # Changed from yarn to npm
+          cache: 'npm'
       - name: Install dependencies
-        run: npm install # Changed from yarn install
+        run: npm install
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
       - name: Move artifacts
-        run: npm run artifacts # Changed from yarn artifacts
+        run: npm run artifacts
       - name: List packages
         run: ls -R ./npm
         shell: bash
