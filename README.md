@@ -2,7 +2,7 @@
 
 ## Features
 
-- High Performance: Built with napi-rs for maximum performance
+- High Performance: Built with [napi-rs](https://napi-rs.com) and [VirusTotal/yara-x](https://github.com/VirusTotal/yara-x)
 - Async Support: First-class support for asynchronous scanning
 - WASM Compilation: Compile rules to WebAssembly for portable execution
 - Advanced Options: Fine-tune scanning with variables, compiler options, and more
@@ -400,7 +400,6 @@ if (warnings.length > 0) {
 ### yarax Methods
 
 - `getWarnings()` - Get compiler warnings.
-- `getErrors()` - Get compiler errors occurred during rule compilation.
 - `scan(data: Buffer, variables?: Record<string, string | number>)` - Scan a buffer.
 - `scanFile(filePath: string, variables?: Record<string, string | number>)` - Scan a file.
 - `scanAsync(data: Buffer, variables?: Record<string, object | undefined | null>)` - Scan a buffer asynchronously.
