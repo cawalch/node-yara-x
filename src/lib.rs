@@ -32,10 +32,17 @@ trait VariableHandler {
   fn apply_variables_from_object(&mut self, variables: &Option<Object>) -> Result<()> {
     if let Some(vars) = variables {
       let property_names = Object::keys(vars)?;
-      for key in property_names {
-        if let Ok(value) = vars.get_named_property::<String>(&key) {
-          self.apply_variable(&key, &value)?;
+
+      let mut values = HashMap::with_capacity(property_names.len());
+
+      for key in &property_names {
+        if let Ok(value) = vars.get_named_property::<String>(key) {
+          values.insert(key.clone(), value);
         }
+      }
+
+      for (key, value) in values {
+        self.apply_variable(&key, &value)?;
       }
     }
     Ok(())
@@ -262,14 +269,14 @@ pub struct CompileResult {
 }
 
 #[napi]
-pub struct YaraScanner {
+pub struct YaraX {
   rules: Arc<Rules>,
   source_code: Option<String>,
   warnings: Vec<CompilerWarning>,
   variables: Option<HashMap<String, String>>,
 }
 
-impl YaraScanner {
+impl YaraX {
   fn apply_compiler_options(
     compiler: &mut Compiler<'_>,
     options: Option<&CompilerOptions>,
@@ -327,18 +334,23 @@ impl YaraScanner {
     let mut meta_obj = env.create_object()?;
 
     for (key, value) in rule.metadata() {
+      let key_string = key.to_string();
+
       match value {
         yara_x::MetaValue::Integer(i) => {
-          meta_obj.set_named_property(key, i)?;
+          let int_val = i;
+          meta_obj.set_named_property(&key_string, int_val)?;
         }
         yara_x::MetaValue::Float(f) => {
-          meta_obj.set_named_property(key, f)?;
+          let float_val = f;
+          meta_obj.set_named_property(&key_string, float_val)?;
         }
         yara_x::MetaValue::String(s) => {
-          meta_obj.set_named_property(key, s.to_string())?;
+          let string_val = s.to_string();
+          meta_obj.set_named_property(&key_string, string_val)?;
         }
         _ => {
-          meta_obj.set_named_property(key, "unknown")?;
+          meta_obj.set_named_property(&key_string, "unknown")?;
         }
       }
     }
@@ -355,13 +367,18 @@ impl YaraScanner {
         }
 
         let mut map = HashMap::with_capacity(property_names.len());
+
         for key in property_names {
           if let Ok(value) = vars.get_named_property::<String>(&key) {
             map.insert(key, value);
           }
         }
 
-        Ok(Some(map))
+        if map.is_empty() {
+          Ok(None)
+        } else {
+          Ok(Some(map))
+        }
       }
       None => Ok(None),
     }
@@ -384,7 +401,7 @@ impl YaraScanner {
     let warnings = Self::get_compiler_warnings(&compiler)?;
     let rules = compiler.build();
 
-    Ok(YaraScanner {
+    Ok(YaraX {
       rules: Arc::new(rules),
       source_code: Some(source),
       warnings,
@@ -470,7 +487,7 @@ impl YaraScanner {
 }
 
 #[napi]
-impl YaraScanner {
+impl YaraX {
   #[napi(constructor)]
   pub fn new(rule_source: String, options: Option<CompilerOptions>) -> Result<Self> {
     Self::create_scanner_from_source(rule_source, options)
@@ -512,14 +529,6 @@ impl YaraScanner {
   #[napi]
   pub fn get_errors(&self) -> Vec<CompilerError> {
     Vec::new()
-  }
-
-  #[napi]
-  pub fn from_file(rule_path: String, options: Option<CompilerOptions>) -> Result<Self> {
-    let file_content = std::fs::read_to_string(Path::new(&rule_path))
-      .map_err(|e| io_error_to_napi(e, &format!("reading file {}", rule_path)))?;
-
-    Self::create_scanner_from_source(file_content, options)
   }
 
   #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number>")]
@@ -591,26 +600,6 @@ impl YaraScanner {
       })?;
 
     Ok(())
-  }
-
-  #[napi]
-  pub fn compile_to_wasm(
-    rule_source: String,
-    output_path: String,
-    options: Option<CompilerOptions>,
-  ) -> Result<()> {
-    Self::compile_source_to_wasm(&rule_source, &output_path, options.as_ref())
-  }
-
-  #[napi]
-  pub fn compile_file_to_wasm(
-    rule_path: String,
-    output_path: String,
-    options: Option<CompilerOptions>,
-  ) -> Result<()> {
-    let file_content = std::fs::read_to_string(Path::new(&rule_path))
-      .map_err(|e| io_error_to_napi(e, &format!("reading file {}", rule_path)))?;
-    Self::compile_source_to_wasm(&file_content, &output_path, options.as_ref())
   }
 
   #[napi]
@@ -689,16 +678,6 @@ impl YaraScanner {
   }
 
   #[napi]
-  pub fn create_with_options() -> Self {
-    YaraScanner {
-      rules: Arc::new(Compiler::new().build()),
-      source_code: Some(String::new()),
-      warnings: Vec::new(),
-      variables: None,
-    }
-  }
-
-  #[napi]
   pub fn define_variable(&mut self, name: String, value: String) -> Result<()> {
     let mut compiler = Compiler::new();
 
@@ -746,7 +725,7 @@ impl BaseYaraTask {
   fn process_results(&self, env: Env, data: &[u8]) -> Result<Vec<RuleMatch>> {
     let mut scanner = self.create_scanner()?;
     let results = scanner.scan(data).map_err(scan_error_to_napi)?;
-    YaraScanner::process_scan_results(results, data, env)
+    YaraX::process_scan_results(results, data, env)
   }
 }
 
@@ -769,7 +748,7 @@ impl Task for ScanTask {
   type JsValue = Vec<RuleMatch>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    Ok(self.data.clone())
+    Ok(std::mem::take(&mut self.data))
   }
 
   fn resolve(&mut self, env: napi::Env, data: Self::Output) -> Result<Self::JsValue> {
@@ -822,7 +801,7 @@ impl Task for EmitWasmFileTask {
       )
     })?;
 
-    YaraScanner::compile_source_to_wasm(source, &self.output_path, None)?;
+    YaraX::compile_source_to_wasm(source, &self.output_path, None)?;
     Ok(())
   }
 
@@ -832,18 +811,59 @@ impl Task for EmitWasmFileTask {
 }
 
 #[napi]
-pub fn validate_yara_rules(
-  rule_source: String,
-  options: Option<CompilerOptions>,
-) -> Result<CompileResult> {
+pub fn validate(rule_source: String, options: Option<CompilerOptions>) -> Result<CompileResult> {
   let mut compiler = Compiler::new();
 
-  YaraScanner::apply_compiler_options(&mut compiler, options.as_ref(), false)?;
+  YaraX::apply_compiler_options(&mut compiler, options.as_ref(), false)?;
 
   let _ = compiler.add_source(rule_source.as_str());
 
-  let warnings = YaraScanner::get_compiler_warnings(&compiler)?;
-  let errors = YaraScanner::get_compiler_errors(&compiler)?;
+  let warnings = YaraX::get_compiler_warnings(&compiler)?;
+  let errors = YaraX::get_compiler_errors(&compiler)?;
 
   Ok(CompileResult { warnings, errors })
+}
+
+#[napi]
+pub fn compile(rule_source: String, options: Option<CompilerOptions>) -> Result<YaraX> {
+  let yarax = YaraX::create_scanner_from_source(rule_source, options)?;
+  Ok(yarax)
+}
+
+#[napi]
+pub fn create() -> YaraX {
+  YaraX {
+    rules: Arc::new(Compiler::new().build()),
+    source_code: Some(String::new()),
+    warnings: Vec::new(),
+    variables: None,
+  }
+}
+
+#[napi]
+pub fn from_file(rule_path: String, options: Option<CompilerOptions>) -> Result<YaraX> {
+  let file_content = std::fs::read_to_string(Path::new(&rule_path))
+    .map_err(|e| io_error_to_napi(e, &format!("reading file {}", rule_path)))?;
+
+  YaraX::create_scanner_from_source(file_content, options)
+}
+
+#[napi]
+pub fn compile_to_wasm(
+  rule_source: String,
+  output_path: String,
+  options: Option<CompilerOptions>,
+) -> Result<()> {
+  YaraX::compile_source_to_wasm(&rule_source, &output_path, options.as_ref())
+}
+
+#[napi]
+pub fn compile_file_to_wasm(
+  rule_path: String,
+  output_path: String,
+  options: Option<CompilerOptions>,
+) -> Result<()> {
+  let file_content = std::fs::read_to_string(Path::new(&rule_path))
+    .map_err(|e| io_error_to_napi(e, &format!("reading file {}", rule_path)))?;
+  YaraX::compile_source_to_wasm(&file_content, &output_path, options.as_ref())
 }

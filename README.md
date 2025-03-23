@@ -1,18 +1,17 @@
-# node-yara-x
+# yara-x
 
 ## Features
 
 - High Performance: Built with napi-rs for maximum performance
 - Async Support: First-class support for asynchronous scanning
 - WASM Compilation: Compile rules to WebAssembly for portable execution
-- Comprehensive API: Full access to YARA-X's powerful pattern matching capabilities
 - Advanced Options: Fine-tune scanning with variables, compiler options, and more
 - Zero Dependencies: No external runtime dependencies
 
 ## Installation
 
 ```bash
-npm install node-yara-x
+npm install yara-x
 ```
 
 ## Usage
@@ -20,10 +19,10 @@ npm install node-yara-x
 ### Basic Example
 
 ```javascript
-import { YaraScanner } from "node-yara-x";
+import { compile } from "yara-x";
 
-// Create a scanner with a YARA rule
-const scanner = new YaraScanner(`
+// Compile yara rules
+const rules = compile(`
   rule test_rule {
     strings:
       $a = "hello world"
@@ -34,7 +33,7 @@ const scanner = new YaraScanner(`
 
 // Scan a buffer
 const buffer = Buffer.from("This is a test with hello world in it");
-const matches = scanner.scan(buffer);
+const matches = rules.scan(buffer);
 
 // Process matches
 if (matches.length > 0) {
@@ -55,15 +54,15 @@ if (matches.length > 0) {
 ## Scanning Files
 
 ```javascript
-import { YaraScanner } from "node-yara-x";
+import { fromFile, compile } from "yara-x";
 import { readFileSync } from "fs";
 
 // Load rules from a file
-const scanner = YaraScanner.fromFile("./rules/malware_rules.yar");
+const rules = fromFile("./rules/malware_rules.yar");
 
 try {
   // Scan a file directly
-  const matches = scanner.scanFile("./samples/suspicious_file.exe");
+  const matches = rules.scanFile("./samples/suspicious_file.exe");
 
   console.log(`Found ${matches.length} matching rules`);
 } catch (error) {
@@ -74,10 +73,10 @@ try {
 ## Asynchronous Scanning
 
 ```javascript
-import { YaraScanner } from "node-yara-x";
+import { compile } from "yara-x";
 
 async function scanLargeFile() {
-  const scanner = new YaraScanner(`     rule large_file_rule {
+  const rules = compile(`     rule large_file_rule {
       strings:
         $a = "sensitive data"
       condition:
@@ -87,7 +86,7 @@ async function scanLargeFile() {
 
   try {
     // Scan a file asynchronously
-    const matches = await scanner.scanFileAsync("./samples/large_file.bin");
+    const matches = await rules.scanFileAsync("./samples/large_file.bin");
     console.log(`Found ${matches.length} matching rules`);
   } catch (error) {
     console.error(`Async scanning error: ${error.message}`);
@@ -100,10 +99,10 @@ scanLargeFile();
 ## Variables
 
 ```javascript
-import { YaraScanner } from "node-yara-x";
+import { compile } from "yara-x";
 
 // Create a scanner with variables
-const scanner = new YaraScanner(
+const rules = compile(
   `
   rule variable_rule {
     condition:
@@ -119,13 +118,13 @@ const scanner = new YaraScanner(
 );
 
 // Scan with default variables
-let matches = scanner.scan(Buffer.from("test data"));
+let matches = rules.scan(Buffer.from("test data"));
 console.log(`Matches with default variables: ${matches.length}`);
 
 // Override variables at scan time
-matches = scanner.scan(Buffer.from("test data"), {
+matches = rules.scan(Buffer.from("test data"), {
   string_var: "no secrets here",
-  int_var: "5",
+  int_var: 5, // Note: variables at scan time can be numbers as well
 });
 console.log(`Matches with overridden variables: ${matches.length}`);
 ```
@@ -133,7 +132,7 @@ console.log(`Matches with overridden variables: ${matches.length}`);
 ## WASM Compilation
 
 ```javascript
-import { YaraScanner } from "node-yara-x";
+import { compile, compileToWasm } from "yara-x";
 
 // Compile rules to WASM
 const rule = `
@@ -146,27 +145,27 @@ const rule = `
 `;
 
 // Static compilation
-YaraScanner.compileToWasm(rule, "./output/rules.wasm");
+compileToWasm(rule, "./output/rules.wasm");
 
-// Or from an instance
-const scanner = new YaraScanner(rule);
-scanner.emitWasmFile("./output/instance_rules.wasm");
+// Or from a compiled rules instance
+const compiledRules = compile(rule);
+compiledRules.emitWasmFile("./output/instance_rules.wasm");
 
 // Async compilation
-await scanner.emitWasmFileAsync("./output/async_rules.wasm");
+await compiledRules.emitWasmFileAsync("./output/async_rules.wasm");
 ```
 
 ## Incremental Rule Building
 
 ```javascript
-import { YaraScanner } from "node-yara-x";
+import { create } from "yara-x";
 
 // Create an empty scanner
-const scanner = YaraScanner.createWithOptions();
+const scanner = create();
 
 // Add rules incrementally
 scanner.addRuleSource(`
-  rule first_rule {
+  wrule first_rule {
     strings:
       $a = "first pattern"
     condition:
@@ -194,16 +193,16 @@ const matches = scanner.scan(Buffer.from("test data with first pattern"));
 ## Rule Validation
 
 ```javascript
-import { validateYaraRules } from "node-yara-x";
+import { validate } from "yara-x";
 
 // Validate rules without executing them
-const result = validateYaraRules(`
+const result = validate(`
   rule valid_rule {
     strings:
       $a = "valid"
     condition:
       $a
-  }
+    }
 `);
 
 if (result.errors.length === 0) {
@@ -219,10 +218,10 @@ if (result.errors.length === 0) {
 ## Advanced Options
 
 ```javascript
-import { YaraScanner } from "node-yara-x";
+import { compile } from "yara-x";
 
 // Create a scanner with advanced options
-const scanner = new YaraScanner(
+const rules = compile(
   `
   rule advanced_rule {
     strings:
@@ -246,7 +245,7 @@ const scanner = new YaraScanner(
     // Ignore specific modules
     ignoreModules: ["pe"],
 
-    // Error on potentially slow patterns
+  :  // Error on potentially slow patterns
     errorOnSlowPattern: true,
 
     // Error on potentially slow loops
@@ -257,12 +256,14 @@ const scanner = new YaraScanner(
 
 ## Error Handling
 
+### Compilation Errors
+
 ```javascript
-import { YaraScanner } from "node-yara-x";
+import { compile } from "yara-x";
 
 try {
   // This will throw an error due to invalid syntax
-  const scanner = new YaraScanner(`
+  const rules = compile(`
     rule invalid_rule {
       strings:
         $a = "unclosed string
@@ -277,15 +278,16 @@ try {
   //   |
   // 3 |         $a = "unclosed string
   //   |                            ^ expecting `"`, found end of file
+  // 278:  }
 }
 ```
 
-## Handling Scanning errors
+### Scanning errors
 
 ```javascript
-import { YaraScanner } from "node-yara-x";
+import { compile } from "yara-x";
 
-const scanner = new YaraScanner(`
+const rules = compile(`
   rule test_rule {
     condition:
       true
@@ -294,20 +296,20 @@ const scanner = new YaraScanner(`
 
 try {
   // This will throw if the file doesn't exist
-  scanner.scanFile("/path/to/nonexistent/file.bin");
+  rules.scanFile("/path/to/nonexistent/file.bin");
 } catch (error) {
   console.error(`Scanning error: ${error.message}`);
   // Output: Scanning error: Error reading file: No such file or directory (os error 2)
 }
 ```
 
-## Handling Async Errors
+### Async Errors
 
 ```javascript
-import { YaraScanner } from "node-yara-x";
+import { compile, compileToWasm } from "yara-x";
 
 async function handleAsyncErrors() {
-  const scanner = new YaraScanner(`
+  const rules = compile(`
     rule test_rule {
       condition:
         true
@@ -315,13 +317,16 @@ async function handleAsyncErrors() {
   `);
 
   try {
-    await scanner.scanFileAsync("/path/to/nonexistent/file.bin");
+    await rules.scanFileAsync("/path/to/nonexistent/file.bin");
   } catch (error) {
     console.error(`Async scanning error: ${error.message}`);
   }
 
   try {
-    await scanner.emitWasmFileAsync("/invalid/path/rules.wasm");
+    await compileToWasm(
+      "rule test { condition: true }",
+      "/invalid/path/rules.wasm",
+    );
   } catch (error) {
     console.error(`WASM compilation error: ${error.message}`);
   }
@@ -333,20 +338,20 @@ handleAsyncErrors();
 ## Compiler Warnings
 
 ```javascript
-import { YaraScanner } from "node-yara-x";
+import { compile } from "yara-x";
 
 // Create a scanner with a rule that generates warnings
-const scanner = new YaraScanner(`
+const rules = compile(`
   rule warning_rule {
     strings:
       $a = "unused string"
     condition:
       true  // Warning: invariant expression
-  }
+    }
 `);
 
 // Get and display warnings
-const warnings = scanner.getWarnings();
+const warnings = rules.getWarnings();
 if (warnings.length > 0) {
   console.log("Compiler warnings:");
   warnings.forEach((warning) => {
@@ -368,34 +373,31 @@ On a MacBook Pro with an M3 Max / 36GB RAM
 
 # API Reference
 
-## YaraScanner
+### Functions
 
-### Constructor
+- `compile(ruleSource: string, options?: CompilerOptions)` - Compiles yara rules from a string.
+- `compileToWasm(ruleSource: string, outputPath: string, options?: CompilerOptions)` - Compiles yara rules from a string to WASM file.
+- `compileFileToWasm(rulesPath: string, outputPath: string, options?: CompilerOptions)` - Compiles yara rules from a file to WASM file.
+- `validate(ruleSource: string, options?: CompilerOptions)` - Validates yara rules without executing them.
+- `create(options?: CompilerOptions)` - Creates an empty rules scanner to add rules incrementally.
+- `fromFile(rulePath: string, options?: CompilerOptions)` - Compiles yara rules from a file.
 
-- `new YaraScanner(rules: string, options?: ScannerOptions)` - Create a scanner with rules
-- `YaraScanner.fromFile(filePath: string, options?: ScannerOptions)` - Create a scanner from a rule file
-- `YaraScanner.createWithOptions(options?: ScannerOptions)` - Create an empty scanner with options
+### yarax Methods
 
-### Methods
+- `getWarnings()` - Get compiler warnings.
+- `getErrors()` - Get compiler errors occurred during rule compilation.
+- `scan(data: Buffer, variables?: Record<string, string | number>)` - Scan a buffer.
+- `scanFile(filePath: string, variables?: Record<string, string | number>)` - Scan a file.
+- `scanAsync(data: Buffer, variables?: Record<string, object | undefined | null>)` - Scan a buffer asynchronously.
+- `scanFileAsync(filePath: string, variables?: Record<string, object | undefined | null>)` - Scan a file asynchronously.
+- `emitWasmFile(filePath: string)` - Emit compiled rules to WASM file synchronously.
+- `emitWasmFileAsync(filePath: string)` - Emit compiled rules to WASM file asynchronously.
+- `addRuleSource(rules: string)` - Add rules from a string to an existing scanner.
+- `addRuleFile(filePath: string)` - Add rules from a file to an existing scanner.
 
-- `scan(buffer: Buffer, variables?: Record<string, string>)` - Scan a buffer
-- `scanFile(filePath: string, variables?: Record<string, string>)` - Scan a file
-- `scanAsync(buffer: Buffer, variables?: Record<string, string>)` - Scan a buffer asynchronously
-- `scanFileAsync(filePath: string, variables?: Record<string, string>)` - Scan a file asynchronously
-- `addRuleSource(rules: string)` - Add rules from a string
-- `addRuleFile(filePath: string)` - Add rules from a file
-- `emitWasmFile(filePath: string)` - Compile rules to WASM
-- `emitWasmFileAsync(filePath: string)` - Compile rules to WASM asynchronously
-- `getWarnings()` - Get compiler warnings
+### Rule Validation
 
-### Static Methods
-
-- `compileToWasm(rules: string, outputPath: string, options?: ScannerOptions)` - Compile rules to WASM
-- `compileFileToWasm(rulesPath: string, outputPath: string, options?: ScannerOptions)` - Compile rule file to WASM
-
-### validateYaraRules
-
-- `validateYaraRules(rules: string, options?: ScannerOptions)` - Validate YARA rules without executing them
+- `validate(rules: string, options?: CompilerOptions)` - Validate yara rules without executing them.
 
 ## Licenses
 
@@ -405,5 +407,5 @@ This project incorporates code under two distinct licenses:
   - The node.js bindings and other code specific to this module are licensed under the MIT license.
   - See `LICENSE-MIT` for the full text.
 - **BSD-3-Clause License:**
-  - The included YARA-X library is licensed under the BSD-3-Clause license.
+  - The included yara-x library is licensed under the BSD-3-Clause license.
   - See `LICENSE-BSD-3-Clause` for the full text.

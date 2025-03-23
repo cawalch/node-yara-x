@@ -49,22 +49,23 @@ export interface CompileResult {
   warnings: Array<CompilerWarning>
   errors: Array<CompilerError>
 }
-export declare function validateYaraRules(ruleSource: string, options?: CompilerOptions | undefined | null): CompileResult
-export declare class YaraScanner {
+export declare function validate(ruleSource: string, options?: CompilerOptions | undefined | null): CompileResult
+export declare function compile(ruleSource: string, options?: CompilerOptions | undefined | null): YaraX
+export declare function create(): YaraX
+export declare function fromFile(rulePath: string, options?: CompilerOptions | undefined | null): YaraX
+export declare function compileToWasm(ruleSource: string, outputPath: string, options?: CompilerOptions | undefined | null): void
+export declare function compileFileToWasm(rulePath: string, outputPath: string, options?: CompilerOptions | undefined | null): void
+export declare class YaraX {
   constructor(ruleSource: string, options?: CompilerOptions | undefined | null)
   getWarnings(): Array<CompilerWarning>
   getErrors(): Array<CompilerError>
-  static fromFile(rulePath: string, options?: CompilerOptions | undefined | null): YaraScanner
   scan(data: Buffer, variables?: Record<string, string | number>): Array<RuleMatch>
   scanFile(filePath: string, variables?: Record<string, string | number>): Array<RuleMatch>
   emitWasmFile(outputPath: string): void
-  static compileToWasm(ruleSource: string, outputPath: string, options?: CompilerOptions | undefined | null): void
-  static compileFileToWasm(rulePath: string, outputPath: string, options?: CompilerOptions | undefined | null): void
   scanAsync(data: Buffer, variables?: object | undefined | null): Promise<unknown>
   scanFileAsync(filePath: string, variables?: object | undefined | null): Promise<unknown>
   emitWasmFileAsync(outputPath: string): Promise<unknown>
   addRuleSource(ruleSource: string): void
   addRuleFile(filePath: string): void
-  static createWithOptions(): YaraScanner
   defineVariable(name: string, value: string): void
 }

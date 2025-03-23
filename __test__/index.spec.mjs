@@ -1,4 +1,4 @@
-import { YaraScanner, validateYaraRules } from "../index.js";
+import yarax from "../index.js";
 import { existsSync, mkdirSync, writeFileSync, unlinkSync, statSync } from "fs";
 import { join, dirname } from "path";
 import { strictEqual, ok, fail } from "assert";
@@ -24,7 +24,7 @@ function cleanupTempFile(filePath) {
   }
 }
 
-describe("YaraScanner Tests", () => {
+describe("yarax Tests", () => {
   before(() => {
     const tempDir = join(__dirname, "temp");
     if (!existsSync(tempDir)) {
@@ -42,9 +42,9 @@ describe("YaraScanner Tests", () => {
       }
     `;
 
-    const scanner = new YaraScanner(rule);
+    const rules = yarax.compile(rule);
     const buffer = Buffer.from("This is a test with hello world in it");
-    const matches = scanner.scan(buffer);
+    const matches = rules.scan(buffer);
 
     strictEqual(matches.length, 1, "Should have one matching rule");
     strictEqual(
@@ -69,7 +69,7 @@ describe("YaraScanner Tests", () => {
           $a
       }
     `;
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
     const buffer = Buffer.from("This is a test without the keyword");
     const matches = scanner.scan(buffer);
     strictEqual(matches.length, 0, "Should have no matching rules");
@@ -85,7 +85,7 @@ describe("YaraScanner Tests", () => {
       }
     `;
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
     const buffer = Buffer.from("This is a test with another test in it");
     const matches = scanner.scan(buffer);
 
@@ -107,7 +107,7 @@ describe("YaraScanner Tests", () => {
     const tempFile = createTempFile(fileContent);
 
     try {
-      const scanner = new YaraScanner(rule);
+      const scanner = yarax.compile(rule);
       const matches = scanner.scanFile(tempFile);
 
       strictEqual(matches.length, 1, "Should have one matching rule");
@@ -134,7 +134,7 @@ describe("YaraScanner Tests", () => {
     const ruleFile = createTempFile(rule, ".yar");
 
     try {
-      const scanner = YaraScanner.fromFile(ruleFile);
+      const scanner = yarax.fromFile(ruleFile);
       const buffer = Buffer.from("This is test content");
       const matches = scanner.scan(buffer);
 
@@ -166,7 +166,7 @@ describe("YaraScanner Tests", () => {
       },
     };
     try {
-      const scanner = YaraScanner.fromFile(ruleFile, options);
+      const scanner = yarax.fromFile(ruleFile, options);
       const buffer = Buffer.from("This is test content");
       const matches = scanner.scan(buffer);
       strictEqual(matches.length, 1, "Should have one matching rule");
@@ -198,7 +198,7 @@ describe("YaraScanner Tests", () => {
     const wasmFile = join(tempDir, `test-${Date.now()}.wasm`);
 
     try {
-      const scanner = new YaraScanner(rule);
+      const scanner = yarax.compile(rule);
       scanner.emitWasmFile(wasmFile);
 
       strictEqual(existsSync(wasmFile), true, "WASM file should exist");
@@ -226,7 +226,7 @@ describe("YaraScanner Tests", () => {
     const wasmFile = join(tempDir, `test-static-${Date.now()}.wasm`);
 
     try {
-      YaraScanner.compileToWasm(rule, wasmFile);
+      yarax.compileToWasm(rule, wasmFile);
 
       strictEqual(existsSync(wasmFile), true, "WASM file should exist");
       ok(statSync(wasmFile).size > 0, "WASM file should not be empty");
@@ -255,7 +255,7 @@ describe("YaraScanner Tests", () => {
     const wasmFile = join(tempDir, `test-static-file-${Date.now()}.wasm`);
 
     try {
-      YaraScanner.compileFileToWasm(ruleFile, wasmFile);
+      yarax.compileFileToWasm(ruleFile, wasmFile);
 
       strictEqual(existsSync(wasmFile), true, "WASM file should exist");
       ok(statSync(wasmFile).size > 0, "WASM file should not be empty");
@@ -275,7 +275,7 @@ describe("YaraScanner Tests", () => {
       }
     `;
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
     const buffer = Buffer.from("This is an async test");
 
     try {
@@ -305,7 +305,7 @@ describe("YaraScanner Tests", () => {
     const tempFile = createTempFile(fileContent);
 
     try {
-      const scanner = new YaraScanner(rule);
+      const scanner = yarax.compile(rule);
       const matches = await scanner.scanFileAsync(tempFile);
 
       strictEqual(matches.length, 1, "Should have one matching rule");
@@ -339,7 +339,7 @@ describe("YaraScanner Tests", () => {
     const wasmFile = join(tempDir, `test-async-${Date.now()}.wasm`);
 
     try {
-      const scanner = new YaraScanner(rule);
+      const scanner = yarax.compile(rule);
       await scanner.emitWasmFileAsync(wasmFile);
 
       strictEqual(existsSync(wasmFile), true, "WASM file should exist");
@@ -352,7 +352,7 @@ describe("YaraScanner Tests", () => {
   });
 
   it("should handle incremental rule building", () => {
-    const scanner = YaraScanner.createWithOptions();
+    const scanner = yarax.create();
 
     scanner.addRuleSource(`
       rule test_incremental_1 {
@@ -406,7 +406,7 @@ describe("YaraScanner Tests", () => {
     const ruleFile = createTempFile(rule, ".yar");
 
     try {
-      const scanner = new YaraScanner(`
+      const scanner = yarax.compile(`
         rule test_initial {
           strings:
             $a = "initial rule"
@@ -455,7 +455,7 @@ describe("YaraScanner Tests", () => {
       },
     };
 
-    const scanner = new YaraScanner(rule, options);
+    const scanner = yarax.compile(rule, options);
 
     const buffer = Buffer.from("");
     const matches = scanner.scan(buffer);
@@ -482,7 +482,7 @@ describe("YaraScanner Tests", () => {
       },
     };
 
-    const scanner = new YaraScanner(rule, options);
+    const scanner = yarax.compile(rule, options);
 
     const buffer = Buffer.from("");
     const matches = scanner.scan(buffer, { scan_var: "100" });
@@ -498,7 +498,7 @@ describe("YaraScanner Tests", () => {
   it("should capture and expose compiler warnings", () => {
     const rule = `rule test_1 { condition: true }`;
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
 
     const warnings = scanner.getWarnings();
 
@@ -537,7 +537,7 @@ describe("YaraScanner Tests", () => {
       relaxedReSyntax: true,
     };
 
-    const scanner = new YaraScanner(rule, options);
+    const scanner = yarax.compile(rule, options);
     const buffer = Buffer.from("This is a test with hello world in it");
     const matches = scanner.scan(buffer);
 
@@ -564,7 +564,7 @@ describe("YaraScanner Tests", () => {
       conditionOptimization: true,
     };
 
-    const scanner = new YaraScanner(rule, options);
+    const scanner = yarax.compile(rule, options);
     const buffer = Buffer.from("This is a test with hello and world in it");
     const matches = scanner.scan(buffer);
 
@@ -590,7 +590,7 @@ describe("YaraScanner Tests", () => {
     };
 
     try {
-      const scanner = new YaraScanner(rule, options);
+      const scanner = yarax.compile(rule, options);
       const buffer = Buffer.from("This is a test");
       const matches = scanner.scan(buffer);
 
@@ -625,7 +625,7 @@ describe("YaraScanner Tests", () => {
     };
 
     try {
-      new YaraScanner(rule, options);
+      yarax.compile(rule, options);
       fail("Should have thrown an error for banned module");
     } catch (error) {
       ok(
@@ -650,7 +650,7 @@ describe("YaraScanner Tests", () => {
       features: ["some_feature"],
     };
 
-    const scanner = new YaraScanner(rule, options);
+    const scanner = yarax.compile(rule, options);
     const buffer = Buffer.from("This is a feature test");
     const matches = scanner.scan(buffer);
 
@@ -665,10 +665,10 @@ describe("YaraScanner Tests", () => {
     };
 
     try {
-      new YaraScanner(rule, options);
+      yarax.compile(rule, options);
 
       const buffer = Buffer.from("This is a test with a b c d e in it");
-      const scanner = new YaraScanner(rule);
+      const scanner = yarax.compile(rule);
       const matches = scanner.scan(buffer);
 
       strictEqual(matches.length, 1, "Should have one matching rule");
@@ -688,7 +688,7 @@ describe("YaraScanner Tests", () => {
     };
 
     try {
-      new YaraScanner(rule, options);
+      yarax.compile(rule, options);
     } catch (error) {
       ok(error.message.includes("slow loop"), "Error should mention slow loop");
     }
@@ -712,7 +712,7 @@ describe("YaraScanner Tests", () => {
       conditionOptimization: true,
     };
 
-    const scanner = new YaraScanner(rule, options);
+    const scanner = yarax.compile(rule, options);
     const buffer = Buffer.from("This is a test with multiple options");
     const matches = scanner.scan(buffer);
 
@@ -742,7 +742,7 @@ describe("YaraScanner Tests", () => {
       },
     };
 
-    const scanner = new YaraScanner(rule, options);
+    const scanner = yarax.compile(rule, options);
     const buffer = Buffer.from("");
     const matches = scanner.scan(buffer);
 
@@ -768,7 +768,7 @@ describe("YaraScanner Tests", () => {
     }
   `;
 
-    const validResult = validateYaraRules(validRule);
+    const validResult = yarax.validate(validRule);
     strictEqual(
       Array.isArray(validResult.errors),
       true,
@@ -780,7 +780,7 @@ describe("YaraScanner Tests", () => {
       "Valid rule should have no errors",
     );
 
-    const invalidResult = validateYaraRules(invalidRule);
+    const invalidResult = yarax.validate(invalidRule);
     strictEqual(
       Array.isArray(invalidResult.errors),
       true,
@@ -802,7 +802,7 @@ describe("YaraScanner Tests", () => {
       },
     };
 
-    const scanner = new YaraScanner(
+    const scanner = yarax.compile(
       `
     rule test_with_variable {
       condition:
@@ -845,7 +845,7 @@ describe("YaraScanner Tests", () => {
     }
   `;
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
     const buffer = Buffer.from("This is a metadata test");
     const matches = scanner.scan(buffer);
 
@@ -879,7 +879,7 @@ describe("YaraScanner Tests", () => {
     }
   `;
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
     const buffer = Buffer.from("This is a tag test");
     const matches = scanner.scan(buffer);
 
@@ -900,7 +900,7 @@ describe("YaraScanner Tests", () => {
     }
   `;
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
     const buffer = Buffer.from("This is a test string");
     const matches = scanner.scan(buffer);
 
@@ -931,7 +931,7 @@ describe("YaraScanner Tests", () => {
     }
   `;
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
     const buffer = Buffer.from("Hello World");
     const matches = scanner.scan(buffer);
 
@@ -954,7 +954,7 @@ describe("YaraScanner Tests", () => {
     }
   `;
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
     const buffer = Buffer.from(
       "Contact us at 555-123-4567 for more information",
     );
@@ -984,7 +984,7 @@ describe("YaraScanner Tests", () => {
     }
   `;
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
     const buffer = Buffer.from("Test Text");
     const matches = scanner.scan(buffer);
 
@@ -1007,7 +1007,7 @@ describe("YaraScanner Tests", () => {
     }
   `;
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
     const buffer = Buffer.from("This is HELLO and hello");
     const matches = scanner.scan(buffer);
 
@@ -1027,7 +1027,7 @@ describe("YaraScanner Tests", () => {
 
     const wideBuffer = Buffer.from("w\0i\0d\0e\0", "binary");
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
     const matches = scanner.scan(wideBuffer);
 
     strictEqual(matches.length, 1, "Should have one matching rule");
@@ -1046,7 +1046,7 @@ describe("YaraScanner Tests", () => {
     }
   `;
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
 
     const buffer = Buffer.from("This string has first and third keywords");
     const matches = scanner.scan(buffer);
@@ -1069,7 +1069,7 @@ describe("YaraScanner Tests", () => {
     }
   `;
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
 
     const buffer1 = Buffer.from("This is a test with another test");
     const matches1 = scanner.scan(buffer1);
@@ -1097,7 +1097,7 @@ describe("YaraScanner Tests", () => {
     }
   `;
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
 
     const buffer1 = Buffer.from("0123456789specific");
     const matches1 = scanner.scan(buffer1);
@@ -1126,7 +1126,7 @@ describe("YaraScanner Tests", () => {
     }
   `;
 
-    const scanner = new YaraScanner(rule);
+    const scanner = yarax.compile(rule);
 
     const buffer1 = Buffer.from("123456789012345");
     const matches1 = scanner.scan(buffer1);
@@ -1143,7 +1143,7 @@ describe("YaraScanner Tests", () => {
 
   it("should handle error cases gracefully", () => {
     try {
-      YaraScanner.fromFile("/path/to/nonexistent/file.yar");
+      yarax.fromFile("/path/to/nonexistent/file.yar");
       fail("Should have thrown an error for nonexistent file");
     } catch (error) {
       ok(
@@ -1153,7 +1153,7 @@ describe("YaraScanner Tests", () => {
     }
 
     try {
-      new YaraScanner("this is not a valid rule");
+      yarax.compile("this is not a valid rule");
       fail("Should have thrown an error for invalid rule syntax");
     } catch (error) {
       ok(
@@ -1162,7 +1162,7 @@ describe("YaraScanner Tests", () => {
       );
     }
 
-    const scanner = new YaraScanner("rule test { condition: true }");
+    const scanner = yarax.compile("rule test { condition: true }");
     try {
       scanner.scanFile("/path/to/nonexistent/file.txt");
       fail("Should have thrown an error for nonexistent file");

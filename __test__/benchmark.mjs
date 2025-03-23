@@ -1,4 +1,4 @@
-import { YaraScanner } from "../index.js";
+import yarax from "../index.js";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { performance } from "perf_hooks";
@@ -138,22 +138,22 @@ const multipleRules = `
 console.log("=== YARA-X Scanner Benchmarks ===");
 
 runBenchmark("Scanner creation with simple rule", 100, () => {
-  new YaraScanner(simpleRule);
+  yarax.compile(simpleRule);
 });
 
 runBenchmark("Scanner creation with complex rule", 100, () => {
-  new YaraScanner(complexRule);
+  yarax.compile(complexRule);
 });
 
 runBenchmark("Scanner creation with regex rule", 100, () => {
-  new YaraScanner(regexRule);
+  yarax.compile(regexRule);
 });
 
 runBenchmark("Scanner creation with multiple rules", 100, () => {
-  new YaraScanner(multipleRules);
+  yarax.compile(multipleRules);
 });
 
-const simpleScanner = new YaraScanner(simpleRule);
+const simpleScanner = yarax.compile(simpleRule);
 
 runBenchmark("Scanning small data (simple rule)", 1000, () => {
   simpleScanner.scan(smallData);
@@ -167,9 +167,9 @@ runBenchmark("Scanning large data (simple rule)", 10, () => {
   simpleScanner.scan(largeData);
 });
 
-const complexScanner = new YaraScanner(complexRule);
-const regexScanner = new YaraScanner(regexRule);
-const multipleScanner = new YaraScanner(multipleRules);
+const complexScanner = yarax.compile(complexRule);
+const regexScanner = yarax.compile(regexRule);
+const multipleScanner = yarax.compile(multipleRules);
 
 runBenchmark("Scanning medium data (complex rule)", 100, () => {
   complexScanner.scan(mediumData);
@@ -198,7 +198,7 @@ const variableRule = `
   }
 `;
 
-const variableScanner = new YaraScanner(variableRule, {
+const variableScanner = yarax.compile(variableRule, {
   defineVariables: { test_var: "100" },
 });
 

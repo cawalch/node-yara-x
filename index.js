@@ -310,7 +310,12 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { YaraScanner, validateYaraRules } = nativeBinding
+const { YaraX, validate, compile, create, fromFile, compileToWasm, compileFileToWasm } = nativeBinding
 
-module.exports.YaraScanner = YaraScanner
-module.exports.validateYaraRules = validateYaraRules
+module.exports.YaraX = YaraX
+module.exports.validate = validate
+module.exports.compile = compile
+module.exports.create = create
+module.exports.fromFile = fromFile
+module.exports.compileToWasm = compileToWasm
+module.exports.compileFileToWasm = compileFileToWasm
