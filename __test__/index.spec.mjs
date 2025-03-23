@@ -1173,4 +1173,122 @@ describe("yarax Tests", () => {
       );
     }
   });
+
+  before(() => {
+    const tempDir = join(__dirname, "temp");
+    if (!existsSync(tempDir)) {
+      mkdirSync(tempDir, { recursive: true });
+    }
+  });
+
+  describe("Error and Warning Handling", () => {
+    const errorTestCases = [
+      {
+        name: "Syntax Error",
+        rule: "rule test { condition: invalid syntax }",
+        errorCode: "E001",
+      },
+      {
+        name: "Unknown Identifier",
+        rule: "rule test { condition: unknown_identifier }",
+        errorCode: "E009",
+      },
+      {
+        name: "Wrong Types",
+        rule: 'rule test { condition: 1 + "string" }',
+        errorCode: "E002",
+      },
+      {
+        name: "Duplicate Rule",
+        rule: `rule test1 { condition: true } rule test1 { condition: false}`,
+        errorCode: "E012",
+      },
+      {
+        name: "Invalid Regexp",
+        rule: "rule test { strings: $a = /[/ condition: $a }",
+        errorCode: "E014",
+      },
+      {
+        name: "Number Out Of Range",
+        rule: 'rule test {  strings:    $a = "foo"  condition:    !a[-1]}',
+        errorCode: "E007",
+      },
+      {
+        name: "Redundant Case Modifier",
+        rule: 'rule test { strings: $a = "test" nocase nocase condition: $a }',
+        errorCode: "E020",
+      },
+    ];
+
+    errorTestCases.forEach(({ name, rule, errorCode }) => {
+      it(`should handle compile error: ${name}`, () => {
+        try {
+          yarax.compile(rule);
+          fail("Should have thrown a compile error");
+        } catch (error) {
+          ok(
+            error.message.includes("Compilation error"),
+            "Error should be compilation error",
+          );
+          ok(
+            error.message.includes(`(${errorCode}):`),
+            `Error should have code ${errorCode}`,
+          );
+        }
+      });
+
+      it(`should handle validate error: ${name}`, () => {
+        const result = yarax.validate(rule);
+        strictEqual(result.errors.length, 1, "Should have one error");
+        strictEqual(
+          result.errors[0].code,
+          errorCode,
+          `Error code should be ${errorCode}`,
+        );
+      });
+    });
+
+    const warningTestCases = [
+      {
+        name: "Invariant Boolean Expression",
+        rule: "rule test { condition: true }",
+        warningCode: "invariant_expr",
+      },
+      {
+        name: "Potentially Slow Loop",
+        rule: `import "math"
+rule test_1 {
+	condition:
+		for any i in (0..filesize) : ( int32(i) == 0 )
+}`,
+        warningCode: "potentially_slow_loop",
+      },
+      {
+        name: "Non Boolean As Boolean",
+        rule: "rule test { condition: 1 }",
+        warningCode: "non_bool_expr",
+      },
+    ];
+
+    warningTestCases.forEach(({ name, rule, warningCode }) => {
+      it(`should capture warning: ${name}`, () => {
+        const scanner = yarax.compile(rule, { errorOnSlowLoop: false });
+        const warnings = scanner.getWarnings();
+        ok(warnings.length > 0, "Should have warnings");
+        ok(
+          warnings.some((warning) => warning.code === warningCode),
+          `Should have warning code ${warningCode}`,
+        );
+      });
+
+      it(`should validate and capture warning: ${name}`, () => {
+        const result = yarax.validate(rule, { errorOnSlowLoop: false });
+        ok(result.warnings.length > 0, "Should have warnings");
+        ok(
+          result.warnings.some((warning) => warning.code === warningCode),
+          `Should have warning code ${warningCode}`,
+        );
+      });
+    });
+  });
 });

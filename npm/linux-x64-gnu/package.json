@@ -1,0 +1,33 @@
+{
+  "name": "@litko/yara-x-linux-x64-gnu",
+  "version": "0.1.0",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "yara-x.linux-x64-gnu.node",
+  "files": [
+    "yara-x.linux-x64-gnu.node"
+  ],
+  "keywords": [
+    "yara",
+    "yara-x",
+    "malware",
+    "detection",
+    "napi-rs",
+    "rust"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 20"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "libc": [
+    "glibc"
+  ]
+}

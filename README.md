@@ -1,18 +1,13 @@
-# yara-x
+# @litko/yara-x
+
+**v0.1.0**
 
 ## Features
 
-- High Performance: Built with napi-rs for maximum performance
+- High Performance: Built with [napi-rs](https://napi-rs.com) and [VirusTotal/yara-x](https://github.com/VirusTotal/yara-x)
 - Async Support: First-class support for asynchronous scanning
 - WASM Compilation: Compile rules to WebAssembly for portable execution
-- Advanced Options: Fine-tune scanning with variables, compiler options, and more
 - Zero Dependencies: No external runtime dependencies
-
-## Installation
-
-```bash
-npm install yara-x
-```
 
 ## Usage
 
@@ -76,7 +71,7 @@ try {
 import { compile } from "yara-x";
 
 async function scanLargeFile() {
-  const rules = compile(`     rule large_file_rule {
+  const rules = compile(`rule large_file_rule {
       strings:
         $a = "sensitive data"
       condition:
@@ -360,16 +355,31 @@ if (warnings.length > 0) {
 }
 ```
 
-# Performance
+## Performance Benchmarks
 
-On a MacBook Pro with an M3 Max / 36GB RAM
+**Test Setup:**
 
-- Scanner creation: ~1.5ms
-- Scanning small data (64 bytes): ~0.15ms
-- Scanning medium data (100KB): ~0.15ms
-- Scanning large data (10MB): ~0.34ms
-- Complex rules with multiple conditions: ~0.22ms
-- Regex pattern matching: ~0.16ms
+- **Hardware:** MacBook Pro (M3 Max, 36GB RAM)
+- **Test Data:** Generated data of varying sizes (small: 64 bytes, medium: 100KB, large: 10MB). See `__test__/benchmark.mjs` for data generation and benchmarking code.
+- The Large test file (10MB) is auto-generated, to prevent bloating the size of the repository.
+
+**Key Metrics (Averages):**
+
+| Operation                                       | Average Time | Iterations |      p50 |      p95 |      p99 |
+| :---------------------------------------------- | -----------: | ---------: | -------: | -------: | -------: |
+| Scanner Creation (Simple Rule)                  |     1.675 ms |        100 | 1.547 ms | 2.318 ms | 2.657 ms |
+| Scanner Creation (Complex Rule)                 |     1.878 ms |        100 | 1.848 ms | 2.005 ms | 2.865 ms |
+| Scanner Creation (Regex Rule)                   |     2.447 ms |        100 | 2.444 ms | 2.473 ms | 2.569 ms |
+| Scanner Creation (Multiple Rules)               |     1.497 ms |        100 | 1.488 ms | 1.547 ms | 1.819 ms |
+| Scanning Small Data (64 bytes, Simple Rule)     |     0.145 ms |       1000 | 0.143 ms | 0.156 ms | 0.169 ms |
+| Scanning Medium Data (100KB, Simple Rule)       |     0.151 ms |        100 | 0.146 ms | 0.179 ms | 0.205 ms |
+| Scanning Large Data (10MB, Simple Rule)         |     0.347 ms |         10 | 0.340 ms | 0.394 ms | 0.394 ms |
+| Scanning Medium Data (100KB, Complex Rule)      |     0.219 ms |        100 | 0.215 ms | 0.254 ms | 0.269 ms |
+| Scanning Medium Data (100KB, Regex Rule)        |     0.156 ms |        100 | 0.152 ms | 0.182 ms | 0.210 ms |
+| Scanning Medium Data (100KB, Multiple Rules)    |     0.218 ms |        100 | 0.212 ms | 0.261 ms | 0.353 ms |
+| Async Scanning Medium Data (100KB, Simple Rule) |     0.012 ms |        100 | 0.011 ms | 0.016 ms |  0.027ms |
+| Scanning with Variables                         |     0.143 ms |       1000 | 0.140 ms | 0.155 ms | 0.166 ms |
+| Scanning with Variables (Override at Scan Time) |     0.144 ms |       1000 | 0.142 ms | 0.158 ms | 0.175 ms |
 
 # API Reference
 
@@ -385,7 +395,6 @@ On a MacBook Pro with an M3 Max / 36GB RAM
 ### yarax Methods
 
 - `getWarnings()` - Get compiler warnings.
-- `getErrors()` - Get compiler errors occurred during rule compilation.
 - `scan(data: Buffer, variables?: Record<string, string | number>)` - Scan a buffer.
 - `scanFile(filePath: string, variables?: Record<string, string | number>)` - Scan a file.
 - `scanAsync(data: Buffer, variables?: Record<string, object | undefined | null>)` - Scan a buffer asynchronously.

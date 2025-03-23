@@ -1,0 +1,30 @@
+{
+  "name": "@litko/yara-x-win32-x64-msvc",
+  "version": "0.1.0",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "yara-x.win32-x64-msvc.node",
+  "files": [
+    "yara-x.win32-x64-msvc.node"
+  ],
+  "keywords": [
+    "yara",
+    "yara-x",
+    "malware",
+    "detection",
+    "napi-rs",
+    "rust"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 20"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
+}
