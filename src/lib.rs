@@ -8,14 +8,9 @@ use std::fmt::Display;
 use std::path::Path;
 use std::sync::Arc;
 use yara_x::errors::CompileError;
-use yara_x::warnings::Warning;
 use yara_x::{Compiler, Rules, Scanner};
 
 type VariableMap = HashMap<String, String>;
-
-trait CodeExtractor {
-  fn extract_code(&self) -> String;
-}
 
 trait VariableHandler {
   fn apply_variable(&mut self, name: &str, value: &str) -> Result<()>;
@@ -81,83 +76,10 @@ impl<'a> VariableHandler for Compiler<'a> {
   }
 }
 
-impl CodeExtractor for Warning {
-  fn extract_code(&self) -> String {
-    match self {
-      Warning::BooleanIntegerComparison(_) => "bool_int_comparison",
-      Warning::ConsecutiveJumps(_) => "consecutive_jumps",
-      Warning::DuplicateImport(_) => "duplicate_import",
-      Warning::IgnoredModule(_) => "unsupported_module",
-      Warning::IgnoredRule(_) => "ignored_rule",
-      Warning::InvariantBooleanExpression(_) => "invariant_expr",
-      Warning::NonBooleanAsBoolean(_) => "non_bool_expr",
-      Warning::PotentiallySlowLoop(_) => "potentially_slow_loop",
-      Warning::PotentiallyUnsatisfiableExpression(_) => "unsatisfiable_expr",
-      Warning::RedundantCaseModifier(_) => "redundant_modifier",
-      Warning::SlowPattern(_) => "slow_pattern",
-      Warning::TextPatternAsHex(_) => "text_as_hex",
-      Warning::InvalidMetadata(_) => "invalid_metadata",
-      Warning::MissingMetadata(_) => "missing_metadata",
-      Warning::InvalidRuleName(_) => "invalid_rule_name",
-      _ => "unknown",
-    }
-    .into()
-  }
-}
-
-impl CodeExtractor for CompileError {
-  fn extract_code(&self) -> String {
-    match self {
-      CompileError::AssignmentMismatch(_) => "E005",
-      CompileError::ConflictingRuleIdentifier(_) => "E013",
-      CompileError::CustomError(_) => "E100",
-      CompileError::DuplicateModifier(_) => "E020",
-      CompileError::DuplicatePattern(_) => "E023",
-      CompileError::DuplicateRule(_) => "E012",
-      CompileError::DuplicateTag(_) => "E021",
-      CompileError::EmptyPatternSet(_) => "E016",
-      CompileError::EntrypointUnsupported(_) => "E017",
-      CompileError::InvalidBase64Alphabet(_) => "E026",
-      CompileError::InvalidEscapeSequence(_) => "E029",
-      CompileError::InvalidFloat(_) => "E028",
-      CompileError::InvalidInteger(_) => "E027",
-      CompileError::InvalidMetadata(_) => "E037",
-      CompileError::InvalidModifier(_) => "E033",
-      CompileError::InvalidModifierCombination(_) => "E019",
-      CompileError::InvalidPattern(_) => "E024",
-      CompileError::InvalidRange(_) => "E011",
-      CompileError::InvalidRegexp(_) => "E014",
-      CompileError::InvalidRegexpModifier(_) => "E030",
-      CompileError::InvalidRuleName(_) => "E038",
-      CompileError::InvalidUTF8(_) => "E032",
-      CompileError::MethodNotAllowedInWith(_) => "E036",
-      CompileError::MismatchingTypes(_) => "E003",
-      CompileError::MissingMetadata(_) => "E038",
-      CompileError::MixedGreediness(_) => "E015",
-      CompileError::NumberOutOfRange(_) => "E007",
-      CompileError::PotentiallySlowLoop(_) => "E034",
-      CompileError::SlowPattern(_) => "E018",
-      CompileError::SyntaxError(_) => "E001",
-      CompileError::TooManyPatterns(_) => "E035",
-      CompileError::UnexpectedEscapeSequence(_) => "E031",
-      CompileError::UnexpectedNegativeNumber(_) => "E006",
-      CompileError::UnknownField(_) => "E008",
-      CompileError::UnknownIdentifier(_) => "E009",
-      CompileError::UnknownModule(_) => "E010",
-      CompileError::UnknownPattern(_) => "E025",
-      CompileError::UnusedPattern(_) => "E022",
-      CompileError::WrongArguments(_) => "E004",
-      CompileError::WrongType(_) => "E002",
-      _ => "unknown",
-    }
-    .into()
-  }
-}
-
 fn compile_error_to_napi(error: &CompileError) -> Error {
   Error::new(
     Status::GenericFailure,
-    format!("Compilation error ({}): {}", error.extract_code(), error),
+    format!("Compilation error ({}): {}", error.code(), error),
   )
 }
 
@@ -196,7 +118,7 @@ fn to_napi_err<E: std::fmt::Display>(err: E) -> Error {
 
 fn convert_compiler_messages<T, U>(messages: &[T], to_output: impl Fn(&T) -> U) -> Vec<U>
 where
-  T: CodeExtractor + Display,
+  T: Display,
 {
   let mut result = Vec::with_capacity(messages.len());
   for msg in messages {
@@ -393,11 +315,6 @@ impl YaraX {
       .add_source(source.as_str())
       .map_err(|e| compile_error_to_napi(&e))?;
 
-    let errors = compiler.errors();
-    if !errors.is_empty() {
-      return Err(compile_error_to_napi(&errors[0]));
-    }
-
     let warnings = Self::get_compiler_warnings(&compiler)?;
     let rules = compiler.build();
 
@@ -488,16 +405,11 @@ impl YaraX {
 
 #[napi]
 impl YaraX {
-  #[napi(constructor)]
-  pub fn new(rule_source: String, options: Option<CompilerOptions>) -> Result<Self> {
-    Self::create_scanner_from_source(rule_source, options)
-  }
-
   fn get_compiler_errors(compiler: &Compiler) -> Result<Vec<CompilerError>> {
     let errors = compiler.errors();
 
     let result = convert_compiler_messages(errors, |e| CompilerError {
-      code: e.extract_code(),
+      code: e.code().to_string(),
       message: e.to_string(),
       source: None,
       line: None,
@@ -511,7 +423,7 @@ impl YaraX {
     let warnings = compiler.warnings();
 
     let result = convert_compiler_messages(warnings, |w| CompilerWarning {
-      code: w.extract_code(),
+      code: w.code().to_string(),
       message: w.to_string(),
       source: None,
       line: None,
@@ -524,11 +436,6 @@ impl YaraX {
   #[napi]
   pub fn get_warnings(&self) -> Vec<CompilerWarning> {
     self.warnings.clone()
-  }
-
-  #[napi]
-  pub fn get_errors(&self) -> Vec<CompilerError> {
-    Vec::new()
   }
 
   #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number>")]

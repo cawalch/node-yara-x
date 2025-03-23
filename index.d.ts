@@ -56,9 +56,7 @@ export declare function fromFile(rulePath: string, options?: CompilerOptions | u
 export declare function compileToWasm(ruleSource: string, outputPath: string, options?: CompilerOptions | undefined | null): void
 export declare function compileFileToWasm(rulePath: string, outputPath: string, options?: CompilerOptions | undefined | null): void
 export declare class YaraX {
-  constructor(ruleSource: string, options?: CompilerOptions | undefined | null)
   getWarnings(): Array<CompilerWarning>
-  getErrors(): Array<CompilerError>
   scan(data: Buffer, variables?: Record<string, string | number>): Array<RuleMatch>
   scanFile(filePath: string, variables?: Record<string, string | number>): Array<RuleMatch>
   emitWasmFile(outputPath: string): void
