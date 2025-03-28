@@ -209,21 +209,31 @@ jobs:
         with:
           path: artifacts
 
-      - name: Move artifacts
+      - name: Debug artifact structure
         run: |
-          # Create npm directory structure if it doesn't exist
-          mkdir -p npm
+          echo "Artifact directory structure:"
+          find artifacts -type f | sort
 
-          # Move artifacts to the correct location for napi-rs
+      - name: Create npm directory structure
+        run: |
+          # Create npm directory structure
+          mkdir -p npm/darwin-x64
+          mkdir -p npm/darwin-arm64
+          mkdir -p npm/linux-x64-gnu
+
+      - name: Move artifacts to root
+        run: |
+          # Copy artifacts to root for GitHub release
           find artifacts -name "*.node" -type f -exec cp {} . \;
 
-          # Run the artifacts script to organize files correctly
-          npm run artifacts
+      - name: Run artifacts script
+        run: npm run artifacts
 
       - name: List packages
         run: |
           echo "Files in npm directories:"
           ls -la npm/ || echo "No npm directory"
+          ls -la npm/*/ || echo "No platform subdirectories"
 
           echo "Files in root:"
           ls -la *.node || echo "No .node files in root"
@@ -253,6 +263,13 @@ jobs:
           else
             echo "Updating version from $PACKAGE_VERSION to $RELEASE_VERSION"
             npm version $RELEASE_VERSION --no-git-tag-version
+
+            # Also update version in platform-specific package.json files
+            for dir in npm/darwin-x64 npm/darwin-arm64 npm/linux-x64-gnu; do
+              if [ -f "$dir/package.json" ]; then
+                node -e "const pkg = require('./$dir/package.json'); pkg.version = '$RELEASE_VERSION'; require('fs').writeFileSync('./$dir/package.json', JSON.stringify(pkg, null, 2));"
+              fi
+            done
           fi
 
       - name: Publish to npm
@@ -267,6 +284,6 @@ jobs:
             *.node
           # If triggered by a tag push, create a release
           tag_name: ${{ github.ref_name }}
-          # Only generate release if one doesn't exist
+          # Only generate release notes if one doesn't exist
           generate_release_notes: ${{ github.event_name != 'release' }}
 
