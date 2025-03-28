@@ -26,24 +26,6 @@ const matches = scan(rules, data);
 
 console.log('Matches:', matches);
 
-// return matches
-// [
-// 	{
-// 		rule_identifier: 'example',
-// 		namespace: '',
-// 		meta: {},
-// 		tags: [],
-// 		matches: [
-// 			{
-// 				offset: 10,
-// 				length: 7,
-// 				data: 'example',
-// 				identifier: '$a'
-// 			}
-// 		]
-// 	}
-// ]
-
 */
 #![deny(clippy::all)]
 use napi::bindgen_prelude::{AsyncTask, Buffer, Object};

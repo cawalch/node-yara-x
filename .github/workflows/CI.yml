@@ -1,3 +1,4 @@
+
 name: CI
 env:
   DEBUG: napi:*
@@ -7,18 +8,11 @@ permissions:
   contents: write
   id-token: write
 'on':
-  workflow_dispatch:
-    inputs:
-      publish:
-        description: 'Publish to npm'
-        required: false
-        default: false
-        type: boolean
   push:
     branches:
       - main
-    tags-ignore:
-      - '**'
+    tags:
+      - 'v*'
     paths-ignore:
       - '**/*.md'
       - LICENSE
@@ -178,3 +172,54 @@ jobs:
       - name: Test bindings
         run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-slim npm test
 
+  publish:
+    name: Publish to npm
+    needs:
+      - test-macOS-windows-binding
+      - test-linux-x64-gnu-binding
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Move artifacts to appropriate directories
+        run: |
+          mkdir -p npm
+          find artifacts -name "*.node" -type f -exec cp {} . \;
+          ls -la *.node
+
+      - name: Extract version from tag
+        id: extract_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Set version in package.json
+        run: npm version ${{ steps.extract_version.outputs.VERSION }} --no-git-tag-version
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            *.node
+          generate_release_notes: true
