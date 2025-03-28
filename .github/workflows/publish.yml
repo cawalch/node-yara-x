@@ -1,30 +1,20 @@
-name: CI
+name: Publish to NPM
+
+on:
+  release:
+    types: [published]
+
 env:
   DEBUG: napi:*
   APP_NAME: node-yara-x
   MACOSX_DEPLOYMENT_TARGET: '10.13'
+
 permissions:
-  contents: write
+  contents: read
   id-token: write
-'on':
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
-    paths-ignore:
-      - '**/*.md'
-      - LICENSE
-      - '**/*.gitignore'
-      - .editorconfig
-      - docs/**
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/PULL_REQUEST_TEMPLATE.md'
-      - 'examples/**'
-  pull_request: null
+
 jobs:
   build:
-    if: github.event_name != 'push' || !contains(github.event.head_commit.message, 'Merge pull request')
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -103,11 +93,8 @@ jobs:
           path: ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
           retention-days: 1
+
   test-macOS-windows-binding:
-    if: |
-      !contains(github.event.head_commit.message, 'ci skip') &&
-      !contains(github.event.head_commit.message, 'skip ci') &&
-      (github.event_name != 'push' || !contains(github.event.head_commit.message, 'Merge pull request'))
     name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
     needs:
       - build
@@ -140,6 +127,7 @@ jobs:
         shell: bash
       - name: Test bindings
         run: npm test
+
   test-linux-x64-gnu-binding:
     name: Test bindings on Linux-x64-gnu - node@${{ matrix.node }}
     needs:
@@ -171,3 +159,59 @@ jobs:
       - name: Test bindings
         run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-slim npm test
 
+  publish:
+    name: Publish to npm
+    needs:
+      - test-macOS-windows-binding
+      - test-linux-x64-gnu-binding
+    runs-on: ubuntu-latest
+    steps:
+      - name: Debug release info
+        run: |
+          echo "GitHub Ref: ${{ github.ref }}"
+          echo "Event Name: ${{ github.event_name }}"
+          echo "Release Tag: ${{ github.event.release.tag_name }}"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Move artifacts to appropriate directories
+        run: |
+          mkdir -p npm
+          find artifacts -name "*.node" -type f -exec cp {} . \;
+          ls -la *.node
+
+      - name: Extract version from release
+        id: extract_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Set version in package.json
+        run: npm version ${{ github.event.release.tag_name }} --no-git-tag-version
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Update release with binaries
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: |
+            *.node
