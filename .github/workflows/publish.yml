@@ -197,12 +197,26 @@ jobs:
           find artifacts -name "*.node" -type f -exec cp {} . \;
           ls -la *.node
 
-      - name: Extract version from release
-        id: extract_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      - name: Verify package version matches release
+        id: verify_version
+        run: |
+          # Remove 'v' prefix if present
+          TAG_NAME="${{ github.event.release.tag_name }}"
+          RELEASE_VERSION="${TAG_NAME#v}"
 
-      - name: Set version in package.json
-        run: npm version ${{ github.event.release.tag_name }} --no-git-tag-version
+          # Get current version from package.json
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+
+          echo "Release version: $RELEASE_VERSION"
+          echo "Package version: $PACKAGE_VERSION"
+
+          # Skip version update if already correct
+          if [ "$RELEASE_VERSION" = "$PACKAGE_VERSION" ]; then
+            echo "Version already matches, no update needed"
+          else
+            echo "Updating version from $PACKAGE_VERSION to $RELEASE_VERSION"
+            npm version $RELEASE_VERSION --no-git-tag-version
+          fi
 
       - name: Publish to npm
         run: npm publish --access public
@@ -215,3 +229,4 @@ jobs:
           tag_name: ${{ github.event.release.tag_name }}
           files: |
             *.node
+
