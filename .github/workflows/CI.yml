@@ -1,7 +1,8 @@
-name: CI
+name: CI/CD
 env:
   DEBUG: napi:*
   APP_NAME: node-yara-x
+  PACKAGE_NAME: yara-x
   MACOSX_DEPLOYMENT_TARGET: '10.13'
 permissions:
   contents: write
@@ -22,6 +23,8 @@ permissions:
       - '.github/PULL_REQUEST_TEMPLATE.md'
       - 'examples/**'
   pull_request: null
+  release:
+    types: [published]
 jobs:
   build:
     if: github.event_name != 'push' || !contains(github.event.head_commit.message, 'Merge pull request')
@@ -103,12 +106,13 @@ jobs:
           path: ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
           retention-days: 1
-  test-macOS-windows-binding:
+
+  test-macOS-binding:
     if: |
       !contains(github.event.head_commit.message, 'ci skip') &&
       !contains(github.event.head_commit.message, 'skip ci') &&
       (github.event_name != 'push' || !contains(github.event.head_commit.message, 'Merge pull request'))
-    name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
+    name: Test bindings on macOS - node@${{ matrix.node }}
     needs:
       - build
     strategy:
@@ -140,6 +144,7 @@ jobs:
         shell: bash
       - name: Test bindings
         run: npm test
+
   test-linux-x64-gnu-binding:
     name: Test bindings on Linux-x64-gnu - node@${{ matrix.node }}
     needs:
@@ -148,7 +153,6 @@ jobs:
       fail-fast: false
       matrix:
         node:
-          - '18'
           - '20'
     runs-on: ubuntu-latest
     steps:
@@ -170,4 +174,99 @@ jobs:
         shell: bash
       - name: Test bindings
         run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-slim npm test
+
+  publish:
+    name: Publish to npm
+    # Only run on tag pushes or release publish events
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release'
+    needs:
+      - test-macOS-binding
+      - test-linux-x64-gnu-binding
+    runs-on: ubuntu-latest
+    steps:
+      - name: Debug release info
+        run: |
+          echo "GitHub Ref: ${{ github.ref }}"
+          echo "Event Name: ${{ github.event_name }}"
+          echo "Release Tag: ${{ github.event.release.tag_name }}"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Move artifacts
+        run: |
+          # Create npm directory structure if it doesn't exist
+          mkdir -p npm
+
+          # Move artifacts to the correct location for napi-rs
+          find artifacts -name "*.node" -type f -exec cp {} . \;
+
+          # Run the artifacts script to organize files correctly
+          npm run artifacts
+
+      - name: List packages
+        run: |
+          echo "Files in npm directories:"
+          ls -la npm/ || echo "No npm directory"
+
+          echo "Files in root:"
+          ls -la *.node || echo "No .node files in root"
+
+      - name: Verify package version matches release
+        id: verify_version
+        run: |
+          # Determine version from tag or release
+          if [ "${{ github.event_name }}" == "release" ]; then
+            TAG_NAME="${{ github.event.release.tag_name }}"
+          else
+            TAG_NAME="${{ github.ref_name }}"
+          fi
+
+          # Remove 'v' prefix if present
+          RELEASE_VERSION="${TAG_NAME#v}"
+
+          # Get current version from package.json
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+
+          echo "Release version: $RELEASE_VERSION"
+          echo "Package version: $PACKAGE_VERSION"
+
+          # Skip version update if already correct
+          if [ "$RELEASE_VERSION" = "$PACKAGE_VERSION" ]; then
+            echo "Version already matches, no update needed"
+          else
+            echo "Updating version from $PACKAGE_VERSION to $RELEASE_VERSION"
+            npm version $RELEASE_VERSION --no-git-tag-version
+          fi
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Update release with binaries
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            *.node
+          # If triggered by a tag push, create a release
+          tag_name: ${{ github.ref_name }}
+          # Only generate release if one doesn't exist
+          generate_release_notes: ${{ github.event_name != 'release' }}
 
