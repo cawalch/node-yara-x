@@ -1,11 +1,12 @@
 # yara-x
 
+**v0.1.0**
+
 ## Features
 
 - High Performance: Built with [napi-rs](https://napi-rs.com) and [VirusTotal/yara-x](https://github.com/VirusTotal/yara-x)
 - Async Support: First-class support for asynchronous scanning
 - WASM Compilation: Compile rules to WebAssembly for portable execution
-- Advanced Options: Fine-tune scanning with variables, compiler options, and more
 - Zero Dependencies: No external runtime dependencies
 
 ## Installation
