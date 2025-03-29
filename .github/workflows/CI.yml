@@ -196,12 +196,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Create npm directory structure
-        run: |
-          # Create npm directory structure
-          mkdir -p npm/darwin-x64
-          mkdir -p npm/darwin-arm64
-          mkdir -p npm/linux-x64-gnu
       - name: Move artifacts
         run: npm run artifacts
       - name: List packages
@@ -210,8 +204,8 @@ jobs:
       - name: Publish
         run: |
           npm config set provenance true
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
           npm publish --access public
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
