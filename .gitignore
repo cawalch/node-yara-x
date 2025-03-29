@@ -194,6 +194,3 @@ $RECYCLE.BIN/
 !.yarn/versions
 
 *.node
-
-# distribution files
-npm
