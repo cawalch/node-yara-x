@@ -4,7 +4,7 @@
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
-    "name": "node-yara-x",
+    "name": "yara-x",
     "triples": {
       "additional": [
         "x86_64-apple-darwin",
