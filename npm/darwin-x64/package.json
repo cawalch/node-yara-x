@@ -7,9 +7,9 @@
   "cpu": [
     "x64"
   ],
-  "main": "yara-x-darwin-x64.darwin-x64.node",
+  "main": "yara-x.darwin-x64.node",
   "files": [
-    "yara-x-darwin-x64.darwin-x64.node"
+    "yara-x.darwin-x64.node"
   ],
   "description": "Yara-X is a high-performance, multi-threaded Yara engine for malware detection, built using Rust and Napi-rs.\nThis package is specifically for x64 architecture on macOS.",
   "keywords": [

@@ -7,9 +7,9 @@
   "cpu": [
     "x64"
   ],
-  "main": "yara-x-linux-x64-gnu.linux-x64-gnu.node",
+  "main": "yara-x.linux-x64-gnu.node",
   "files": [
-    "yara-x-linux-x64-gnu.linux-x64-gnu.node"
+    "yara-x.linux-x64-gnu.node"
   ],
   "description": "Yara-X is a high-performance, multi-threaded Yara engine for malware detection, built using Rust and Napi-rs.\nThis package is specifically for Linux x64 GNU systems.",
   "keywords": [
