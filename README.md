@@ -76,7 +76,7 @@ try {
 import { compile } from "yara-x";
 
 async function scanLargeFile() {
-  const rules = compile(`     rule large_file_rule {
+  const rules = compile(`rule large_file_rule {
       strings:
         $a = "sensitive data"
       condition:
