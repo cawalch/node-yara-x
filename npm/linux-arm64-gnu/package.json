@@ -1,15 +1,15 @@
 {
-  "name": "yara-x-linux-x64-gnu",
+  "name": "yara-x-linux-arm64-gnu",
   "version": "0.1.0",
   "os": [
     "linux"
   ],
   "cpu": [
-    "x64"
+    "arm64"
   ],
-  "main": "yara-x.linux-x64-gnu.node",
+  "main": "yara-x.linux-arm64-gnu.node",
   "files": [
-    "yara-x.linux-x64-gnu.node"
+    "yara-x.linux-arm64-gnu.node"
   ],
   "keywords": [
     "yara",

@@ -1,15 +1,15 @@
 {
-  "name": "yara-x-linux-x64-gnu",
+  "name": "yara-x-win32-x64-msvc",
   "version": "0.1.0",
   "os": [
-    "linux"
+    "win32"
   ],
   "cpu": [
     "x64"
   ],
-  "main": "yara-x.linux-x64-gnu.node",
+  "main": "yara-x.win32-x64-msvc.node",
   "files": [
-    "yara-x.linux-x64-gnu.node"
+    "yara-x.win32-x64-msvc.node"
   ],
   "keywords": [
     "yara",
@@ -26,8 +26,5 @@
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
-  },
-  "libc": [
-    "glibc"
-  ]
+  }
 }
