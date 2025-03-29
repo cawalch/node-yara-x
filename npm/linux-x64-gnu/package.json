@@ -12,7 +12,7 @@
     "yara-x-linux-x64-gnu.linux-x64-gnu.node"
   ],
   "description": "Yara-X is a high-performance, multi-threaded Yara engine for malware detection, built using Rust and Napi-rs.\nThis package is specifically for Linux x64 GNU systems.",
-    "keywords": [
+  "keywords": [
     "yara",
     "yara-x",
     "malware",
@@ -28,5 +28,8 @@
     "registry": "https://registry.npmjs.org/",
     "access": "public"
   },
-  "repository": "git@github.com:cawalch/yara-x.git"
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/cawalch/yara-x.git"
+  }
 }

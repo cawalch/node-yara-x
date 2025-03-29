@@ -1,7 +1,7 @@
 name: CI/CD
 env:
   DEBUG: napi:*
-  APP_NAME: node-yara-x
+  APP_NAME: yara-x
   PACKAGE_NAME: yara-x
   MACOSX_DEPLOYMENT_TARGET: '10.13'
 permissions:
