@@ -1,4 +1,4 @@
-# yara-x
+# @litko/yara-x
 
 **v0.1.0**
 
@@ -8,12 +8,6 @@
 - Async Support: First-class support for asynchronous scanning
 - WASM Compilation: Compile rules to WebAssembly for portable execution
 - Zero Dependencies: No external runtime dependencies
-
-## Installation
-
-```bash
-npm install yara-x
-```
 
 ## Usage
 

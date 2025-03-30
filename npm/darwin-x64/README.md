@@ -1,3 +1,3 @@
-# `yara-x-darwin-x64`
+# `@litko/yara-x-darwin-x64`
 
-This is the **x86_64-apple-darwin** binary for `yara-x`
+This is the **x86_64-apple-darwin** binary for `@litko/yara-x`
