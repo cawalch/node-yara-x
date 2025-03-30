@@ -20,7 +20,7 @@ npm install @litko/yara-x
 ### Basic Example
 
 ```javascript
-import { compile } from "yara-x";
+import { compile } from "@litko/yara-x";
 
 // Compile yara rules
 const rules = compile(`
@@ -55,7 +55,7 @@ if (matches.length > 0) {
 ## Scanning Files
 
 ```javascript
-import { fromFile, compile } from "yara-x";
+import { fromFile, compile } from "@litko/yara-x";
 import { readFileSync } from "fs";
 
 // Load rules from a file
@@ -74,7 +74,7 @@ try {
 ## Asynchronous Scanning
 
 ```javascript
-import { compile } from "yara-x";
+import { compile } from "@litko/yara-x";
 
 async function scanLargeFile() {
   const rules = compile(`rule large_file_rule {
@@ -100,7 +100,7 @@ scanLargeFile();
 ## Variables
 
 ```javascript
-import { compile } from "yara-x";
+import { compile } from "@litko/yara-x";
 
 // Create a scanner with variables
 const rules = compile(
@@ -133,7 +133,7 @@ console.log(`Matches with overridden variables: ${matches.length}`);
 ## WASM Compilation
 
 ```javascript
-import { compile, compileToWasm } from "yara-x";
+import { compile, compileToWasm } from "@litko/yara-x";
 
 // Compile rules to WASM
 const rule = `
@@ -159,7 +159,7 @@ await compiledRules.emitWasmFileAsync("./output/async_rules.wasm");
 ## Incremental Rule Building
 
 ```javascript
-import { create } from "yara-x";
+import { create } from "@litko/yara-x";
 
 // Create an empty scanner
 const scanner = create();
