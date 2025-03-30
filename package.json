@@ -1,5 +1,5 @@
 {
-  "name": "yara-x",
+  "name": "@litko/yara-x",
   "version": "0.1.0",
   "main": "index.js",
   "types": "index.d.ts",

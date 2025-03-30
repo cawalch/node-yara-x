@@ -1,3 +1,3 @@
-# `yara-x-linux-arm64-gnu`
+# `@litko/yara-x-linux-arm64-gnu`
 
-This is the **aarch64-unknown-linux-gnu** binary for `yara-x`
+This is the **aarch64-unknown-linux-gnu** binary for `@litko/yara-x`
