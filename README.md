@@ -1,6 +1,6 @@
 # @litko/yara-x
 
-**v0.1.0**
+**v0.1.1**
 
 ## Features
 
@@ -194,7 +194,7 @@ const matches = scanner.scan(Buffer.from("test data with first pattern"));
 ## Rule Validation
 
 ```javascript
-import { validate } from "yara-x";
+import { validate } from "@litko/yara-x";
 
 // Validate rules without executing them
 const result = validate(`
@@ -219,7 +219,7 @@ if (result.errors.length === 0) {
 ## Advanced Options
 
 ```javascript
-import { compile } from "yara-x";
+import { compile } from "@litko/yara-x";
 
 // Create a scanner with advanced options
 const rules = compile(
@@ -260,7 +260,7 @@ const rules = compile(
 ### Compilation Errors
 
 ```javascript
-import { compile } from "yara-x";
+import { compile } from "@litko/yara-x";
 
 try {
   // This will throw an error due to invalid syntax
@@ -286,7 +286,7 @@ try {
 ### Scanning errors
 
 ```javascript
-import { compile } from "yara-x";
+import { compile } from "@litko/yara-x";
 
 const rules = compile(`
   rule test_rule {
@@ -307,7 +307,7 @@ try {
 ### Async Errors
 
 ```javascript
-import { compile, compileToWasm } from "yara-x";
+import { compile, compileToWasm } from "@litko/yara-x";
 
 async function handleAsyncErrors() {
   const rules = compile(`
@@ -339,7 +339,7 @@ handleAsyncErrors();
 ## Compiler Warnings
 
 ```javascript
-import { compile } from "yara-x";
+import { compile } from "@litko/yara-x";
 
 // Create a scanner with a rule that generates warnings
 const rules = compile(`
