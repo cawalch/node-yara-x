@@ -11,6 +11,12 @@
 
 ## Usage
 
+### Installation
+
+```bash
+npm install @litko/yara-x
+```
+
 ### Basic Example
 
 ```javascript
