@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 # Enable napi4 and async features
 napi = { version = "2.12.2", default-features = false, features = ["napi4", "async"] }
 napi-derive = "2.12.2"
-yara-x = "0.13.0"
+yara-x = "0.14.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
