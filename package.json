@@ -1,6 +1,6 @@
 {
   "name": "@litko/yara-x",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
@@ -50,8 +50,8 @@
     "rust"
   ],
   "optionalDependencies": {
-    "@litko/yara-x-darwin-x64": "0.1.1",
-    "@litko/yara-x-linux-x64-gnu": "0.1.1",
-    "@litko/yara-x-darwin-arm64": "0.1.1"
+    "@litko/yara-x-darwin-x64": "0.1.2",
+    "@litko/yara-x-linux-x64-gnu": "0.1.2",
+    "@litko/yara-x-darwin-arm64": "0.1.2"
   }
 }
