@@ -8,14 +8,14 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # Enable napi4 and async features
-napi = { version = "2.12.2", default-features = false, features = ["napi4", "async"] }
-napi-derive = "2.12.2"
-yara-x = "0.14.0"
+napi = { version = "2.16.17", default-features = false, features = ["napi4", "async"] }
+napi-derive = "2.16.13"
+yara-x = "0.15.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 [build-dependencies]
-napi-build = "2.0.1"
+napi-build = "2.2.0"
 
 [profile.release]
 lto = true
