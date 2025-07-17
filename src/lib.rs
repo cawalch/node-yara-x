@@ -63,18 +63,10 @@ trait VariableHandler {
     if let Some(vars) = variables {
       let property_names = Object::keys(vars)?;
 
-      // Create a HashMap to store the variables
-      // Optimize for performance by pre-allocating the HashMap
-      let mut values = HashMap::with_capacity(property_names.len());
-
       for key in &property_names {
         if let Ok(value) = vars.get_named_property::<String>(key) {
-          values.insert(key.clone(), value);
+          self.apply_variable(key, &value)?;
         }
-      }
-
-      for (key, value) in values {
-        self.apply_variable(&key, &value)?;
       }
     }
     Ok(())
@@ -409,16 +401,20 @@ impl YaraX {
 
       if let Some(vars) = &opts.define_variables {
         let property_names = Object::keys(vars)?;
-        if !property_names.is_empty() && store_variables {
+        if property_names.is_empty() {
+          return Ok(stored_variables);
+        }
+
+        if store_variables {
           stored_variables = Some(HashMap::with_capacity(property_names.len()));
         }
 
-        for key in property_names {
-          if let Ok(value) = vars.get_named_property::<String>(&key) {
-            compiler.apply_variable(&key, &value)?;
+        for key in &property_names {
+          if let Ok(value) = vars.get_named_property::<String>(key) {
+            compiler.apply_variable(key, &value)?;
 
             if let Some(var_map) = &mut stored_variables {
-              var_map.insert(key, value);
+              var_map.insert(key.clone(), value);
             }
           }
         }
@@ -469,29 +465,37 @@ impl YaraX {
   /// This is useful for applying variables defined in JavaScript to the YARA compiler or scanner.
   /// Returns None if the object is empty or None.
   fn convert_variables_to_map(variables: Option<Object>) -> Result<Option<VariableMap>> {
-    match variables {
-      Some(vars) => {
-        let property_names = Object::keys(&vars)?;
-        if property_names.is_empty() {
-          return Ok(None);
-        }
+    let vars = match variables {
+      Some(vars) => vars,
+      None => return Ok(None),
+    };
 
-        // Optimize for performance by pre-allocating the HashMap
-        let mut map = HashMap::with_capacity(property_names.len());
+    let property_names = Object::keys(&vars)?;
+    if property_names.is_empty() {
+      return Ok(None);
+    }
 
-        for key in property_names {
-          if let Ok(value) = vars.get_named_property::<String>(&key) {
-            map.insert(key, value);
-          }
-        }
+    // Pre-allocate HashMap with exact capacity and reserve additional space
+    // to avoid rehashing during insertion
+    let mut map = HashMap::with_capacity(property_names.len());
 
-        if map.is_empty() {
-          Ok(None)
-        } else {
-          Ok(Some(map))
-        }
+    // Use iterator to reduce temporary allocations
+    let mut valid_entries = 0;
+    for key in &property_names {
+      if let Ok(value) = vars.get_named_property::<String>(key) {
+        map.insert(key.clone(), value);
+        valid_entries += 1;
       }
-      None => Ok(None),
+    }
+
+    if valid_entries == 0 {
+      Ok(None)
+    } else {
+      // shrink HashMap if significantly under-utilized to save memory
+      if valid_entries < property_names.len() / 2 {
+        map.shrink_to_fit();
+      }
+      Ok(Some(map))
     }
   }
 
@@ -541,10 +545,9 @@ impl YaraX {
   /// // Match found: MatchData { offset: 10, length: 7, data: "example", identifier: "$a" }
   /// ```
   fn extract_matches(rule: &yara_x::Rule, data: &[u8]) -> Vec<MatchData> {
-    let mut total_matches = 0;
-    for pattern in rule.patterns() {
-      total_matches += pattern.matches().len();
-    }
+    let total_matches: usize = rule.patterns()
+      .map(|pattern| pattern.matches().len())
+      .sum();
 
     // Pre-allocate the vector for performance optimization
     let mut matches_vec = Vec::with_capacity(total_matches);
@@ -562,20 +565,11 @@ impl YaraX {
         let offset = range.start as usize;
         let length = (range.end - range.start) as usize;
 
-        // Check if the offset and length are within the bounds of the data
-        // This prevents out-of-bounds access and ensures safe handling of the data.
-        // If the offset and length are valid, extract the matched bytes.
-        if offset + length <= data.len() {
-          let matched_bytes = &data[offset..offset + length];
-
-          // Convert matched bytes to a string
-          // This allows for handling both ASCII and non-ASCII data.
+        if let Some(matched_bytes) = data.get(offset..offset + length) {
           let matched_data = if matched_bytes.is_ascii() {
-            // If the matched bytes are ASCII, we can safely convert them to a String
             unsafe { String::from_utf8_unchecked(matched_bytes.to_vec()) }
           } else {
-            // If the matched bytes are not ASCII, we use String::from_utf8_lossy to handle
-            String::from_utf8_lossy(matched_bytes).to_string()
+            String::from_utf8_lossy(matched_bytes).into_owned()
           };
 
           // Create a new MatchData instance with the extracted information
@@ -611,17 +605,19 @@ impl YaraX {
     let matching_rules = results.matching_rules();
     let rule_count = matching_rules.len();
 
+    if rule_count == 0 {
+      return Ok(Vec::new());
+    }
+
     // Pre-allocate the vector for performance optimization
     let mut rule_matches = Vec::with_capacity(rule_count);
 
     for rule in matching_rules {
       let matches_vec = Self::extract_matches(&rule, data);
 
-      let tag_count = rule.tags().len();
-      let mut tags = Vec::with_capacity(tag_count);
-      for tag in rule.tags() {
-        tags.push(tag.identifier().to_string());
-      }
+      let tags: Vec<String> = rule.tags()
+        .map(|tag| tag.identifier().to_string())
+        .collect();
 
       // Create a meta object for the rule
       let meta_obj = Self::create_meta_object(env, &rule)?;
