@@ -23,9 +23,17 @@
   "engines": {
     "node": ">= 20"
   },
+  "homepage": "https://github.com/cawalch/node-yara-x",
+  "bugs": {
+    "url": "https://github.com/cawalch/node-yara-x/issues"
+  },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cawalch/node-yara-x.git"
   },
   "scripts": {
     "artifacts": "napi artifacts",
