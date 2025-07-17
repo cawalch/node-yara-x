@@ -974,6 +974,47 @@ describe("yarax Tests", () => {
     );
   });
 
+  it("should handle regex escape sequences and character classes", () => {
+    const rule = `
+    rule test_regex_escape {
+      strings:
+        // NOTE: double escaping backslashes (could also use String.raw)
+        $re = /Speak \\"\\S+\\"\\sand\\Wenter/
+      condition:
+        $re
+    }
+  `;
+
+    const valid = yarax.validate(rule);
+    strictEqual(valid.errors.length, 0,  "Rule should be valid");
+
+    const scanner = yarax.compile(rule);
+
+    const testStrings = [
+      'Speak "friend" and enter',
+      'Speak "foe" and enter',
+      'Speak "stranger" and enter',
+    ]
+
+    testStrings.forEach((testString) => {
+      const buffer = Buffer.from(testString);
+      const matches = scanner.scan(buffer);
+      strictEqual(matches.length, 1, "Should have one matching rule");
+      strictEqual(
+        matches[0].ruleIdentifier,
+        "test_regex_escape",
+        "Rule identifier should match",
+      );
+
+      strictEqual(matches[0].matches.length, 1, "Should have one match");
+      console.log('match:', matches[0].matches[0]);
+      strictEqual(
+        matches[0].matches[0].data, testString,
+        "Matched data should be correct",
+      );
+    });
+  });
+
   it("should handle wildcard hex patterns", () => {
     const rule = `
     rule test_wildcard_hex {
