@@ -148,13 +148,13 @@ fn scan_error_to_napi(error: yara_x::ScanError) -> Error {
   // indicating the file could not be opened.
   match &error {
     yara_x::ScanError::Timeout => Error::new(Status::Cancelled, "Scan timed out"),
-    yara_x::ScanError::OpenError { path, source } => Error::new(
+    yara_x::ScanError::OpenError { path, err } => Error::new(
       Status::GenericFailure,
-      format!("Failed to open file '{}': {}", path.display(), source),
+      format!("Failed to open file '{}': {}", path.display(), err),
     ),
-    yara_x::ScanError::MapError { path, source } => Error::new(
+    yara_x::ScanError::MapError { path, err } => Error::new(
       Status::GenericFailure,
-      format!("Failed to map file '{}': {}", path.display(), source),
+      format!("Failed to map file '{}': {}", path.display(), err),
     ),
     yara_x::ScanError::ProtoError { module, err } => Error::new(
       Status::GenericFailure,
@@ -163,6 +163,10 @@ fn scan_error_to_napi(error: yara_x::ScanError) -> Error {
     yara_x::ScanError::UnknownModule { module } => Error::new(
       Status::GenericFailure,
       format!("Unknown module: '{}'", module),
+    ),
+    _ => Error::new(
+      Status::GenericFailure,
+      format!("Unknown scan error: {:?}", error),
     ),
   }
 }
@@ -842,7 +846,9 @@ impl YaraX {
     self.rules = Arc::new(compiler.build());
 
     if let Some(source) = &mut self.source_code {
-      source.reserve(rule_source.len() + 1);
+      // Pre-allocate the source code string to avoid reallocations
+      let new_capacity = source.len() + rule_source.len() + 1;
+      source.reserve(new_capacity);
       source.push('\n');
       source.push_str(&rule_source);
     } else {
