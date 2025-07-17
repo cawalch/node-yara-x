@@ -1,36 +1,36 @@
 import yarax from "../index.js";
-import { existsSync, mkdirSync, writeFileSync, unlinkSync, statSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, rmSync, statSync } from "fs";
 import { join, dirname } from "path";
 import { strictEqual, ok, fail } from "assert";
-import { describe, it, before } from "node:test";
+import { describe, it, before, after } from "node:test";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const __tempDir = join(__dirname, "temp");
 
 function createTempFile(content, extension = ".txt") {
-  const tempDir = join(__dirname, "temp");
-  if (!existsSync(tempDir)) {
-    mkdirSync(tempDir, { recursive: true });
-  }
-  const tempFile = join(tempDir, `test-${Date.now()}${extension}`);
+  const tempFile = join(__tempDir, `test-${Date.now()}${extension}`);
   writeFileSync(tempFile, content);
   return tempFile;
 }
 
-function cleanupTempFile(filePath) {
-  if (existsSync(filePath)) {
-    unlinkSync(filePath);
+function createTempDirectory() {
+  if (!existsSync(__tempDir)) {
+    mkdirSync(__tempDir, { recursive: true });
   }
 }
 
+function cleanupTempDirectory() {
+  if (existsSync(__tempDir)) {
+    rmSync(__tempDir, { recursive: true });
+  }
+}
+
+before(createTempDirectory);
+after(cleanupTempDirectory);
+
 describe("yarax Tests", () => {
-  before(() => {
-    const tempDir = join(__dirname, "temp");
-    if (!existsSync(tempDir)) {
-      mkdirSync(tempDir, { recursive: true });
-    }
-  });
 
   it("should perform basic rule matching", () => {
     const rule = `
@@ -106,19 +106,16 @@ describe("yarax Tests", () => {
     const fileContent = "This is file content for testing";
     const tempFile = createTempFile(fileContent);
 
-    try {
-      const scanner = yarax.compile(rule);
-      const matches = scanner.scanFile(tempFile);
+    const scanner = yarax.compile(rule);
+    const matches = scanner.scanFile(tempFile);
 
-      strictEqual(matches.length, 1, "Should have one matching rule");
-      strictEqual(
-        matches[0].ruleIdentifier,
-        "test_file",
-        "Rule identifier should match",
-      );
-    } finally {
-      cleanupTempFile(tempFile);
-    }
+    strictEqual(matches.length, 1, "Should have one matching rule");
+    strictEqual(
+      matches[0].ruleIdentifier,
+      "test_file",
+      "Rule identifier should match",
+    );
+
   });
 
   it("should load rules from a file", () => {
@@ -133,20 +130,17 @@ describe("yarax Tests", () => {
 
     const ruleFile = createTempFile(rule, ".yar");
 
-    try {
-      const scanner = yarax.fromFile(ruleFile);
-      const buffer = Buffer.from("This is test content");
-      const matches = scanner.scan(buffer);
+    const scanner = yarax.fromFile(ruleFile);
+    const buffer = Buffer.from("This is test content");
+    const matches = scanner.scan(buffer);
 
-      strictEqual(matches.length, 1, "Should have one matching rule");
-      strictEqual(
-        matches[0].ruleIdentifier,
-        "test_from_file",
-        "Rule identifier should match",
-      );
-    } finally {
-      cleanupTempFile(ruleFile);
-    }
+    strictEqual(matches.length, 1, "Should have one matching rule");
+    strictEqual(
+      matches[0].ruleIdentifier,
+      "test_from_file",
+      "Rule identifier should match",
+    );
+
   });
 
   it("should allow setting options when loading rules from a file", () => {
@@ -165,19 +159,16 @@ describe("yarax Tests", () => {
         test_var: "test",
       },
     };
-    try {
-      const scanner = yarax.fromFile(ruleFile, options);
-      const buffer = Buffer.from("This is test content");
-      const matches = scanner.scan(buffer);
-      strictEqual(matches.length, 1, "Should have one matching rule");
-      strictEqual(
-        matches[0].ruleIdentifier,
-        "test_from_file_with_options",
-        "Rule identifier should match",
-      );
-    } finally {
-      cleanupTempFile(ruleFile);
-    }
+    const scanner = yarax.fromFile(ruleFile, options);
+    const buffer = Buffer.from("This is test content");
+    const matches = scanner.scan(buffer);
+    strictEqual(matches.length, 1, "Should have one matching rule");
+    strictEqual(
+      matches[0].ruleIdentifier,
+      "test_from_file_with_options",
+      "Rule identifier should match",
+    );
+
   });
 
   it("should compile to WASM", () => {
@@ -190,22 +181,14 @@ describe("yarax Tests", () => {
       }
     `;
 
-    const tempDir = join(__dirname, "temp");
-    if (!existsSync(tempDir)) {
-      mkdirSync(tempDir, { recursive: true });
-    }
+    const wasmFile = join(__tempDir, `test-${Date.now()}.wasm`);
 
-    const wasmFile = join(tempDir, `test-${Date.now()}.wasm`);
+    const scanner = yarax.compile(rule);
+    scanner.emitWasmFile(wasmFile);
 
-    try {
-      const scanner = yarax.compile(rule);
-      scanner.emitWasmFile(wasmFile);
+    strictEqual(existsSync(wasmFile), true, "WASM file should exist");
+    ok(statSync(wasmFile).size > 0, "WASM file should not be empty");
 
-      strictEqual(existsSync(wasmFile), true, "WASM file should exist");
-      ok(statSync(wasmFile).size > 0, "WASM file should not be empty");
-    } finally {
-      cleanupTempFile(wasmFile);
-    }
   });
 
   it("should perform static WASM compilation", () => {
@@ -218,21 +201,13 @@ describe("yarax Tests", () => {
       }
     `;
 
-    const tempDir = join(__dirname, "temp");
-    if (!existsSync(tempDir)) {
-      mkdirSync(tempDir, { recursive: true });
-    }
+    const wasmFile = join(__tempDir, `test-static-${Date.now()}.wasm`);
 
-    const wasmFile = join(tempDir, `test-static-${Date.now()}.wasm`);
+    yarax.compileToWasm(rule, wasmFile);
 
-    try {
-      yarax.compileToWasm(rule, wasmFile);
+    strictEqual(existsSync(wasmFile), true, "WASM file should exist");
+    ok(statSync(wasmFile).size > 0, "WASM file should not be empty");
 
-      strictEqual(existsSync(wasmFile), true, "WASM file should exist");
-      ok(statSync(wasmFile).size > 0, "WASM file should not be empty");
-    } finally {
-      cleanupTempFile(wasmFile);
-    }
   });
 
   it("should perform static WASM compilation from a file", () => {
@@ -246,23 +221,12 @@ describe("yarax Tests", () => {
     `;
 
     const ruleFile = createTempFile(rule, ".yar");
+    const wasmFile = join(__tempDir, `test-static-file-${Date.now()}.wasm`);
 
-    const tempDir = join(__dirname, "temp");
-    if (!existsSync(tempDir)) {
-      mkdirSync(tempDir, { recursive: true });
-    }
+    yarax.compileFileToWasm(ruleFile, wasmFile);
 
-    const wasmFile = join(tempDir, `test-static-file-${Date.now()}.wasm`);
-
-    try {
-      yarax.compileFileToWasm(ruleFile, wasmFile);
-
-      strictEqual(existsSync(wasmFile), true, "WASM file should exist");
-      ok(statSync(wasmFile).size > 0, "WASM file should not be empty");
-    } finally {
-      cleanupTempFile(ruleFile);
-      cleanupTempFile(wasmFile);
-    }
+    strictEqual(existsSync(wasmFile), true, "WASM file should exist");
+    ok(statSync(wasmFile).size > 0, "WASM file should not be empty");
   });
 
   it("should perform async scanning", async () => {
@@ -316,8 +280,6 @@ describe("yarax Tests", () => {
       );
     } catch (error) {
       fail(`Async file scanning failed: ${error.message}`);
-    } finally {
-      cleanupTempFile(tempFile);
     }
   });
 
@@ -331,12 +293,7 @@ describe("yarax Tests", () => {
       }
     `;
 
-    const tempDir = join(__dirname, "temp");
-    if (!existsSync(tempDir)) {
-      mkdirSync(tempDir, { recursive: true });
-    }
-
-    const wasmFile = join(tempDir, `test-async-${Date.now()}.wasm`);
+    const wasmFile = join(__tempDir, `test-async-${Date.now()}.wasm`);
 
     try {
       const scanner = yarax.compile(rule);
@@ -346,8 +303,6 @@ describe("yarax Tests", () => {
       ok(statSync(wasmFile).size > 0, "WASM file should not be empty");
     } catch (error) {
       fail(`Async WASM compilation failed: ${error.message}`);
-    } finally {
-      cleanupTempFile(wasmFile);
     }
   });
 
@@ -405,40 +360,36 @@ describe("yarax Tests", () => {
 
     const ruleFile = createTempFile(rule, ".yar");
 
-    try {
-      const scanner = yarax.compile(`
-        rule test_initial {
-          strings:
-            $a = "initial rule"
-          condition:
-            $a
-        }
-      `);
+    const scanner = yarax.compile(`
+      rule test_initial {
+        strings:
+          $a = "initial rule"
+        condition:
+          $a
+      }
+    `);
 
-      scanner.addRuleFile(ruleFile);
+    scanner.addRuleFile(ruleFile);
 
-      const buffer1 = Buffer.from("This contains initial rule");
-      const matches1 = scanner.scan(buffer1);
+    const buffer1 = Buffer.from("This contains initial rule");
+    const matches1 = scanner.scan(buffer1);
 
-      strictEqual(matches1.length, 1, "Should have one matching rule");
-      strictEqual(
-        matches1[0].ruleIdentifier,
-        "test_initial",
-        "Initial rule identifier should match",
-      );
+    strictEqual(matches1.length, 1, "Should have one matching rule");
+    strictEqual(
+      matches1[0].ruleIdentifier,
+      "test_initial",
+      "Initial rule identifier should match",
+    );
 
-      const buffer2 = Buffer.from("This contains added from file");
-      const matches2 = scanner.scan(buffer2);
+    const buffer2 = Buffer.from("This contains added from file");
+    const matches2 = scanner.scan(buffer2);
 
-      strictEqual(matches2.length, 1, "Should have one matching rule");
-      strictEqual(
-        matches2[0].ruleIdentifier,
-        "test_add_file",
-        "Added rule identifier should match",
-      );
-    } finally {
-      cleanupTempFile(ruleFile);
-    }
+    strictEqual(matches2.length, 1, "Should have one matching rule");
+    strictEqual(
+      matches2[0].ruleIdentifier,
+      "test_add_file",
+      "Added rule identifier should match",
+    );
   });
 
   it("should handle YARA-X variables", () => {
@@ -1171,13 +1122,6 @@ describe("yarax Tests", () => {
         error.message.includes("reading file"),
         "Error should mention file reading",
       );
-    }
-  });
-
-  before(() => {
-    const tempDir = join(__dirname, "temp");
-    if (!existsSync(tempDir)) {
-      mkdirSync(tempDir, { recursive: true });
     }
   });
 
