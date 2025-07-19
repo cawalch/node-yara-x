@@ -1,8 +1,7 @@
-name: CI/CD
+name: CI
 env:
   DEBUG: napi:*
   APP_NAME: yara-x
-  PACKAGE_NAME: yara-x
   MACOSX_DEPLOYMENT_TARGET: "10.13"
   CARGO_INCREMENTAL: "1"
 permissions:
@@ -12,54 +11,48 @@ permissions:
   push:
     branches:
       - main
-    tags:
-      - v*
     paths-ignore:
       - "**/*.md"
       - LICENSE
       - "**/*.gitignore"
       - .editorconfig
       - docs/**
-      - .github/ISSUE_TEMPLATE/**
-      - .github/PULL_REQUEST_TEMPLATE.md
-      - examples/**
   pull_request: null
   release:
-    types:
-      - published
+    types: [published]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
-    if: github.event_name != 'push' || !contains(github.event.head_commit.message, 'skip ci')
-    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         settings:
           - host: macos-latest
             target: x86_64-apple-darwin
-            build: npm run build -- --target x86_64-apple-darwin
+            build: pnpm build --target x86_64-apple-darwin
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
-            build: npm run build -- --target x86_64-unknown-linux-gnu
+            build: pnpm build --target x86_64-unknown-linux-gnu --use-napi-cross
           - host: macos-latest
             target: aarch64-apple-darwin
-            build: npm run build -- --target aarch64-apple-darwin
+            build: pnpm build --target aarch64-apple-darwin
     name: stable - ${{ matrix.settings.target }} - node@20
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
+      - name: setup pnpm
+        uses: pnpm/action-setup@v4
       - name: Setup node
         uses: actions/setup-node@v4
-        if: ${{ !matrix.settings.docker }}
         with:
-          node-version: 20
-          cache: npm
+          node-version: 22
+          cache: pnpm
       - name: Install
         uses: dtolnay/rust-toolchain@stable
-        if: ${{ !matrix.settings.docker }}
         with:
-          toolchain: "1.88.0"
+          toolchain: stable
           targets: ${{ matrix.settings.target }}
       - name: Cache cargo
         uses: actions/cache@v4
@@ -68,60 +61,23 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
+            ~/.napi-rs
             .cargo-cache
             target/
           key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
-      - name: Cache npm dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-npm-
-      - uses: goto-bus-stop/setup-zig@v2
-        if: ${{ matrix.settings.target == 'armv7-unknown-linux-gnueabihf' }}
-        with:
-          version: 0.14.0
-      - name: Setup toolchain
-        run: ${{ matrix.settings.setup }}
-        if: ${{ matrix.settings.setup }}
-        shell: bash
       - name: Install dependencies
-        run: npm install
-      - name: Build in docker
-        uses: addnab/docker-run-action@v3
-        if: ${{ matrix.settings.docker }}
-        with:
-          image: ${{ matrix.settings.docker }}
-          options: "--user 0:0 -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build"
-          run: |
-            set -e # Exit immediately if a command exits with a non-zero status.
-            echo "Updating Rust toolchain to 1.88.0..."
-            rustup toolchain install 1.88.0 --profile minimal --no-self-update
-            rustup default 1.88.0
-            rustup target add ${{ matrix.settings.target }}
-            echo "Current Rust version after update:"
-            rustc --version
-            cargo --version
-            echo "Proceeding with the build command..."
-            ${{ matrix.settings.build }}
+        run: pnpm install
       - name: Build
         run: ${{ matrix.settings.build }}
-        if: ${{ !matrix.settings.docker }}
         shell: bash
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: ${{ env.APP_NAME }}.*.node
+          path: "*.node"
           if-no-files-found: error
-          retention-days: 1
-  test-macOS-binding:
-    if: |
-      !contains(github.event.head_commit.message, 'ci skip') &&
-      !contains(github.event.head_commit.message, 'skip ci') &&
-      (github.event_name != 'push' || !contains(github.event.head_commit.message, 'Merge pull request'))
-    name: Test bindings on macOS - node@${{ matrix.node }}
+  test-bindings:
+    name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
     needs:
       - build
     strategy:
@@ -130,19 +86,29 @@ jobs:
         settings:
           - host: macos-latest
             target: x86_64-apple-darwin
+            architecture: x64
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            architecture: arm64
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            architecture: x64
         node:
           - "20"
+          - "22"
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
+      - name: setup pnpm
+        uses: pnpm/action-setup@v4
       - name: Setup node
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: npm
-          architecture: x64
+          cache: pnpm
+          architecture: ${{ matrix.settings.architecture }}
       - name: Install dependencies
-        run: npm install
+        run: pnpm install
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -152,59 +118,33 @@ jobs:
         run: ls -R .
         shell: bash
       - name: Test bindings
-        run: npm test
-  test-linux-x64-gnu-binding:
-    name: Test bindings on Linux-x64-gnu - node@${{ matrix.node }}
-    needs:
-      - build
-    strategy:
-      fail-fast: false
-      matrix:
-        node:
-          - "20"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-      - name: Install dependencies
-        run: npm install
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: bindings-x86_64-unknown-linux-gnu
-          path: .
-      - name: List packages
-        run: ls -R .
-        shell: bash
-      - name: Test bindings
-        run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-slim npm test
+        run: pnpm test
   publish:
     name: Publish
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release'
-    needs:
-      - test-macOS-binding
-      - test-linux-x64-gnu-binding
     runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    needs:
+      - build
+      - test-bindings
     steps:
       - uses: actions/checkout@v4
+      - name: setup pnpm
+        uses: pnpm/action-setup@v4
       - name: Setup node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          registry-url: https://registry.npmjs.org
+          cache: pnpm
       - name: Install dependencies
-        run: npm install
+        run: pnpm install
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+      - name: create npm dirs
+        run: pnpm napi create-npm-dirs
       - name: Move artifacts
-        run: npm run artifacts
+        run: pnpm artifacts
       - name: List packages
         run: ls -R ./npm
         shell: bash
@@ -212,7 +152,11 @@ jobs:
         run: |
           npm config set provenance true
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
-          npm publish --access public
+          if [[ "${{ github.event.release.prerelease }}" == "true" ]]; then
+            npm publish --tag next --access public
+          else
+            npm publish --access public
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
