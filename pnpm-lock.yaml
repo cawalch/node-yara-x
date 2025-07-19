@@ -17,16 +17,6 @@ importers:
       '@types/node':
         specifier: ^22.13.10
         version: 22.15.24
-    optionalDependencies:
-      '@litko/yara-x-darwin-arm64':
-        specifier: 0.1.2
-        version: 0.1.2
-      '@litko/yara-x-darwin-x64':
-        specifier: 0.1.2
-        version: 0.1.2
-      '@litko/yara-x-linux-x64-gnu':
-        specifier: 0.1.2
-        version: 0.1.2
 
 packages:
 
@@ -159,24 +149,6 @@ packages:
     peerDependenciesMeta:
       '@types/node':
         optional: true
-
-  '@litko/yara-x-darwin-arm64@0.1.2':
-    resolution: {integrity: sha512-DAb99/9xa38/aqPRDYaMI5U9RAdaf6JOEgVE0rGMwmg8sH1A141Md6/D5kC0sO7h5+du1tLRH0t6pWnp7pb30w==}
-    engines: {node: '>= 20'}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@litko/yara-x-darwin-x64@0.1.2':
-    resolution: {integrity: sha512-nZTM9I6fvG5RQDujv7af8YIboC+UOyfmtW7rCPxvZIo9LdqQeMD+oA4gohM2HamIlLl9CrYhBCHJi3P1uYMS+A==}
-    engines: {node: '>= 20'}
-    cpu: [x64]
-    os: [darwin]
-
-  '@litko/yara-x-linux-x64-gnu@0.1.2':
-    resolution: {integrity: sha512-7JyjjfqyBEgS1AxDByTJyVyyF1p1HFdvTRExhKq0E9ag40TGydPhgz9m3oNdLWstG4RZk2kBQ8OdR8kiLPDNUw==}
-    engines: {node: '>= 20'}
-    cpu: [x64]
-    os: [linux]
 
   '@napi-rs/cli@3.0.0':
     resolution: {integrity: sha512-V4xSbP4AnS+1POtAGVRhCt0erOTEyLAsZ2+MJOcI1NXCwgsKZGjp8cf/UmVo8e2jUE8tTkyxvnIPCqzVkT3RjQ==}
@@ -865,15 +837,6 @@ snapshots:
   '@inquirer/type@3.0.7(@types/node@22.15.24)':
     optionalDependencies:
       '@types/node': 22.15.24
-
-  '@litko/yara-x-darwin-arm64@0.1.2':
-    optional: true
-
-  '@litko/yara-x-darwin-x64@0.1.2':
-    optional: true
-
-  '@litko/yara-x-linux-x64-gnu@0.1.2':
-    optional: true
 
   '@napi-rs/cli@3.0.0(@emnapi/runtime@1.4.5)(@types/node@22.15.24)(emnapi@1.4.5)':
     dependencies:
