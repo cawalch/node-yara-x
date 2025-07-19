@@ -28,9 +28,10 @@ console.log('Matches:', matches);
 
 */
 #![deny(clippy::all)]
-use napi::bindgen_prelude::{AsyncTask, Buffer, Object};
+pub use napi::bindgen_prelude::{AsyncTask, Buffer, JsObjectValue, Object};
 use napi::{Env, Error, Result, Status, Task};
 use napi_derive::napi;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -242,13 +243,13 @@ pub struct MatchData {
 ///
 /// See [yara_::Match](https://docs.rs/yara-x/latest/yara_x/struct.Match.html) for more details.
 #[napi(object)]
-pub struct RuleMatch {
+pub struct RuleMatch<'a> {
   /// The identifier of the rule that matched.
   pub rule_identifier: String,
   /// The namespace of the rule that matched.
   pub namespace: String,
   /// The metadata associated with the rule that matched.
-  pub meta: Object,
+  pub meta: Object<'a>,
   /// The tags associated with the rule that matched.
   pub tags: Vec<String>,
   /// The matches found by the rule.
@@ -260,9 +261,9 @@ pub struct RuleMatch {
 /// See [yara_x::Compiler](https://docs.rs/yara-x/latest/yara_x/struct.Compiler.html) for more
 /// details.
 #[napi(object)]
-pub struct CompilerOptions {
+pub struct CompilerOptions<'a> {
   /// Defines global variables for the YARA rules.
-  pub define_variables: Option<Object>,
+  pub define_variables: Option<Object<'a>>,
   /// A list of module names to ignore during compilation.
   pub ignore_modules: Option<Vec<String>>,
   /// A list of banned modules that cannot be used in the YARA rules.
@@ -428,8 +429,8 @@ impl YaraX {
   ///
   /// This function takes a YARA rule and creates a meta object containing the metadata associated
   /// with the rule.
-  fn create_meta_object(env: napi::Env, rule: &yara_x::Rule) -> Result<Object> {
-    let mut meta_obj = env.create_object()?;
+  fn create_meta_object<'a>(env: napi::Env, rule: &yara_x::Rule) -> Result<Object<'a>> {
+    let mut meta_obj = Object::new(&env)?;
 
     // Iterate over the metadata of the rule
     // This allows for dynamic creation of metadata objects based on the rule's properties.
@@ -545,9 +546,7 @@ impl YaraX {
   /// // Match found: MatchData { offset: 10, length: 7, data: "example", identifier: "$a" }
   /// ```
   fn extract_matches(rule: &yara_x::Rule, data: &[u8]) -> Vec<MatchData> {
-    let total_matches: usize = rule.patterns()
-      .map(|pattern| pattern.matches().len())
-      .sum();
+    let total_matches: usize = rule.patterns().map(|pattern| pattern.matches().len()).sum();
 
     // Pre-allocate the vector for performance optimization
     let mut matches_vec = Vec::with_capacity(total_matches);
@@ -597,11 +596,11 @@ impl YaraX {
   /// // Process the scan results
   /// let matches = Self::process_scan_results(results, data, env)?;
   /// ```
-  fn process_scan_results(
+  fn process_scan_results<'a>(
     results: yara_x::ScanResults,
     data: &[u8],
     env: napi::Env,
-  ) -> Result<Vec<RuleMatch>> {
+  ) -> Result<Vec<RuleMatch<'a>>> {
     let matching_rules = results.matching_rules();
     let rule_count = matching_rules.len();
 
@@ -615,7 +614,8 @@ impl YaraX {
     for rule in matching_rules {
       let matches_vec = Self::extract_matches(&rule, data);
 
-      let tags: Vec<String> = rule.tags()
+      let tags: Vec<String> = rule
+        .tags()
         .map(|tag| tag.identifier().to_string())
         .collect();
 
@@ -685,7 +685,12 @@ impl YaraX {
   /// This function takes the scanned data and an optional object of variables,
   /// and returns a vector of RuleMatch representing the matching rules found during the scan.
   #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number>")]
-  pub fn scan(&self, env: Env, data: Buffer, variables: Option<Object>) -> Result<Vec<RuleMatch>> {
+  pub fn scan<'a>(
+    &self,
+    env: Env,
+    data: Buffer,
+    variables: Option<Object>,
+  ) -> Result<Vec<RuleMatch<'a>>> {
     let mut scanner = Scanner::new(&self.rules);
 
     scanner.apply_variables_from_map(&self.variables)?;
@@ -701,12 +706,12 @@ impl YaraX {
   /// This function takes the file path and an optional object of variables,
   /// and returns a vector of RuleMatch representing the matching rules found during the scan.
   #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number>")]
-  pub fn scan_file(
+  pub fn scan_file<'a>(
     &self,
     env: Env,
     file_path: String,
     variables: Option<Object>,
-  ) -> Result<Vec<RuleMatch>> {
+  ) -> Result<Vec<RuleMatch<'a>>> {
     let file_data = std::fs::read(&file_path)
       .map_err(|e| io_error_to_napi(e, &format!("reading file {}", file_path)))?;
 
@@ -938,7 +943,7 @@ impl BaseYaraTask {
   /// Processes the scan results and returns a vector of RuleMatch.
   /// This function takes the scan results and the scanned data,
   /// and returns a vector of RuleMatch representing the matching rules found during the scan.
-  fn process_results(&self, env: Env, data: &[u8]) -> Result<Vec<RuleMatch>> {
+  fn process_results<'a>(&self, env: Env, data: &[u8]) -> Result<Vec<RuleMatch<'a>>> {
     let mut scanner = self.create_scanner()?;
     let results = scanner.scan(data).map_err(scan_error_to_napi)?;
     YaraX::process_scan_results(results, data, env)
@@ -972,7 +977,7 @@ impl ScanTask {
 /// vector of RuleMatch.
 impl Task for ScanTask {
   type Output = Vec<u8>;
-  type JsValue = Vec<RuleMatch>;
+  type JsValue = Vec<RuleMatch<'static>>;
 
   fn compute(&mut self) -> Result<Self::Output> {
     // Return the data to be scanned, using std::mem::take to avoid ownership issues
@@ -1014,7 +1019,7 @@ impl Task for ScanFileTask {
   /// The output type for the task, which is the file data as a byte vector
   type Output = Vec<u8>;
   /// The JavaScript value type for the task, which is a vector of RuleMatch
-  type JsValue = Vec<RuleMatch>;
+  type JsValue = Vec<RuleMatch<'static>>;
 
   fn compute(&mut self) -> Result<Self::Output> {
     std::fs::read(&self.file_path)
