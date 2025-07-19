@@ -145,8 +145,6 @@ jobs:
         run: pnpm napi create-npm-dirs
       - name: Move artifacts
         run: pnpm artifacts
-      - name: Prepare for publish
-        run: pnpm napi prepublish -t npm --gh-release-id ${{ github.event.release.id }}
       - name: List packages
         run: ls -R ./npm
         shell: bash
