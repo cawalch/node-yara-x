@@ -1,7 +1,5 @@
 # @litko/yara-x
 
-**v0.1.1**
-
 ## Features
 
 - High Performance: Built with [napi-rs](https://napi-rs.com) and [VirusTotal/yara-x](https://github.com/VirusTotal/yara-x)
@@ -363,31 +361,42 @@ if (warnings.length > 0) {
 
 ## Performance Benchmarks
 
-**Test Setup:**
+`node-yara-x` delivers exceptional performance through intelligent scanner caching and optimized Rust implementation.
 
-- **Hardware:** MacBook Pro (M3 Max, 36GB RAM)
-- **Test Data:** Generated data of varying sizes (small: 64 bytes, medium: 100KB, large: 10MB). See `__test__/benchmark.mjs` for data generation and benchmarking code.
-- The Large test file (10MB) is auto-generated, to prevent bloating the size of the repository.
+### Benchmark Results
 
-**Key Metrics (Averages):**
+Test Environment: MacBook Pro M3 Max, 36GB RAM, Release build with LTO
+Methodology: Statistical analysis across multiple iterations with percentile reporting
 
-| Operation                                       | Average Time | Iterations |      p50 |      p95 |      p99 |
-| :---------------------------------------------- | -----------: | ---------: | -------: | -------: | -------: |
-| Scanner Creation (Simple Rule)                  |     1.675 ms |        100 | 1.547 ms | 2.318 ms | 2.657 ms |
-| Scanner Creation (Complex Rule)                 |     1.878 ms |        100 | 1.848 ms | 2.005 ms | 2.865 ms |
-| Scanner Creation (Regex Rule)                   |     2.447 ms |        100 | 2.444 ms | 2.473 ms | 2.569 ms |
-| Scanner Creation (Multiple Rules)               |     1.497 ms |        100 | 1.488 ms | 1.547 ms | 1.819 ms |
-| Scanning Small Data (64 bytes, Simple Rule)     |     0.145 ms |       1000 | 0.143 ms | 0.156 ms | 0.169 ms |
-| Scanning Medium Data (100KB, Simple Rule)       |     0.151 ms |        100 | 0.146 ms | 0.179 ms | 0.205 ms |
-| Scanning Large Data (10MB, Simple Rule)         |     0.347 ms |         10 | 0.340 ms | 0.394 ms | 0.394 ms |
-| Scanning Medium Data (100KB, Complex Rule)      |     0.219 ms |        100 | 0.215 ms | 0.254 ms | 0.269 ms |
-| Scanning Medium Data (100KB, Regex Rule)        |     0.156 ms |        100 | 0.152 ms | 0.182 ms | 0.210 ms |
-| Scanning Medium Data (100KB, Multiple Rules)    |     0.218 ms |        100 | 0.212 ms | 0.261 ms | 0.353 ms |
-| Async Scanning Medium Data (100KB, Simple Rule) |     0.012 ms |        100 | 0.011 ms | 0.016 ms |  0.027ms |
-| Scanning with Variables                         |     0.143 ms |       1000 | 0.140 ms | 0.155 ms | 0.166 ms |
-| Scanning with Variables (Override at Scan Time) |     0.144 ms |       1000 | 0.142 ms | 0.158 ms | 0.175 ms |
+#### Scanner Creation Performance
 
-# API Reference
+| Rule Type      | Mean   | p50    | p95    | p99    |
+| -------------- | ------ | ------ | ------ | ------ |
+| Simple Rule    | 2.44ms | 2.42ms | 2.67ms | 3.00ms |
+| Complex Rule   | 2.79ms | 2.78ms | 3.00ms | 3.26ms |
+| Regex Rule     | 8.63ms | 8.63ms | 8.91ms | 9.34ms |
+| Multiple Rules | 2.42ms | 2.39ms | 2.69ms | 3.07ms |
+
+#### Scanning Performance by Data Size
+
+| Data Size | Rule Type      | Mean  | Throughput |
+| --------- | -------------- | ----- | ---------- |
+| 64 bytes  | Simple         | 3μs   | ~21 MB/s   |
+| 100KB     | Simple         | 6μs   | ~16.7 GB/s |
+| 100KB     | Complex        | 71μs  | ~1.4 GB/s  |
+| 100KB     | Regex          | 7μs   | ~14.3 GB/s |
+| 100KB     | Multiple Rules | 71μs  | ~1.4 GB/s  |
+| 10MB      | Simple         | 196μs | ~51 GB/s   |
+
+#### Advanced Features Performance
+
+| Feature           | Mean | Notes                      |
+| ----------------- | ---- | -------------------------- |
+| Variable Scanning | 1μs  | Pre-compiled variables     |
+| Runtime Variables | 2μs  | Variables set at scan time |
+| Async Scanning    | 12μs | Non-blocking operations    |
+
+## API Reference
 
 ### Functions
 
@@ -395,7 +404,7 @@ if (warnings.length > 0) {
 - `compileToWasm(ruleSource: string, outputPath: string, options?: CompilerOptions)` - Compiles yara rules from a string to WASM file.
 - `compileFileToWasm(rulesPath: string, outputPath: string, options?: CompilerOptions)` - Compiles yara rules from a file to WASM file.
 - `validate(ruleSource: string, options?: CompilerOptions)` - Validates yara rules without executing them.
-- `create(options?: CompilerOptions)` - Creates an empty rules scanner to add rules incrementally.
+- `create()` - Creates an empty rules scanner to add rules incrementally.
 - `fromFile(rulePath: string, options?: CompilerOptions)` - Compiles yara rules from a file.
 
 ### yarax Methods
@@ -409,10 +418,7 @@ if (warnings.length > 0) {
 - `emitWasmFileAsync(filePath: string)` - Emit compiled rules to WASM file asynchronously.
 - `addRuleSource(rules: string)` - Add rules from a string to an existing scanner.
 - `addRuleFile(filePath: string)` - Add rules from a file to an existing scanner.
-
-### Rule Validation
-
-- `validate(rules: string, options?: CompilerOptions)` - Validate yara rules without executing them.
+- `defineVariable(name: string, value: string)` - Define a variable for the YARA compiler.
 
 ## Licenses
 
