@@ -1,7 +1,5 @@
 # @litko/yara-x
 
-**v0.1.1**
-
 ## Features
 
 - High Performance: Built with [napi-rs](https://napi-rs.com) and [VirusTotal/yara-x](https://github.com/VirusTotal/yara-x)
@@ -369,23 +367,23 @@ if (warnings.length > 0) {
 - **Test Data:** Generated data of varying sizes (small: 64 bytes, medium: 100KB, large: 10MB). See `__test__/benchmark.mjs` for data generation and benchmarking code.
 - The Large test file (10MB) is auto-generated, to prevent bloating the size of the repository.
 
-**Key Metrics (Averages):**
+**Key Metrics (Averages across 5 runs):**
 
 | Operation                                       | Average Time | Iterations |      p50 |      p95 |      p99 |
 | :---------------------------------------------- | -----------: | ---------: | -------: | -------: | -------: |
-| Scanner Creation (Simple Rule)                  |     1.675 ms |        100 | 1.547 ms | 2.318 ms | 2.657 ms |
-| Scanner Creation (Complex Rule)                 |     1.878 ms |        100 | 1.848 ms | 2.005 ms | 2.865 ms |
-| Scanner Creation (Regex Rule)                   |     2.447 ms |        100 | 2.444 ms | 2.473 ms | 2.569 ms |
-| Scanner Creation (Multiple Rules)               |     1.497 ms |        100 | 1.488 ms | 1.547 ms | 1.819 ms |
-| Scanning Small Data (64 bytes, Simple Rule)     |     0.145 ms |       1000 | 0.143 ms | 0.156 ms | 0.169 ms |
-| Scanning Medium Data (100KB, Simple Rule)       |     0.151 ms |        100 | 0.146 ms | 0.179 ms | 0.205 ms |
-| Scanning Large Data (10MB, Simple Rule)         |     0.347 ms |         10 | 0.340 ms | 0.394 ms | 0.394 ms |
-| Scanning Medium Data (100KB, Complex Rule)      |     0.219 ms |        100 | 0.215 ms | 0.254 ms | 0.269 ms |
-| Scanning Medium Data (100KB, Regex Rule)        |     0.156 ms |        100 | 0.152 ms | 0.182 ms | 0.210 ms |
-| Scanning Medium Data (100KB, Multiple Rules)    |     0.218 ms |        100 | 0.212 ms | 0.261 ms | 0.353 ms |
-| Async Scanning Medium Data (100KB, Simple Rule) |     0.012 ms |        100 | 0.011 ms | 0.016 ms |  0.027ms |
-| Scanning with Variables                         |     0.143 ms |       1000 | 0.140 ms | 0.155 ms | 0.166 ms |
-| Scanning with Variables (Override at Scan Time) |     0.144 ms |       1000 | 0.142 ms | 0.158 ms | 0.175 ms |
+| Scanner Creation (Simple Rule)                  |     2.494 ms |        100 | 2.372 ms | 2.951 ms | 3.210 ms |
+| Scanner Creation (Complex Rule)                 |     2.684 ms |        100 | 2.613 ms | 2.786 ms | 2.967 ms |
+| Scanner Creation (Regex Rule)                   |     8.288 ms |        100 | 8.277 ms | 8.666 ms | 8.844 ms |
+| Scanner Creation (Multiple Rules)               |     2.312 ms |        100 | 2.238 ms | 2.536 ms | 2.650 ms |
+| Scanning Small Data (64 bytes, Simple Rule)     |     0.209 ms |       1000 | 0.209 ms | 0.236 ms | 0.272 ms |
+| Scanning Medium Data (100KB, Simple Rule)       |     0.214 ms |        100 | 0.210 ms | 0.283 ms | 0.480 ms |
+| Scanning Large Data (10MB, Simple Rule)         |     0.417 ms |         10 | 0.404 ms | 0.503 ms | 0.503 ms |
+| Scanning Medium Data (100KB, Complex Rule)      |     0.275 ms |        100 | 0.264 ms | 0.316 ms | 0.537 ms |
+| Scanning Medium Data (100KB, Regex Rule)        |     0.216 ms |        100 | 0.210 ms | 0.288 ms | 0.438 ms |
+| Scanning Medium Data (100KB, Multiple Rules)    |     0.275 ms |        100 | 0.269 ms | 0.313 ms | 0.408 ms |
+| Async Scanning Medium Data (100KB, Simple Rule) |     0.011 ms |        100 | 0.010 ms | 0.018 ms | 0.051 ms |
+| Scanning with Variables                         |     0.204 ms |       1000 | 0.200 ms | 0.229 ms | 0.319 ms |
+| Scanning with Variables (Override at Scan Time) |     0.206 ms |       1000 | 0.205 ms | 0.230 ms | 0.267 ms |
 
 # API Reference
 
