@@ -646,7 +646,7 @@ impl YaraX {
   }
 
   /// Scans the provided data asynchronously using the compiled YARA rules.
-  #[napi]
+  #[napi(ts_return_type = "Promise<Array<RuleMatch>>")]
   pub fn scan_async(&self, data: Buffer, variables: Option<Object>) -> Result<AsyncTask<ScanTask>> {
     let data_vec = data.to_vec();
     let vars_map = Self::convert_variables_to_map(variables)?;
@@ -659,7 +659,7 @@ impl YaraX {
   }
 
   /// Scans a file asynchronously using the compiled YARA rules.
-  #[napi]
+  #[napi(ts_return_type = "Promise<Array<RuleMatch>>")]
   pub fn scan_file_async(
     &self,
     file_path: String,

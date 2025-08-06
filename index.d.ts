@@ -10,9 +10,9 @@ export declare class YaraX {
   /** Emits a WASM file from the compiled YARA rules. */
   emitWasmFile(outputPath: string): void
   /** Scans the provided data asynchronously using the compiled YARA rules. */
-  scanAsync(data: Buffer, variables?: object | undefined | null): Promise<unknown>
+  scanAsync(data: Buffer, variables?: object | undefined | null): Promise<Array<RuleMatch>>
   /** Scans a file asynchronously using the compiled YARA rules. */
-  scanFileAsync(filePath: string, variables?: object | undefined | null): Promise<unknown>
+  scanFileAsync(filePath: string, variables?: object | undefined | null): Promise<Array<RuleMatch>>
   /** Emits a WASM file asynchronously from the compiled YARA rules. */
   emitWasmFileAsync(outputPath: string): Promise<unknown>
   /** Adds a rule source to the YARA compiler. */
