@@ -244,11 +244,17 @@ const rules = compile(
     // Ignore specific modules
     ignoreModules: ["pe"],
 
-  :  // Error on potentially slow patterns
+    // Error on potentially slow patterns
     errorOnSlowPattern: true,
 
     // Error on potentially slow loops
     errorOnSlowLoop: true,
+
+    // Specify directories for include statements (v1.5.0+)
+    includeDirectories: ["./rules/includes", "./rules/common"],
+
+    // Enable or disable include statements (v1.5.0+)
+    enableIncludes: true,
   },
 );
 ```
@@ -359,6 +365,90 @@ if (warnings.length > 0) {
 }
 ```
 
+## Include Directories
+
+```javascript
+import { compile } from "@litko/yara-x";
+
+// Create a main rule that includes other rules
+const mainRule = `
+  include "common/strings.yar"
+  include "malware/pe_patterns.yar"
+
+  rule main_detection {
+    condition:
+      common_string_rule or pe_malware_rule
+  }
+`;
+
+// Compile with include directories
+const rules = compile(mainRule, {
+  includeDirectories: [
+    "./rules", // Base directory
+    "./rules/common", // Additional include path
+    "./rules/malware", // Another include path
+  ],
+});
+
+// Scan as usual
+const matches = rules.scan(Buffer.from("test data"));
+```
+
+## Scan Performance Options
+
+Control scanning behavior for better performance or safety.
+
+### Limiting Matches Per Pattern
+
+Prevent excessive memory usage by limiting the number of matches per pattern:
+
+```javascript
+import { compile } from "@litko/yara-x";
+
+const rules = compile(`
+  rule find_pattern {
+    strings:
+      $a = "pattern"
+    condition:
+      $a
+  }
+`);
+
+// Limit to 1000 matches per pattern
+rules.setMaxMatchesPerPattern(1000);
+
+// Scan data with many occurrences
+const data = Buffer.from("pattern ".repeat(10000));
+const matches = rules.scan(data);
+
+// Will only return up to 1000 matches per pattern
+console.log(`Found ${matches[0].matches.length} matches (limited to 1000)`);
+```
+
+### Memory-Mapped File Control
+
+Control whether to use memory-mapped files for scanning:
+
+```javascript
+import { compile } from "@litko/yara-x";
+
+const rules = compile(`
+  rule test {
+    strings:
+      $a = "test"
+    condition:
+      $a
+  }
+`);
+
+// Disable memory-mapped files for safer scanning
+// (slower but safer for untrusted files)
+rules.setUseMmap(false);
+
+// Scan file without memory mapping
+const matches = rules.scanFile("./sample.bin");
+```
+
 ## Performance Benchmarks
 
 `node-yara-x` delivers exceptional performance through intelligent scanner caching and optimized Rust implementation.
@@ -372,10 +462,10 @@ Methodology: Statistical analysis across multiple iterations with percentile rep
 
 | Rule Type      | Mean   | p50    | p95    | p99    |
 | -------------- | ------ | ------ | ------ | ------ |
-| Simple Rule    | 2.44ms | 2.42ms | 2.67ms | 3.00ms |
-| Complex Rule   | 2.79ms | 2.78ms | 3.00ms | 3.26ms |
-| Regex Rule     | 8.63ms | 8.63ms | 8.91ms | 9.34ms |
-| Multiple Rules | 2.42ms | 2.39ms | 2.69ms | 3.07ms |
+| Simple Rule    | 2.43ms | 2.41ms | 2.87ms | 3.11ms |
+| Complex Rule   | 2.57ms | 2.52ms | 2.96ms | 3.06ms |
+| Regex Rule     | 7.57ms | 7.47ms | 8.29ms | 8.70ms |
+| Multiple Rules | 2.05ms | 2.03ms | 2.24ms | 2.42ms |
 
 #### Scanning Performance by Data Size
 
@@ -383,10 +473,10 @@ Methodology: Statistical analysis across multiple iterations with percentile rep
 | --------- | -------------- | ----- | ---------- |
 | 64 bytes  | Simple         | 3μs   | ~21 MB/s   |
 | 100KB     | Simple         | 6μs   | ~16.7 GB/s |
-| 100KB     | Complex        | 71μs  | ~1.4 GB/s  |
+| 100KB     | Complex        | 73μs  | ~1.4 GB/s  |
 | 100KB     | Regex          | 7μs   | ~14.3 GB/s |
-| 100KB     | Multiple Rules | 71μs  | ~1.4 GB/s  |
-| 10MB      | Simple         | 196μs | ~51 GB/s   |
+| 100KB     | Multiple Rules | 73μs  | ~1.4 GB/s  |
+| 10MB      | Simple         | 204μs | ~49 GB/s   |
 
 #### Advanced Features Performance
 
@@ -394,7 +484,7 @@ Methodology: Statistical analysis across multiple iterations with percentile rep
 | ----------------- | ---- | -------------------------- |
 | Variable Scanning | 1μs  | Pre-compiled variables     |
 | Runtime Variables | 2μs  | Variables set at scan time |
-| Async Scanning    | 12μs | Non-blocking operations    |
+| Async Scanning    | 11μs | Non-blocking operations    |
 
 ## API Reference
 
@@ -407,7 +497,7 @@ Methodology: Statistical analysis across multiple iterations with percentile rep
 - `create()` - Creates an empty rules scanner to add rules incrementally.
 - `fromFile(rulePath: string, options?: CompilerOptions)` - Compiles yara rules from a file.
 
-### yarax Methods
+### YaraX Methods
 
 - `getWarnings()` - Get compiler warnings.
 - `scan(data: Buffer, variables?: Record<string, string | number>)` - Scan a buffer.
@@ -419,6 +509,21 @@ Methodology: Statistical analysis across multiple iterations with percentile rep
 - `addRuleSource(rules: string)` - Add rules from a string to an existing scanner.
 - `addRuleFile(filePath: string)` - Add rules from a file to an existing scanner.
 - `defineVariable(name: string, value: string)` - Define a variable for the YARA compiler.
+- `setMaxMatchesPerPattern(maxMatches: number)` - **(v1.7.0+)** Set the maximum number of matches per pattern.
+- `setUseMmap(useMmap: boolean)` - **(v1.6.0+)** Enable or disable memory-mapped files for scanning.
+
+### CompilerOptions
+
+- `defineVariables?: object` - Define global variables for the YARA rules.
+- `ignoreModules?: string[]` - List of module names to ignore during compilation.
+- `bannedModules?: BannedModule[]` - List of banned modules that cannot be used.
+- `features?: string[]` - List of features to enable for the YARA rules.
+- `relaxedReSyntax?: boolean` - Use relaxed regular expression syntax.
+- `conditionOptimization?: boolean` - Optimize conditions in the YARA rules.
+- `errorOnSlowPattern?: boolean` - Raise an error on slow patterns.
+- `errorOnSlowLoop?: boolean` - Raise an error on slow loops.
+- `includeDirectories?: string[]` - **(v1.5.0+)** Directories where the compiler should look for included files.
+- `enableIncludes?: boolean` - **(v1.5.0+)** Enable or disable include statements in YARA rules.
 
 ## Licenses
 
