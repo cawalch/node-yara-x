@@ -66,7 +66,7 @@ const isMuslFromChildProcess = () => {
 function requireNative() {
   if (process.env.NAPI_RS_NATIVE_LIBRARY_PATH) {
     try {
-      nativeBinding = require(process.env.NAPI_RS_NATIVE_LIBRARY_PATH);
+      return require(process.env.NAPI_RS_NATIVE_LIBRARY_PATH);
     } catch (err) {
       loadErrors.push(err)
     }
@@ -78,7 +78,12 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@litko/yara-x-android-arm64')
+        const binding = require('@litko/yara-x-android-arm64')
+        const bindingPackageVersion = require('@litko/yara-x-android-arm64/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
       } catch (e) {
         loadErrors.push(e)
       }
@@ -89,7 +94,12 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@litko/yara-x-android-arm-eabi')
+        const binding = require('@litko/yara-x-android-arm-eabi')
+        const bindingPackageVersion = require('@litko/yara-x-android-arm-eabi/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
       } catch (e) {
         loadErrors.push(e)
       }
@@ -98,15 +108,38 @@ function requireNative() {
     }
   } else if (process.platform === 'win32') {
     if (process.arch === 'x64') {
+      if (process.report?.getReport?.()?.header?.osName?.startsWith?.('MINGW')) {
+        try {
+        return require('./yara-x.win32-x64-gnu.node')
+      } catch (e) {
+        loadErrors.push(e)
+      }
       try {
+        const binding = require('@litko/yara-x-win32-x64-gnu')
+        const bindingPackageVersion = require('@litko/yara-x-win32-x64-gnu/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
+      } catch (e) {
+        loadErrors.push(e)
+      }
+      } else {
+        try {
         return require('./yara-x.win32-x64-msvc.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        return require('@litko/yara-x-win32-x64-msvc')
+        const binding = require('@litko/yara-x-win32-x64-msvc')
+        const bindingPackageVersion = require('@litko/yara-x-win32-x64-msvc/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
       } catch (e) {
         loadErrors.push(e)
+      }
       }
     } else if (process.arch === 'ia32') {
       try {
@@ -115,7 +148,12 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@litko/yara-x-win32-ia32-msvc')
+        const binding = require('@litko/yara-x-win32-ia32-msvc')
+        const bindingPackageVersion = require('@litko/yara-x-win32-ia32-msvc/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
       } catch (e) {
         loadErrors.push(e)
       }
@@ -126,7 +164,12 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@litko/yara-x-win32-arm64-msvc')
+        const binding = require('@litko/yara-x-win32-arm64-msvc')
+        const bindingPackageVersion = require('@litko/yara-x-win32-arm64-msvc/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
       } catch (e) {
         loadErrors.push(e)
       }
@@ -140,7 +183,12 @@ function requireNative() {
       loadErrors.push(e)
     }
     try {
-      return require('@litko/yara-x-darwin-universal')
+      const binding = require('@litko/yara-x-darwin-universal')
+      const bindingPackageVersion = require('@litko/yara-x-darwin-universal/package.json').version
+      if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+        throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+      }
+      return binding
     } catch (e) {
       loadErrors.push(e)
     }
@@ -151,7 +199,12 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@litko/yara-x-darwin-x64')
+        const binding = require('@litko/yara-x-darwin-x64')
+        const bindingPackageVersion = require('@litko/yara-x-darwin-x64/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
       } catch (e) {
         loadErrors.push(e)
       }
@@ -162,7 +215,12 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@litko/yara-x-darwin-arm64')
+        const binding = require('@litko/yara-x-darwin-arm64')
+        const bindingPackageVersion = require('@litko/yara-x-darwin-arm64/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
       } catch (e) {
         loadErrors.push(e)
       }
@@ -177,7 +235,12 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@litko/yara-x-freebsd-x64')
+        const binding = require('@litko/yara-x-freebsd-x64')
+        const bindingPackageVersion = require('@litko/yara-x-freebsd-x64/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
       } catch (e) {
         loadErrors.push(e)
       }
@@ -188,7 +251,12 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@litko/yara-x-freebsd-arm64')
+        const binding = require('@litko/yara-x-freebsd-arm64')
+        const bindingPackageVersion = require('@litko/yara-x-freebsd-arm64/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
       } catch (e) {
         loadErrors.push(e)
       }
@@ -204,7 +272,12 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@litko/yara-x-linux-x64-musl')
+          const binding = require('@litko/yara-x-linux-x64-musl')
+          const bindingPackageVersion = require('@litko/yara-x-linux-x64-musl/package.json').version
+          if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          }
+          return binding
         } catch (e) {
           loadErrors.push(e)
         }
@@ -215,7 +288,12 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@litko/yara-x-linux-x64-gnu')
+          const binding = require('@litko/yara-x-linux-x64-gnu')
+          const bindingPackageVersion = require('@litko/yara-x-linux-x64-gnu/package.json').version
+          if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          }
+          return binding
         } catch (e) {
           loadErrors.push(e)
         }
@@ -228,7 +306,12 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@litko/yara-x-linux-arm64-musl')
+          const binding = require('@litko/yara-x-linux-arm64-musl')
+          const bindingPackageVersion = require('@litko/yara-x-linux-arm64-musl/package.json').version
+          if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          }
+          return binding
         } catch (e) {
           loadErrors.push(e)
         }
@@ -239,7 +322,12 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@litko/yara-x-linux-arm64-gnu')
+          const binding = require('@litko/yara-x-linux-arm64-gnu')
+          const bindingPackageVersion = require('@litko/yara-x-linux-arm64-gnu/package.json').version
+          if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          }
+          return binding
         } catch (e) {
           loadErrors.push(e)
         }
@@ -252,7 +340,12 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@litko/yara-x-linux-arm-musleabihf')
+          const binding = require('@litko/yara-x-linux-arm-musleabihf')
+          const bindingPackageVersion = require('@litko/yara-x-linux-arm-musleabihf/package.json').version
+          if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          }
+          return binding
         } catch (e) {
           loadErrors.push(e)
         }
@@ -263,7 +356,46 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@litko/yara-x-linux-arm-gnueabihf')
+          const binding = require('@litko/yara-x-linux-arm-gnueabihf')
+          const bindingPackageVersion = require('@litko/yara-x-linux-arm-gnueabihf/package.json').version
+          if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          }
+          return binding
+        } catch (e) {
+          loadErrors.push(e)
+        }
+      }
+    } else if (process.arch === 'loong64') {
+      if (isMusl()) {
+        try {
+          return require('./yara-x.linux-loong64-musl.node')
+        } catch (e) {
+          loadErrors.push(e)
+        }
+        try {
+          const binding = require('@litko/yara-x-linux-loong64-musl')
+          const bindingPackageVersion = require('@litko/yara-x-linux-loong64-musl/package.json').version
+          if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          }
+          return binding
+        } catch (e) {
+          loadErrors.push(e)
+        }
+      } else {
+        try {
+          return require('./yara-x.linux-loong64-gnu.node')
+        } catch (e) {
+          loadErrors.push(e)
+        }
+        try {
+          const binding = require('@litko/yara-x-linux-loong64-gnu')
+          const bindingPackageVersion = require('@litko/yara-x-linux-loong64-gnu/package.json').version
+          if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          }
+          return binding
         } catch (e) {
           loadErrors.push(e)
         }
@@ -276,7 +408,12 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@litko/yara-x-linux-riscv64-musl')
+          const binding = require('@litko/yara-x-linux-riscv64-musl')
+          const bindingPackageVersion = require('@litko/yara-x-linux-riscv64-musl/package.json').version
+          if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          }
+          return binding
         } catch (e) {
           loadErrors.push(e)
         }
@@ -287,7 +424,12 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@litko/yara-x-linux-riscv64-gnu')
+          const binding = require('@litko/yara-x-linux-riscv64-gnu')
+          const bindingPackageVersion = require('@litko/yara-x-linux-riscv64-gnu/package.json').version
+          if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          }
+          return binding
         } catch (e) {
           loadErrors.push(e)
         }
@@ -299,7 +441,12 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@litko/yara-x-linux-ppc64-gnu')
+        const binding = require('@litko/yara-x-linux-ppc64-gnu')
+        const bindingPackageVersion = require('@litko/yara-x-linux-ppc64-gnu/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
       } catch (e) {
         loadErrors.push(e)
       }
@@ -310,7 +457,12 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@litko/yara-x-linux-s390x-gnu')
+        const binding = require('@litko/yara-x-linux-s390x-gnu')
+        const bindingPackageVersion = require('@litko/yara-x-linux-s390x-gnu/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
       } catch (e) {
         loadErrors.push(e)
       }
@@ -320,34 +472,49 @@ function requireNative() {
   } else if (process.platform === 'openharmony') {
     if (process.arch === 'arm64') {
       try {
-        return require('./yara-x.linux-arm64-ohos.node')
+        return require('./yara-x.openharmony-arm64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        return require('@litko/yara-x-linux-arm64-ohos')
+        const binding = require('@litko/yara-x-openharmony-arm64')
+        const bindingPackageVersion = require('@litko/yara-x-openharmony-arm64/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
       } catch (e) {
         loadErrors.push(e)
       }
     } else if (process.arch === 'x64') {
       try {
-        return require('./yara-x.linux-x64-ohos.node')
+        return require('./yara-x.openharmony-x64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        return require('@litko/yara-x-linux-x64-ohos')
+        const binding = require('@litko/yara-x-openharmony-x64')
+        const bindingPackageVersion = require('@litko/yara-x-openharmony-x64/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
       } catch (e) {
         loadErrors.push(e)
       }
     } else if (process.arch === 'arm') {
       try {
-        return require('./yara-x.linux-arm-ohos.node')
+        return require('./yara-x.openharmony-arm.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        return require('@litko/yara-x-linux-arm-ohos')
+        const binding = require('@litko/yara-x-openharmony-arm')
+        const bindingPackageVersion = require('@litko/yara-x-openharmony-arm/package.json').version
+        if (bindingPackageVersion !== '0.3.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.3.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        }
+        return binding
       } catch (e) {
         loadErrors.push(e)
       }
@@ -362,21 +529,31 @@ function requireNative() {
 nativeBinding = requireNative()
 
 if (!nativeBinding || process.env.NAPI_RS_FORCE_WASI) {
+  let wasiBinding = null
+  let wasiBindingError = null
   try {
-    nativeBinding = require('./yara-x.wasi.cjs')
+    wasiBinding = require('./yara-x.wasi.cjs')
+    nativeBinding = wasiBinding
   } catch (err) {
     if (process.env.NAPI_RS_FORCE_WASI) {
-      loadErrors.push(err)
+      wasiBindingError = err
     }
   }
   if (!nativeBinding) {
     try {
-      nativeBinding = require('@litko/yara-x-wasm32-wasi')
+      wasiBinding = require('@litko/yara-x-wasm32-wasi')
+      nativeBinding = wasiBinding
     } catch (err) {
       if (process.env.NAPI_RS_FORCE_WASI) {
+        wasiBindingError.cause = err
         loadErrors.push(err)
       }
     }
+  }
+  if (process.env.NAPI_RS_FORCE_WASI === 'error' && !wasiBinding) {
+    const error = new Error('WASI binding not found and NAPI_RS_FORCE_WASI is set to error')
+    error.cause = wasiBindingError
+    throw error
   }
 }
 
@@ -386,7 +563,12 @@ if (!nativeBinding) {
       `Cannot find native binding. ` +
         `npm has a bug related to optional dependencies (https://github.com/npm/cli/issues/4828). ` +
         'Please try `npm i` again after removing both package-lock.json and node_modules directory.',
-      { cause: loadErrors }
+      {
+        cause: loadErrors.reduce((err, cur) => {
+          cur.cause = err
+          return cur
+        }),
+      },
     )
   }
   throw new Error(`Failed to load native binding`)
