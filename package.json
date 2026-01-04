@@ -1,6 +1,6 @@
 {
   "name": "@litko/yara-x",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "main": "index.js",
   "types": "index.d.ts",
   "packageManager": "pnpm@10.18.0",
