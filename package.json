@@ -14,7 +14,7 @@
   },
   "license": "MIT",
   "devDependencies": {
-    "@napi-rs/cli": "^3.3.0",
+    "@napi-rs/cli": "^3.5.1",
     "@napi-rs/wasm-runtime": "^1.0.6",
     "@types/node": "^24.6.2"
   },
@@ -35,8 +35,8 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release",
-    "build:debug": "napi build --platform",
+    "build": "napi build --platform --release && node scripts/patch-index.js",
+    "build:debug": "napi build --platform && node scripts/patch-index.js",
     "prepublishOnly": "napi prepublish -t npm",
     "universal": "napi universal",
     "version": "napi version",
