@@ -1,12 +1,12 @@
 {
-  "name": "@litko/yara-x-darwin-x64",
+  "name": "@litko/yara-x-win32-arm64-msvc",
   "version": "0.5.0",
   "cpu": [
-    "x64"
+    "arm64"
   ],
-  "main": "yara-x.darwin-x64.node",
+  "main": "yara-x.win32-arm64-msvc.node",
   "files": [
-    "yara-x.darwin-x64.node"
+    "yara-x.win32-arm64-msvc.node"
   ],
   "keywords": [
     "yara",
@@ -33,6 +33,6 @@
     "access": "public"
   },
   "os": [
-    "darwin"
+    "win32"
   ]
 }
