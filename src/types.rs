@@ -6,7 +6,6 @@
 
 use napi::bindgen_prelude::Object;
 use napi_derive::napi;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// A map of variable names to their values.
@@ -26,6 +25,39 @@ pub struct MatchData {
   pub data: String,
   /// The identifier of the pattern that matched.
   pub identifier: String,
+}
+
+/// A thread-safe metadata value that can be transferred across thread boundaries.
+///
+/// Used by async tasks to hold scan results before converting to N-API objects.
+#[derive(Debug, Clone)]
+pub enum MetaValueData {
+  /// An integer metadata value.
+  Integer(i64),
+  /// A floating-point metadata value.
+  Float(f64),
+  /// A string metadata value.
+  String(String),
+  /// A boolean metadata value.
+  Bool(bool),
+}
+
+/// A thread-safe representation of a rule match that can cross thread boundaries.
+///
+/// Unlike `RuleMatch`, this struct contains no N-API references, making it `Send + Sync`.
+/// It is used as an intermediate type in async scanning tasks.
+#[derive(Debug, Clone)]
+pub struct RuleMatchData {
+  /// The identifier of the rule that matched.
+  pub rule_identifier: String,
+  /// The namespace of the rule that matched.
+  pub namespace: String,
+  /// The metadata associated with the rule, as key-value pairs.
+  pub meta: Vec<(String, MetaValueData)>,
+  /// The tags associated with the rule that matched.
+  pub tags: Vec<String>,
+  /// The matches found by the rule.
+  pub matches: Vec<MatchData>,
 }
 
 /// Represents a matching rule found during scanning.
@@ -106,7 +138,7 @@ pub struct ScanOptions {
 /// Warnings indicate potential issues that don't prevent compilation
 /// but may indicate problems with the rules.
 #[napi(object)]
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct CompilerWarning {
   /// The code of the warning.
   pub code: String,
@@ -125,7 +157,7 @@ pub struct CompilerWarning {
 /// Errors prevent successful compilation and must be resolved before
 /// the rules can be used.
 #[napi(object)]
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct CompilerError {
   /// The code of the error.
   pub code: String,
@@ -144,7 +176,7 @@ pub struct CompilerError {
 /// Contains any warnings or errors generated during the compilation process.
 /// If errors are present, the compilation failed.
 #[napi(object)]
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct CompileResult {
   /// Any warnings generated during the compilation process.
   pub warnings: Vec<CompilerWarning>,

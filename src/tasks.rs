@@ -2,12 +2,15 @@
 //!
 //! This module provides async task implementations for scanning and WASM compilation,
 //! allowing these operations to run in background threads without blocking the Node.js event loop.
+//!
+//! Scanning is performed in `compute()` (worker thread) using thread-safe `RuleMatchData`,
+//! then converted to N-API `RuleMatch` objects in `resolve()` (main thread).
 
 use crate::error::{io_error_to_napi, scan_error_to_napi};
 use crate::scanner::YaraX;
-use crate::types::{RuleMatch, VariableMap};
+use crate::types::{RuleMatch, RuleMatchData, VariableMap};
 use crate::variables::VariableHandler;
-use napi::{Env, Error, Result, Status, Task};
+use napi::{Error, Result, Status, Task};
 use std::sync::Arc;
 use yara_x::{Rules, Scanner};
 
@@ -22,46 +25,30 @@ pub struct BaseYaraTask {
 
 impl BaseYaraTask {
   /// Creates a new base YARA task.
-  ///
-  /// # Arguments
-  ///
-  /// * `rules` - The compiled YARA rules
-  /// * `variables` - Optional variables to apply during scanning
   pub fn new(rules: Arc<Rules>, variables: Option<VariableMap>) -> Self {
     Self { rules, variables }
   }
 
   /// Creates a new scanner with the compiled YARA rules and applies any defined variables.
-  ///
-  /// # Returns
-  ///
-  /// A configured scanner ready to scan data
   fn create_scanner(&self) -> Result<Scanner<'_>> {
     let mut scanner = Scanner::new(&self.rules);
     scanner.apply_variables_from_map(&self.variables)?;
     Ok(scanner)
   }
 
-  /// Processes the scan results and returns a vector of RuleMatch.
+  /// Scans data on the current thread and returns thread-safe results.
   ///
-  /// # Arguments
-  ///
-  /// * `env` - The N-API environment
-  /// * `data` - The scanned data
-  ///
-  /// # Returns
-  ///
-  /// A vector of matching rules
-  pub fn process_results<'a>(&self, env: Env, data: &[u8]) -> Result<Vec<RuleMatch<'a>>> {
+  /// This is designed to be called from `compute()` (worker thread).
+  pub fn scan_to_data(&self, data: &[u8]) -> Result<Vec<RuleMatchData>> {
     let mut scanner = self.create_scanner()?;
     let results = scanner.scan(data).map_err(scan_error_to_napi)?;
-    YaraX::process_scan_results(results, data, env)
+    Ok(YaraX::extract_scan_data(results, data))
   }
 }
 
 /// Task for scanning data with YARA rules.
 ///
-/// This task scans in-memory data asynchronously.
+/// Scanning runs on the worker thread in `compute()`.
 pub struct ScanTask {
   base: BaseYaraTask,
   data: Vec<u8>,
@@ -69,12 +56,6 @@ pub struct ScanTask {
 
 impl ScanTask {
   /// Creates a new scan task.
-  ///
-  /// # Arguments
-  ///
-  /// * `rules` - The compiled YARA rules
-  /// * `data` - The data to scan
-  /// * `variables` - Optional variables to apply during scanning
   pub fn new(rules: Arc<Rules>, data: Vec<u8>, variables: Option<VariableMap>) -> Self {
     Self {
       base: BaseYaraTask::new(rules, variables),
@@ -84,21 +65,22 @@ impl ScanTask {
 }
 
 impl Task for ScanTask {
-  type Output = Vec<u8>;
+  type Output = Vec<RuleMatchData>;
   type JsValue = Vec<RuleMatch<'static>>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    Ok(std::mem::take(&mut self.data))
+    let data = std::mem::take(&mut self.data);
+    self.base.scan_to_data(&data)
   }
 
-  fn resolve(&mut self, env: napi::Env, data: Self::Output) -> Result<Self::JsValue> {
-    self.base.process_results(env, &data)
+  fn resolve(&mut self, env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
+    YaraX::convert_to_rule_matches(env, output)
   }
 }
 
 /// Task for scanning a file with YARA rules.
 ///
-/// This task reads and scans a file asynchronously.
+/// File I/O and scanning both run on the worker thread in `compute()`.
 pub struct ScanFileTask {
   base: BaseYaraTask,
   file_path: String,
@@ -106,12 +88,6 @@ pub struct ScanFileTask {
 
 impl ScanFileTask {
   /// Creates a new file scan task.
-  ///
-  /// # Arguments
-  ///
-  /// * `rules` - The compiled YARA rules
-  /// * `file_path` - Path to the file to scan
-  /// * `variables` - Optional variables to apply during scanning
   pub fn new(rules: Arc<Rules>, file_path: String, variables: Option<VariableMap>) -> Self {
     Self {
       base: BaseYaraTask::new(rules, variables),
@@ -121,16 +97,17 @@ impl ScanFileTask {
 }
 
 impl Task for ScanFileTask {
-  type Output = Vec<u8>;
+  type Output = Vec<RuleMatchData>;
   type JsValue = Vec<RuleMatch<'static>>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    std::fs::read(&self.file_path)
-      .map_err(|e| io_error_to_napi(e, &format!("reading file {}", self.file_path)))
+    let data = std::fs::read(&self.file_path)
+      .map_err(|e| io_error_to_napi(e, &format!("reading file {}", self.file_path)))?;
+    self.base.scan_to_data(&data)
   }
 
-  fn resolve(&mut self, env: napi::Env, data: Self::Output) -> Result<Self::JsValue> {
-    self.base.process_results(env, &data)
+  fn resolve(&mut self, env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
+    YaraX::convert_to_rule_matches(env, output)
   }
 }
 

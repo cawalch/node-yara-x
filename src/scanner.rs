@@ -141,11 +141,7 @@ impl YaraX {
         let length = range.end - range.start;
 
         if let Some(matched_bytes) = data.get(offset..offset + length) {
-          let matched_data = if matched_bytes.is_ascii() {
-            unsafe { String::from_utf8_unchecked(matched_bytes.to_vec()) }
-          } else {
-            String::from_utf8_lossy(matched_bytes).into_owned()
-          };
+          let matched_data = String::from_utf8_lossy(matched_bytes).into_owned();
 
           matches_vec.push(MatchData {
             offset: offset as u32,
@@ -173,6 +169,10 @@ impl YaraX {
     let needs_new_scanner = cached.is_none();
 
     if needs_new_scanner {
+      // SAFETY: The transmute extends the borrow lifetime of `self.rules` to `'static`.
+      // This is sound because `self.rules` is an `Arc<Rules>` that outlives the cached
+      // scanner, and `invalidate_scanner_cache()` is called whenever `self.rules` is
+      // replaced (in `add_rule_source`, `define_variable`, and option setters).
       let mut scanner = Scanner::new(unsafe {
         std::mem::transmute::<&yara_x::Rules, &yara_x::Rules>(&*self.rules)
       });
@@ -238,6 +238,91 @@ impl YaraX {
         meta: meta_obj,
         tags,
         matches: matches_vec,
+      });
+    }
+
+    Ok(rule_matches)
+  }
+
+  /// Extracts scan results into thread-safe `RuleMatchData` structs.
+  pub fn extract_scan_data(
+    results: yara_x::ScanResults,
+    data: &[u8],
+  ) -> Vec<crate::types::RuleMatchData> {
+    use crate::types::{MetaValueData, RuleMatchData};
+
+    let matching_rules = results.matching_rules();
+    let rule_count = matching_rules.len();
+
+    if rule_count == 0 {
+      return Vec::new();
+    }
+
+    let mut rule_matches = Vec::with_capacity(rule_count);
+
+    for rule in matching_rules {
+      let matches_vec = Self::extract_matches(&rule, data);
+
+      let tags: Vec<String> = rule
+        .tags()
+        .map(|tag| tag.identifier().to_string())
+        .collect();
+
+      let meta: Vec<(String, MetaValueData)> = rule
+        .metadata()
+        .map(|(key, value)| {
+          let v = match value {
+            yara_x::MetaValue::Integer(i) => MetaValueData::Integer(i),
+            yara_x::MetaValue::Float(f) => MetaValueData::Float(f),
+            yara_x::MetaValue::String(s) => MetaValueData::String(s.to_string()),
+            yara_x::MetaValue::Bool(b) => MetaValueData::Bool(b),
+            _ => MetaValueData::String("unknown".to_string()),
+          };
+          (key.to_string(), v)
+        })
+        .collect();
+
+      rule_matches.push(RuleMatchData {
+        rule_identifier: rule.identifier().to_string(),
+        namespace: rule.namespace().to_string(),
+        meta,
+        tags,
+        matches: matches_vec,
+      });
+    }
+
+    rule_matches
+  }
+
+  /// Converts thread-safe `RuleMatchData` into N-API `RuleMatch` objects.
+  ///
+  /// This should be called on the main thread (in `resolve()`).
+  pub fn convert_to_rule_matches<'a>(
+    env: napi::Env,
+    data: Vec<crate::types::RuleMatchData>,
+  ) -> Result<Vec<RuleMatch<'a>>> {
+    use crate::types::MetaValueData;
+
+    let mut rule_matches = Vec::with_capacity(data.len());
+
+    for item in data {
+      let mut meta_obj = Object::new(&env)?;
+
+      for (key, value) in &item.meta {
+        match value {
+          MetaValueData::Integer(i) => meta_obj.set_named_property(key, *i)?,
+          MetaValueData::Float(f) => meta_obj.set_named_property(key, *f)?,
+          MetaValueData::String(s) => meta_obj.set_named_property(key, s.clone())?,
+          MetaValueData::Bool(b) => meta_obj.set_named_property(key, *b)?,
+        }
+      }
+
+      rule_matches.push(RuleMatch {
+        rule_identifier: item.rule_identifier,
+        namespace: item.namespace,
+        meta: meta_obj,
+        tags: item.tags,
+        matches: item.matches,
       });
     }
 
@@ -464,8 +549,7 @@ impl YaraX {
     self.rules = Arc::new(compiler.build());
 
     if let Some(source) = &mut self.source_code {
-      let new_capacity = source.len() + rule_source.len() + 1;
-      source.reserve(new_capacity);
+      source.reserve(rule_source.len() + 1);
       source.push('\n');
       source.push_str(&rule_source);
     } else {
