@@ -1,6 +1,6 @@
 {
   "name": "@litko/yara-x",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "main": "index.js",
   "types": "index.d.ts",
   "packageManager": "pnpm@10.18.0",
@@ -9,7 +9,10 @@
     "targets": [
       "x86_64-apple-darwin",
       "aarch64-apple-darwin",
-      "x86_64-unknown-linux-gnu"
+      "x86_64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc",
+      "aarch64-unknown-linux-gnu"
     ]
   },
   "license": "MIT",
@@ -59,8 +62,11 @@
     "rust"
   ],
   "optionalDependencies": {
-    "@litko/yara-x-darwin-arm64": "0.2.1",
-    "@litko/yara-x-darwin-x64": "0.2.1",
-    "@litko/yara-x-linux-x64-gnu": "0.2.1"
+    "@litko/yara-x-darwin-x64": "0.5.0",
+    "@litko/yara-x-darwin-arm64": "0.5.0",
+    "@litko/yara-x-linux-x64-gnu": "0.5.0",
+    "@litko/yara-x-win32-x64-msvc": "0.5.0",
+    "@litko/yara-x-win32-arm64-msvc": "0.5.0",
+    "@litko/yara-x-linux-arm64-gnu": "0.5.0"
   }
 }
