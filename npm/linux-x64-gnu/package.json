@@ -1,9 +1,6 @@
 {
   "name": "@litko/yara-x-linux-x64-gnu",
   "version": "0.5.0",
-  "os": [
-    "linux"
-  ],
   "cpu": [
     "x64"
   ],
@@ -19,14 +16,25 @@
     "napi-rs",
     "rust"
   ],
+  "homepage": "https://github.com/cawalch/node-yara-x",
   "license": "MIT",
   "engines": {
     "node": ">= 20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cawalch/node-yara-x.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cawalch/node-yara-x/issues"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
   },
+  "os": [
+    "linux"
+  ],
   "libc": [
     "glibc"
   ]
