@@ -3,9 +3,9 @@
 //! This module contains the main YaraX struct and related functionality for
 //! scanning data with compiled YARA rules, including scanner caching for performance.
 
-use crate::compiler::apply_compiler_options;
-use crate::error::{compile_error_to_napi, io_error_to_napi, scan_error_to_napi};
-use crate::types::{CompilerOptions, CompilerWarning, MatchData, RuleMatch};
+use crate::compiler::{add_source_to_compiler, apply_compiler_options};
+use crate::error::{io_error_to_napi, scan_error_to_napi};
+use crate::types::{CompilerOptions, CompilerWarning, MatchData, RuleMatch, RuleSource};
 use crate::variables::{convert_variables_to_map, get_compiler_warnings, VariableHandler};
 use napi::bindgen_prelude::{AsyncTask, Buffer, JsObjectValue, Object};
 use napi::{Env, Error, Result, Status};
@@ -26,6 +26,8 @@ pub struct YaraX {
   pub(crate) rules: Arc<Rules>,
   /// The source code used to compile the YARA rules.
   pub(crate) source_code: Option<String>,
+  /// The source code segments and namespaces used to compile the YARA rules.
+  pub(crate) rule_sources: Vec<RuleSource>,
   /// Any warnings generated during the compilation process.
   pub(crate) warnings: Vec<CompilerWarning>,
   /// The variables defined for the YARA rules.
@@ -56,17 +58,21 @@ impl YaraX {
     let mut compiler = Compiler::new();
 
     let stored_variables = apply_compiler_options(&mut compiler, options.as_ref(), true)?;
+    let namespace = options.as_ref().and_then(|opts| opts.namespace.as_deref());
 
-    compiler
-      .add_source(source.as_str())
-      .map_err(|e| compile_error_to_napi(&e))?;
+    add_source_to_compiler(&mut compiler, source.as_str(), namespace)?;
 
     let warnings = get_compiler_warnings(&compiler)?;
     let rules = compiler.build();
+    let rule_sources = vec![RuleSource {
+      source: source.clone(),
+      namespace: namespace.map(str::to_string),
+    }];
 
     Ok(YaraX {
       rules: Arc::new(rules),
       source_code: Some(source),
+      rule_sources,
       warnings,
       variables: stored_variables,
       cached_scanner: RefCell::new(None),
@@ -443,7 +449,11 @@ impl YaraX {
       )
     })?;
 
-    crate::compiler::compile_source_to_wasm(source, &output_path, None)
+    if self.rule_sources.is_empty() {
+      crate::compiler::compile_source_to_wasm(source, &output_path, None)
+    } else {
+      crate::compiler::compile_sources_to_wasm(&self.rule_sources, &output_path, None)
+    }
   }
 
   /// Scans the provided data asynchronously using the compiled YARA rules.
@@ -513,6 +523,7 @@ impl YaraX {
   ) -> Result<AsyncTask<crate::tasks::EmitWasmFileTask>> {
     Ok(AsyncTask::new(crate::tasks::EmitWasmFileTask {
       source_code: self.source_code.clone(),
+      rule_sources: self.rule_sources.clone(),
       output_path,
     }))
   }
@@ -527,17 +538,21 @@ impl YaraX {
   ///
   /// Ok(()) on success, or an error if compilation fails
   #[napi]
-  pub fn add_rule_source(&mut self, rule_source: String) -> Result<()> {
+  pub fn add_rule_source(&mut self, rule_source: String, namespace: Option<String>) -> Result<()> {
     let mut compiler = Compiler::new();
 
-    compiler
-      .add_source(rule_source.as_str())
-      .map_err(|e| compile_error_to_napi(&e))?;
+    let mut rule_sources = self.rule_sources.clone();
+    rule_sources.push(RuleSource {
+      source: rule_source.clone(),
+      namespace: namespace.clone(),
+    });
 
-    if let Some(existing_source) = &self.source_code {
-      compiler
-        .add_source(existing_source.as_str())
-        .map_err(|e| compile_error_to_napi(&e))?;
+    if rule_sources.is_empty() {
+      add_source_to_compiler(&mut compiler, rule_source.as_str(), namespace.as_deref())?;
+    } else {
+      for source in &rule_sources {
+        add_source_to_compiler(&mut compiler, &source.source, source.namespace.as_deref())?;
+      }
     }
 
     if let Some(vars) = &self.variables {
@@ -547,6 +562,7 @@ impl YaraX {
     }
 
     self.rules = Arc::new(compiler.build());
+    self.rule_sources = rule_sources;
 
     if let Some(source) = &mut self.source_code {
       source.reserve(rule_source.len() + 1);
@@ -571,10 +587,10 @@ impl YaraX {
   ///
   /// Ok(()) on success, or an error if reading or compilation fails
   #[napi]
-  pub fn add_rule_file(&mut self, file_path: String) -> Result<()> {
+  pub fn add_rule_file(&mut self, file_path: String, namespace: Option<String>) -> Result<()> {
     let file_content = std::fs::read_to_string(Path::new(&file_path))
       .map_err(|e| io_error_to_napi(e, &format!("reading file {file_path}")))?;
-    self.add_rule_source(file_content)
+    self.add_rule_source(file_content, namespace)
   }
 
   /// Defines a variable for the YARA compiler.
@@ -591,11 +607,15 @@ impl YaraX {
   pub fn define_variable(&mut self, name: String, value: String) -> Result<()> {
     let mut compiler = Compiler::new();
 
-    if let Some(source) = &self.source_code {
-      if !source.is_empty() {
-        compiler
-          .add_source(source.as_str())
-          .map_err(|e| compile_error_to_napi(&e))?;
+    for source in &self.rule_sources {
+      add_source_to_compiler(&mut compiler, &source.source, source.namespace.as_deref())?;
+    }
+
+    if self.rule_sources.is_empty() {
+      if let Some(source) = &self.source_code {
+        if !source.is_empty() {
+          add_source_to_compiler(&mut compiler, source.as_str(), None)?;
+        }
       }
     }
 
