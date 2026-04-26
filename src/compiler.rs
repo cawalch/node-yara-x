@@ -5,8 +5,8 @@
 
 use crate::error::compile_error_to_napi;
 use crate::types::{CompilerOptions, RuleSource, VariableMap};
-use crate::variables::VariableHandler;
-use napi::bindgen_prelude::{JsObjectValue, Object};
+use crate::variables::{get_variable_value, VariableHandler};
+use napi::bindgen_prelude::Object;
 use napi::{Error, Result, Status};
 use std::collections::HashMap;
 use std::path::Path;
@@ -103,12 +103,11 @@ pub fn apply_compiler_options(
       }
 
       for key in &property_names {
-        if let Ok(value) = vars.get_named_property::<String>(key) {
-          compiler.apply_variable(key, &value)?;
+        let value = get_variable_value(vars, key)?;
+        compiler.apply_variable_value(key, &value)?;
 
-          if let Some(var_map) = &mut stored_variables {
-            var_map.insert(key.clone(), value);
-          }
+        if let Some(var_map) = &mut stored_variables {
+          var_map.insert(key.clone(), value);
         }
       }
     }

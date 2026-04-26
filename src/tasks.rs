@@ -6,12 +6,13 @@
 //! Scanning is performed in `compute()` (worker thread) using thread-safe `RuleMatchData`,
 //! then converted to N-API `RuleMatch` objects in `resolve()` (main thread).
 
-use crate::error::{io_error_to_napi, scan_error_to_napi};
+use crate::error::scan_error_to_napi;
 use crate::scanner::YaraX;
 use crate::types::{RuleMatch, RuleMatchData, RuleSource, VariableMap};
 use crate::variables::VariableHandler;
 use napi::{Error, Result, Status, Task};
 use std::sync::Arc;
+use std::time::Duration;
 use yara_x::{Rules, Scanner};
 
 /// Base task for YARA scanning operations.
@@ -21,17 +22,41 @@ use yara_x::{Rules, Scanner};
 pub struct BaseYaraTask {
   rules: Arc<Rules>,
   variables: Option<VariableMap>,
+  max_matches_per_pattern: Option<usize>,
+  use_mmap: Option<bool>,
+  timeout_ms: Option<u32>,
 }
 
 impl BaseYaraTask {
   /// Creates a new base YARA task.
-  pub fn new(rules: Arc<Rules>, variables: Option<VariableMap>) -> Self {
-    Self { rules, variables }
+  pub fn new(
+    rules: Arc<Rules>,
+    variables: Option<VariableMap>,
+    max_matches_per_pattern: Option<usize>,
+    use_mmap: Option<bool>,
+    timeout_ms: Option<u32>,
+  ) -> Self {
+    Self {
+      rules,
+      variables,
+      max_matches_per_pattern,
+      use_mmap,
+      timeout_ms,
+    }
   }
 
   /// Creates a new scanner with the compiled YARA rules and applies any defined variables.
   fn create_scanner(&self) -> Result<Scanner<'_>> {
     let mut scanner = Scanner::new(&self.rules);
+    if let Some(max_matches) = self.max_matches_per_pattern {
+      scanner.max_matches_per_pattern(max_matches);
+    }
+    if let Some(use_mmap) = self.use_mmap {
+      scanner.use_mmap(use_mmap);
+    }
+    if let Some(timeout_ms) = self.timeout_ms {
+      scanner.set_timeout(Duration::from_millis(timeout_ms as u64));
+    }
     scanner.apply_variables_from_map(&self.variables)?;
     Ok(scanner)
   }
@@ -42,7 +67,16 @@ impl BaseYaraTask {
   pub fn scan_to_data(&self, data: &[u8]) -> Result<Vec<RuleMatchData>> {
     let mut scanner = self.create_scanner()?;
     let results = scanner.scan(data).map_err(scan_error_to_napi)?;
-    Ok(YaraX::extract_scan_data(results, data))
+    Ok(YaraX::extract_scan_data(results))
+  }
+
+  /// Scans a file on the current thread and returns thread-safe results.
+  pub fn scan_file_to_data(&self, file_path: &str) -> Result<Vec<RuleMatchData>> {
+    let mut scanner = self.create_scanner()?;
+    let results = scanner
+      .scan_file(file_path)
+      .map_err(scan_error_to_napi)?;
+    Ok(YaraX::extract_scan_data(results))
   }
 }
 
@@ -56,9 +90,15 @@ pub struct ScanTask {
 
 impl ScanTask {
   /// Creates a new scan task.
-  pub fn new(rules: Arc<Rules>, data: Vec<u8>, variables: Option<VariableMap>) -> Self {
+  pub fn new(
+    rules: Arc<Rules>,
+    data: Vec<u8>,
+    variables: Option<VariableMap>,
+    max_matches_per_pattern: Option<usize>,
+    timeout_ms: Option<u32>,
+  ) -> Self {
     Self {
-      base: BaseYaraTask::new(rules, variables),
+      base: BaseYaraTask::new(rules, variables, max_matches_per_pattern, None, timeout_ms),
       data,
     }
   }
@@ -88,9 +128,22 @@ pub struct ScanFileTask {
 
 impl ScanFileTask {
   /// Creates a new file scan task.
-  pub fn new(rules: Arc<Rules>, file_path: String, variables: Option<VariableMap>) -> Self {
+  pub fn new(
+    rules: Arc<Rules>,
+    file_path: String,
+    variables: Option<VariableMap>,
+    max_matches_per_pattern: Option<usize>,
+    use_mmap: Option<bool>,
+    timeout_ms: Option<u32>,
+  ) -> Self {
     Self {
-      base: BaseYaraTask::new(rules, variables),
+      base: BaseYaraTask::new(
+        rules,
+        variables,
+        max_matches_per_pattern,
+        use_mmap,
+        timeout_ms,
+      ),
       file_path,
     }
   }
@@ -101,9 +154,7 @@ impl Task for ScanFileTask {
   type JsValue = Vec<RuleMatch<'static>>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    let data = std::fs::read(&self.file_path)
-      .map_err(|e| io_error_to_napi(e, &format!("reading file {}", self.file_path)))?;
-    self.base.scan_to_data(&data)
+    self.base.scan_file_to_data(&self.file_path)
   }
 
   fn resolve(&mut self, env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
