@@ -38,7 +38,7 @@ pub fn scan_error_to_napi(error: yara_x::ScanError) -> Error {
     yara_x::ScanError::Timeout => Error::new(Status::Cancelled, "Scan timed out"),
     yara_x::ScanError::OpenError { path, err } => Error::new(
       Status::GenericFailure,
-      format!("Failed to open file '{}': {}", path.display(), err),
+      format!("I/O error (reading file {}): {}", path.display(), err),
     ),
     yara_x::ScanError::MapError { path, err } => Error::new(
       Status::GenericFailure,
