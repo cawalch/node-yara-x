@@ -45,7 +45,7 @@ pub use types::{
 };
 
 // Internal imports
-use compiler::apply_compiler_options;
+use compiler::{add_source_to_compiler, apply_compiler_options};
 use error::io_error_to_napi;
 use napi::Result;
 use napi_derive::napi;
@@ -76,8 +76,9 @@ pub fn validate(
   let mut compiler = Compiler::new();
 
   apply_compiler_options(&mut compiler, options.as_ref(), false)?;
+  let namespace = options.as_ref().and_then(|opts| opts.namespace.as_deref());
 
-  let _ = compiler.add_source(rule_source.as_str());
+  let _ = add_source_to_compiler(&mut compiler, rule_source.as_str(), namespace);
 
   let warnings = get_compiler_warnings(&compiler)?;
   let errors = get_compiler_errors(&compiler)?;
@@ -114,6 +115,7 @@ pub fn create() -> YaraXImpl {
   YaraXImpl {
     rules: Arc::new(Compiler::new().build()),
     source_code: Some(String::new()),
+    rule_sources: Vec::new(),
     warnings: Vec::new(),
     variables: None,
     cached_scanner: RefCell::new(None),

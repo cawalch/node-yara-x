@@ -128,6 +128,33 @@ matches = rules.scan(Buffer.from("test data"), {
 console.log(`Matches with overridden variables: ${matches.length}`);
 ```
 
+## Namespaces
+
+```javascript
+import { compile, create } from "@litko/yara-x";
+
+// Compile a source into a YARA namespace
+const rules = compile(
+  `
+  rule namespaced_rule {
+    strings:
+      $a = "namespace test"
+    condition:
+      $a
+  }
+`,
+  { namespace: "alpha" },
+);
+
+const [match] = rules.scan(Buffer.from("namespace test"));
+console.log(match.namespace); // "alpha"
+
+// Add sources incrementally into separate namespaces
+const scanner = create();
+scanner.addRuleSource('rule shared { strings: $a = "one" condition: $a }', "one");
+scanner.addRuleSource('rule shared { strings: $a = "two" condition: $a }', "two");
+```
+
 ## WASM Compilation
 
 ```javascript
@@ -234,6 +261,9 @@ const rules = compile(
     defineVariables: {
       test_var: "20",
     },
+
+    // Compile these rules into a YARA namespace
+    namespace: "research",
 
     // Enable relaxed regular expression syntax
     relaxedReSyntax: true,

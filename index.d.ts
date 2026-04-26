@@ -114,7 +114,7 @@ export declare class YaraX {
    *
    * Ok(()) on success, or an error if compilation fails
    */
-  addRuleSource(ruleSource: string): void
+  addRuleSource(ruleSource: string, namespace?: string | undefined | null): void
   /**
    * Adds a rule file to the YARA compiler.
    *
@@ -126,7 +126,7 @@ export declare class YaraX {
    *
    * Ok(()) on success, or an error if reading or compilation fails
    */
-  addRuleFile(filePath: string): void
+  addRuleFile(filePath: string, namespace?: string | undefined | null): void
   /**
    * Defines a variable for the YARA compiler.
    *
@@ -225,6 +225,8 @@ export interface CompileResult {
  * module handling, optimization, and feature flags.
  */
 export interface CompilerOptions {
+  /** The namespace where the YARA rules should be compiled. */
+  namespace?: string
   /** Defines global variables for the YARA rules. */
   defineVariables?: object
   /** A list of module names to ignore during compilation. */

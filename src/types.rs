@@ -11,6 +11,15 @@ use std::collections::HashMap;
 /// A map of variable names to their values.
 pub type VariableMap = HashMap<String, String>;
 
+/// A YARA rule source and the namespace it belongs to.
+#[derive(Debug, Clone)]
+pub struct RuleSource {
+  /// The YARA rule source code.
+  pub source: String,
+  /// The namespace for the source. `None` means the default namespace.
+  pub namespace: Option<String>,
+}
+
 /// Represents a match found by a YARA rule pattern.
 ///
 /// Contains information about where the match occurred and what data was matched.
@@ -83,6 +92,8 @@ pub struct RuleMatch<'a> {
 /// module handling, optimization, and feature flags.
 #[napi(object)]
 pub struct CompilerOptions<'a> {
+  /// The namespace where the YARA rules should be compiled.
+  pub namespace: Option<String>,
   /// Defines global variables for the YARA rules.
   pub define_variables: Option<Object<'a>>,
   /// A list of module names to ignore during compilation.
