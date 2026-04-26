@@ -59,6 +59,60 @@ describe("yarax Tests", () => {
     );
   });
 
+  it("should compile rules into a namespace", () => {
+    const rule = `
+      rule namespaced_rule {
+        strings:
+          $a = "namespace test"
+        condition:
+          $a
+      }
+    `;
+
+    const scanner = yarax.compile(rule, { namespace: "alpha" });
+    const matches = scanner.scan(Buffer.from("This is a namespace test"));
+
+    strictEqual(matches.length, 1, "Should have one matching rule");
+    strictEqual(matches[0].ruleIdentifier, "namespaced_rule");
+    strictEqual(matches[0].namespace, "alpha");
+  });
+
+  it("should allow duplicate rule names in different namespaces", () => {
+    const scanner = yarax.create();
+
+    scanner.addRuleSource(
+      `
+        rule shared_name {
+          strings:
+            $a = "alpha value"
+          condition:
+            $a
+        }
+      `,
+      "alpha",
+    );
+
+    scanner.addRuleSource(
+      `
+        rule shared_name {
+          strings:
+            $a = "beta value"
+          condition:
+            $a
+        }
+      `,
+      "beta",
+    );
+
+    const matches = scanner.scan(Buffer.from("alpha value and beta value"));
+
+    strictEqual(matches.length, 2, "Should match both namespaced rules");
+    strictEqual(matches[0].ruleIdentifier, "shared_name");
+    strictEqual(matches[0].namespace, "alpha");
+    strictEqual(matches[1].ruleIdentifier, "shared_name");
+    strictEqual(matches[1].namespace, "beta");
+  });
+
   it("should not have any matches for any rules", () => {
     const rule = `
       rule test_no_match {

@@ -8,7 +8,7 @@
 
 use crate::error::{io_error_to_napi, scan_error_to_napi};
 use crate::scanner::YaraX;
-use crate::types::{RuleMatch, RuleMatchData, VariableMap};
+use crate::types::{RuleMatch, RuleMatchData, RuleSource, VariableMap};
 use crate::variables::VariableHandler;
 use napi::{Error, Result, Status, Task};
 use std::sync::Arc;
@@ -116,6 +116,7 @@ impl Task for ScanFileTask {
 /// This task compiles YARA rules to WebAssembly asynchronously.
 pub struct EmitWasmFileTask {
   pub source_code: Option<String>,
+  pub rule_sources: Vec<RuleSource>,
   pub output_path: String,
 }
 
@@ -131,7 +132,11 @@ impl Task for EmitWasmFileTask {
       )
     })?;
 
-    crate::compiler::compile_source_to_wasm(source, &self.output_path, None)?;
+    if self.rule_sources.is_empty() {
+      crate::compiler::compile_source_to_wasm(source, &self.output_path, None)?;
+    } else {
+      crate::compiler::compile_sources_to_wasm(&self.rule_sources, &self.output_path, None)?;
+    }
     Ok(())
   }
 

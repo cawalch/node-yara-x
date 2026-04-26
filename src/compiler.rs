@@ -4,13 +4,30 @@
 //! including applying compiler options and generating WASM output.
 
 use crate::error::compile_error_to_napi;
-use crate::types::{CompilerOptions, VariableMap};
+use crate::types::{CompilerOptions, RuleSource, VariableMap};
 use crate::variables::VariableHandler;
 use napi::bindgen_prelude::{JsObjectValue, Object};
 use napi::{Error, Result, Status};
 use std::collections::HashMap;
 use std::path::Path;
 use yara_x::Compiler;
+
+/// Adds a source string to the compiler, switching namespaces when requested.
+pub fn add_source_to_compiler(
+  compiler: &mut Compiler<'_>,
+  source: &str,
+  namespace: Option<&str>,
+) -> Result<()> {
+  if let Some(namespace) = namespace {
+    compiler.new_namespace(namespace);
+  }
+
+  compiler
+    .add_source(source)
+    .map_err(|e| compile_error_to_napi(&e))?;
+
+  Ok(())
+}
 
 /// Applies compiler options to a YARA compiler instance.
 ///
@@ -119,13 +136,34 @@ pub fn compile_source_to_wasm(
   output_path: &str,
   options: Option<&CompilerOptions>,
 ) -> Result<()> {
+  let namespace = options.and_then(|opts| opts.namespace.as_deref());
+  compile_sources_to_wasm(
+    &[RuleSource {
+      source: source.to_string(),
+      namespace: namespace.map(str::to_string),
+    }],
+    output_path,
+    options,
+  )
+}
+
+/// Compiles YARA rule sources to a WASM file.
+pub fn compile_sources_to_wasm(
+  sources: &[RuleSource],
+  output_path: &str,
+  options: Option<&CompilerOptions>,
+) -> Result<()> {
   let mut compiler = Compiler::new();
 
   apply_compiler_options(&mut compiler, options, false)?;
 
-  compiler
-    .add_source(source)
-    .map_err(|e| compile_error_to_napi(&e))?;
+  for rule_source in sources {
+    add_source_to_compiler(
+      &mut compiler,
+      &rule_source.source,
+      rule_source.namespace.as_deref(),
+    )?;
+  }
 
   compiler
     .emit_wasm_file(Path::new(output_path))
