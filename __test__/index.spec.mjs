@@ -748,6 +748,35 @@ describe("yarax Tests", () => {
     strictEqual(matches.length, 1, "Should have one matching rule");
   });
 
+  it("should accept typed JavaScript variables", () => {
+    const rule = `
+      rule test_typed_variables {
+        condition:
+          string_var contains "test" and
+          int_var > 10 and
+          float_var > 1.5 and
+          bool_var
+      }
+    `;
+
+    const scanner = yarax.compile(rule, {
+      defineVariables: {
+        string_var: "this is a test string",
+        int_var: 20,
+        float_var: 2.5,
+        bool_var: true,
+      },
+    });
+
+    const matches = scanner.scan(Buffer.from(""), {
+      int_var: 30,
+      float_var: 3.5,
+      bool_var: true,
+    });
+
+    strictEqual(matches.length, 1, "Should match with typed JS variables");
+  });
+
   it("should validate YARA rules without executing them", () => {
     const validRule = `
     rule valid_rule {
@@ -863,8 +892,8 @@ describe("yarax Tests", () => {
 
     strictEqual(
       matches[0].meta.is_dangerous,
-      "unknown",
-      "Boolean metadata is returned as 'unknown'",
+      true,
+      "Boolean metadata should be preserved",
     );
   });
 
@@ -1426,6 +1455,26 @@ rule test_1 {
           `Should find exactly 5 matches, found ${matchCount}`,
         );
       });
+
+      it("should work with async scanning", async () => {
+        const rule = `
+					rule test_async_max_matches {
+						strings:
+							$a = "test"
+						condition:
+							$a
+					}
+				`;
+
+        const scanner = yarax.compile(rule);
+        scanner.setMaxMatchesPerPattern(4);
+
+        const matches = await scanner.scanAsync(
+          Buffer.from("test test test test test test"),
+        );
+
+        strictEqual(matches[0].matches.length, 4);
+      });
     });
 
     describe("use_mmap", () => {
@@ -1459,6 +1508,36 @@ rule test_1 {
           matchesWithoutMmap[0].matches.length,
           "Match count should be the same with or without mmap",
         );
+      });
+
+      it("should apply file options to async file scanning", async () => {
+        const rule = `
+					rule test_async_file_options {
+						strings:
+							$a = "data"
+						condition:
+							$a
+					}
+				`;
+
+        const testFile = join(__tempDir, "async-file-options-test.txt");
+        writeFileSync(testFile, "data data data data data data");
+
+        const scanner = yarax.compile(rule);
+        scanner.setMaxMatchesPerPattern(2);
+        scanner.setUseMmap(false);
+
+        const matches = await scanner.scanFileAsync(testFile);
+
+        strictEqual(matches[0].matches.length, 2);
+      });
+    });
+
+    describe("timeout", () => {
+      it("should expose a scan timeout setter", () => {
+        const scanner = yarax.compile(`rule test_timeout_api { condition: true }`);
+        strictEqual(typeof scanner.setTimeout, "function");
+        scanner.setTimeout(1000);
       });
     });
 

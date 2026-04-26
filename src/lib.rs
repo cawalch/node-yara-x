@@ -121,6 +121,7 @@ pub fn create() -> YaraXImpl {
     cached_scanner: RefCell::new(None),
     max_matches_per_pattern: None,
     use_mmap: None,
+    timeout_ms: None,
   }
 }
 

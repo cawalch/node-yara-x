@@ -5,7 +5,9 @@
 
 use crate::compiler::{add_source_to_compiler, apply_compiler_options};
 use crate::error::{io_error_to_napi, scan_error_to_napi};
-use crate::types::{CompilerOptions, CompilerWarning, MatchData, RuleMatch, RuleSource};
+use crate::types::{
+  CompilerOptions, CompilerWarning, MatchData, RuleMatch, RuleSource, VariableValue,
+};
 use crate::variables::{convert_variables_to_map, get_compiler_warnings, VariableHandler};
 use napi::bindgen_prelude::{AsyncTask, Buffer, JsObjectValue, Object};
 use napi::{Env, Error, Result, Status};
@@ -14,6 +16,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use yara_x::{Compiler, Rules, Scanner};
 
 /// The main YARA-X scanner struct.
@@ -31,13 +34,15 @@ pub struct YaraX {
   /// Any warnings generated during the compilation process.
   pub(crate) warnings: Vec<CompilerWarning>,
   /// The variables defined for the YARA rules.
-  pub(crate) variables: Option<HashMap<String, String>>,
+  pub(crate) variables: Option<HashMap<String, VariableValue>>,
   /// Cached scanner for reuse (thread-local, not Send/Sync safe)
   pub(crate) cached_scanner: RefCell<Option<Scanner<'static>>>,
   /// Maximum number of matches per pattern
   pub(crate) max_matches_per_pattern: Option<usize>,
   /// Whether to use memory-mapped files for scanning
   pub(crate) use_mmap: Option<bool>,
+  /// Scan timeout in milliseconds
+  pub(crate) timeout_ms: Option<u32>,
 }
 
 impl YaraX {
@@ -78,6 +83,7 @@ impl YaraX {
       cached_scanner: RefCell::new(None),
       max_matches_per_pattern: None,
       use_mmap: None,
+      timeout_ms: None,
     })
   }
 
@@ -109,6 +115,9 @@ impl YaraX {
           let string_val = s.to_string();
           meta_obj.set_named_property(&key_string, string_val)?;
         }
+        yara_x::MetaValue::Bool(b) => {
+          meta_obj.set_named_property(&key_string, b)?;
+        }
         _ => {
           meta_obj.set_named_property(&key_string, "unknown")?;
         }
@@ -123,12 +132,10 @@ impl YaraX {
   /// # Arguments
   ///
   /// * `rule` - The YARA rule
-  /// * `data` - The scanned data
-  ///
   /// # Returns
   ///
   /// A vector of MatchData structs
-  fn extract_matches(rule: &yara_x::Rule, data: &[u8]) -> Vec<MatchData> {
+  fn extract_matches(rule: &yara_x::Rule) -> Vec<MatchData> {
     let total_matches: usize = rule.patterns().map(|pattern| pattern.matches().len()).sum();
 
     let mut matches_vec = Vec::with_capacity(total_matches);
@@ -146,16 +153,14 @@ impl YaraX {
         let offset = range.start;
         let length = range.end - range.start;
 
-        if let Some(matched_bytes) = data.get(offset..offset + length) {
-          let matched_data = String::from_utf8_lossy(matched_bytes).into_owned();
+        let matched_data = String::from_utf8_lossy(match_item.data()).into_owned();
 
-          matches_vec.push(MatchData {
-            offset: offset as u32,
-            length: length as u32,
-            data: matched_data,
-            identifier: pattern_id.clone(),
-          });
-        }
+        matches_vec.push(MatchData {
+          offset: offset as u32,
+          length: length as u32,
+          data: matched_data,
+          identifier: pattern_id.clone(),
+        });
       }
     }
 
@@ -192,6 +197,10 @@ impl YaraX {
         scanner.use_mmap(use_mmap);
       }
 
+      if let Some(timeout_ms) = self.timeout_ms {
+        scanner.set_timeout(Duration::from_millis(timeout_ms as u64));
+      }
+
       *cached = Some(scanner);
     }
 
@@ -216,7 +225,6 @@ impl YaraX {
   /// A vector of RuleMatch structs
   pub fn process_scan_results<'a>(
     results: yara_x::ScanResults,
-    data: &[u8],
     env: napi::Env,
   ) -> Result<Vec<RuleMatch<'a>>> {
     let matching_rules = results.matching_rules();
@@ -229,7 +237,7 @@ impl YaraX {
     let mut rule_matches = Vec::with_capacity(rule_count);
 
     for rule in matching_rules {
-      let matches_vec = Self::extract_matches(&rule, data);
+      let matches_vec = Self::extract_matches(&rule);
 
       let tags: Vec<String> = rule
         .tags()
@@ -253,7 +261,6 @@ impl YaraX {
   /// Extracts scan results into thread-safe `RuleMatchData` structs.
   pub fn extract_scan_data(
     results: yara_x::ScanResults,
-    data: &[u8],
   ) -> Vec<crate::types::RuleMatchData> {
     use crate::types::{MetaValueData, RuleMatchData};
 
@@ -267,7 +274,7 @@ impl YaraX {
     let mut rule_matches = Vec::with_capacity(rule_count);
 
     for rule in matching_rules {
-      let matches_vec = Self::extract_matches(&rule, data);
+      let matches_vec = Self::extract_matches(&rule);
 
       let tags: Vec<String> = rule
         .tags()
@@ -366,6 +373,13 @@ impl YaraX {
     self.invalidate_scanner_cache();
   }
 
+  /// Sets the scan timeout in milliseconds.
+  #[napi]
+  pub fn set_timeout(&mut self, timeout_ms: u32) {
+    self.timeout_ms = Some(timeout_ms);
+    self.invalidate_scanner_cache();
+  }
+
   /// Scans the provided data using the compiled YARA rules.
   ///
   /// # Arguments
@@ -377,7 +391,7 @@ impl YaraX {
   /// # Returns
   ///
   /// A vector of matching rules
-  #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number>")]
+  #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean>")]
   pub fn scan<'a>(
     &self,
     env: Env,
@@ -389,12 +403,16 @@ impl YaraX {
     scanner.apply_variables_from_map(&self.variables)?;
     scanner.apply_variables_from_object(&variables)?;
 
-    let results = scanner.scan(data.as_ref()).map_err(|e| {
-      self.invalidate_scanner_cache();
-      scan_error_to_napi(e)
-    })?;
+    let results = match scanner.scan(data.as_ref()) {
+      Ok(r) => r,
+      Err(e) => {
+        drop(scanner);
+        self.invalidate_scanner_cache();
+        return Err(scan_error_to_napi(e));
+      }
+    };
 
-    Self::process_scan_results(results, data.as_ref(), env)
+    Self::process_scan_results(results, env)
   }
 
   /// Scans a file using the compiled YARA rules.
@@ -408,27 +426,28 @@ impl YaraX {
   /// # Returns
   ///
   /// A vector of matching rules
-  #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number>")]
+  #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean>")]
   pub fn scan_file<'a>(
     &self,
     env: Env,
     file_path: String,
     variables: Option<Object>,
   ) -> Result<Vec<RuleMatch<'a>>> {
-    let file_data = std::fs::read(&file_path)
-      .map_err(|e| io_error_to_napi(e, &format!("reading file {file_path}")))?;
-
     let mut scanner = self.get_or_create_scanner()?;
 
     scanner.apply_variables_from_map(&self.variables)?;
     scanner.apply_variables_from_object(&variables)?;
 
-    let results = scanner.scan(&file_data).map_err(|e| {
-      self.invalidate_scanner_cache();
-      scan_error_to_napi(e)
-    })?;
+    let results = match scanner.scan_file(Path::new(&file_path)) {
+      Ok(r) => r,
+      Err(e) => {
+        drop(scanner);
+        self.invalidate_scanner_cache();
+        return Err(scan_error_to_napi(e));
+      }
+    };
 
-    Self::process_scan_results(results, &file_data, env)
+    Self::process_scan_results(results, env)
   }
 
   /// Emits a WASM file from the compiled YARA rules.
@@ -479,6 +498,8 @@ impl YaraX {
       self.rules.clone(),
       data_vec,
       vars_map,
+      self.max_matches_per_pattern,
+      self.timeout_ms,
     )))
   }
 
@@ -504,6 +525,9 @@ impl YaraX {
       self.rules.clone(),
       file_path,
       vars_map,
+      self.max_matches_per_pattern,
+      self.use_mmap,
+      self.timeout_ms,
     )))
   }
 
@@ -557,7 +581,7 @@ impl YaraX {
 
     if let Some(vars) = &self.variables {
       for (key, value) in vars {
-        compiler.apply_variable(key, value)?;
+        compiler.apply_variable_value(key, value)?;
       }
     }
 
@@ -622,10 +646,10 @@ impl YaraX {
     compiler.apply_variable(&name, &value)?;
 
     if let Some(vars) = &mut self.variables {
-      vars.insert(name, value);
+      vars.insert(name, VariableValue::String(value));
     } else {
       let mut vars = HashMap::new();
-      vars.insert(name, value);
+      vars.insert(name, VariableValue::String(value));
       self.variables = Some(vars);
     }
 

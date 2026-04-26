@@ -4,9 +4,9 @@
 //! and scanner, with automatic type inference for boolean, integer, and string values.
 
 use crate::error::to_napi_err;
-use crate::types::{CompilerError, CompilerWarning, VariableMap};
-use napi::bindgen_prelude::{JsObjectValue, Object};
-use napi::Result;
+use crate::types::{CompilerError, CompilerWarning, VariableMap, VariableValue};
+use napi::bindgen_prelude::{JsObjectValue, Object, Unknown};
+use napi::{Error, Result, Status, ValueType};
 use std::collections::HashMap;
 use std::fmt::Display;
 use yara_x::{Compiler, Scanner};
@@ -26,6 +26,25 @@ pub trait VariableHandler {
   /// * `value` - The variable value as a string
   fn apply_variable(&mut self, name: &str, value: &str) -> Result<()>;
 
+  /// Applies a typed variable to the handler.
+  fn apply_variable_value(&mut self, name: &str, value: &VariableValue) -> Result<()> {
+    match value {
+      VariableValue::Bool(value) => self.apply_bool_variable(name, *value),
+      VariableValue::Integer(value) => self.apply_integer_variable(name, *value),
+      VariableValue::Float(value) => self.apply_float_variable(name, *value),
+      VariableValue::String(value) => self.apply_variable(name, value),
+    }
+  }
+
+  /// Applies a boolean variable to the handler.
+  fn apply_bool_variable(&mut self, name: &str, value: bool) -> Result<()>;
+
+  /// Applies an integer variable to the handler.
+  fn apply_integer_variable(&mut self, name: &str, value: i64) -> Result<()>;
+
+  /// Applies a floating-point variable to the handler.
+  fn apply_float_variable(&mut self, name: &str, value: f64) -> Result<()>;
+
   /// Applies variables from a map to the handler.
   ///
   /// # Arguments
@@ -34,7 +53,7 @@ pub trait VariableHandler {
   fn apply_variables_from_map(&mut self, variables: &Option<VariableMap>) -> Result<()> {
     if let Some(vars) = variables {
       for (key, value) in vars {
-        self.apply_variable(key, value)?;
+        self.apply_variable_value(key, value)?;
       }
     }
     Ok(())
@@ -50,9 +69,8 @@ pub trait VariableHandler {
       let property_names = Object::keys(vars)?;
 
       for key in &property_names {
-        if let Ok(value) = vars.get_named_property::<String>(key) {
-          self.apply_variable(key, &value)?;
-        }
+        let value = get_variable_value(vars, key)?;
+        self.apply_variable_value(key, &value)?;
       }
     }
     Ok(())
@@ -79,6 +97,18 @@ impl<'a> VariableHandler for Scanner<'a> {
 
     result.map(|_| ()).map_err(to_napi_err)
   }
+
+  fn apply_bool_variable(&mut self, name: &str, value: bool) -> Result<()> {
+    self.set_global(name, value).map(|_| ()).map_err(to_napi_err)
+  }
+
+  fn apply_integer_variable(&mut self, name: &str, value: i64) -> Result<()> {
+    self.set_global(name, value).map(|_| ()).map_err(to_napi_err)
+  }
+
+  fn apply_float_variable(&mut self, name: &str, value: f64) -> Result<()> {
+    self.set_global(name, value).map(|_| ()).map_err(to_napi_err)
+  }
 }
 
 impl<'a> VariableHandler for Compiler<'a> {
@@ -100,6 +130,40 @@ impl<'a> VariableHandler for Compiler<'a> {
     };
 
     result.map(|_| ()).map_err(to_napi_err)
+  }
+
+  fn apply_bool_variable(&mut self, name: &str, value: bool) -> Result<()> {
+    self.define_global(name, value).map(|_| ()).map_err(to_napi_err)
+  }
+
+  fn apply_integer_variable(&mut self, name: &str, value: i64) -> Result<()> {
+    self.define_global(name, value).map(|_| ()).map_err(to_napi_err)
+  }
+
+  fn apply_float_variable(&mut self, name: &str, value: f64) -> Result<()> {
+    self.define_global(name, value).map(|_| ()).map_err(to_napi_err)
+  }
+}
+
+/// Reads a JavaScript value and converts it into a YARA global variable.
+pub fn get_variable_value(vars: &Object, key: &str) -> Result<VariableValue> {
+  let value = vars.get_named_property::<Unknown>(key)?;
+
+  match value.get_type()? {
+    ValueType::Boolean => Ok(VariableValue::Bool(unsafe { value.cast::<bool>()? })),
+    ValueType::Number => {
+      let value = unsafe { value.cast::<f64>()? };
+      if value.fract() == 0.0 && value >= i64::MIN as f64 && value <= i64::MAX as f64 {
+        Ok(VariableValue::Integer(value as i64))
+      } else {
+        Ok(VariableValue::Float(value))
+      }
+    }
+    ValueType::String => Ok(VariableValue::String(unsafe { value.cast::<String>()? })),
+    value_type => Err(Error::new(
+      Status::InvalidArg,
+      format!("Unsupported variable type for `{key}`: {value_type}"),
+    )),
   }
 }
 
@@ -128,22 +192,12 @@ pub fn convert_variables_to_map(variables: Option<Object>) -> Result<Option<Vari
 
   let mut map = HashMap::with_capacity(property_names.len());
 
-  let mut valid_entries = 0;
   for key in &property_names {
-    if let Ok(value) = vars.get_named_property::<String>(key) {
-      map.insert(key.clone(), value);
-      valid_entries += 1;
-    }
+    let value = get_variable_value(&vars, key)?;
+    map.insert(key.clone(), value);
   }
 
-  if valid_entries == 0 {
-    Ok(None)
-  } else {
-    if valid_entries < property_names.len() / 2 {
-      map.shrink_to_fit();
-    }
-    Ok(Some(map))
-  }
+  Ok(Some(map))
 }
 
 /// Converts a list of compiler messages to a vector of output types.

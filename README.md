@@ -105,13 +105,14 @@ const rules = compile(
   `
   rule variable_rule {
     condition:
-      string_var contains "secret" and int_var > 10
+      string_var contains "secret" and int_var > 10 and bool_var
   }
 `,
   {
     defineVariables: {
       string_var: "this is a secret message",
-      int_var: "20",
+      int_var: 20,
+      bool_var: true,
     },
   },
 );
@@ -123,7 +124,8 @@ console.log(`Matches with default variables: ${matches.length}`);
 // Override variables at scan time
 matches = rules.scan(Buffer.from("test data"), {
   string_var: "no secrets here",
-  int_var: 5, // Note: variables at scan time can be numbers as well
+  int_var: 5,
+  bool_var: false,
 });
 console.log(`Matches with overridden variables: ${matches.length}`);
 ```
@@ -479,6 +481,28 @@ rules.setUseMmap(false);
 const matches = rules.scanFile("./sample.bin");
 ```
 
+### Scan Timeout
+
+Set a timeout for scan operations to prevent runaway scans:
+
+```javascript
+import { compile } from "@litko/yara-x";
+
+const rules = compile(`
+  rule slow_rule {
+    strings:
+      $a = /(.+)*\1/
+    condition:
+      $a
+  }
+`);
+
+// Set a 5-second timeout
+rules.setTimeout(5000);
+
+const matches = rules.scan(Buffer.from("test data"));
+```
+
 ## Performance Benchmarks
 
 `node-yara-x` delivers exceptional performance through intelligent scanner caching and optimized Rust implementation.
@@ -530,8 +554,8 @@ Methodology: Statistical analysis across multiple iterations with percentile rep
 ### YaraX Methods
 
 - `getWarnings()` - Get compiler warnings.
-- `scan(data: Buffer, variables?: Record<string, string | number>)` - Scan a buffer.
-- `scanFile(filePath: string, variables?: Record<string, string | number>)` - Scan a file.
+- `scan(data: Buffer, variables?: Record<string, string | number | boolean>)` - Scan a buffer.
+- `scanFile(filePath: string, variables?: Record<string, string | number | boolean>)` - Scan a file.
 - `scanAsync(data: Buffer, variables?: Record<string, object | undefined | null>)` - Scan a buffer asynchronously.
 - `scanFileAsync(filePath: string, variables?: Record<string, object | undefined | null>)` - Scan a file asynchronously.
 - `emitWasmFile(filePath: string)` - Emit compiled rules to WASM file synchronously.
@@ -541,6 +565,7 @@ Methodology: Statistical analysis across multiple iterations with percentile rep
 - `defineVariable(name: string, value: string)` - Define a variable for the YARA compiler.
 - `setMaxMatchesPerPattern(maxMatches: number)` - **(v1.7.0+)** Set the maximum number of matches per pattern.
 - `setUseMmap(useMmap: boolean)` - **(v1.6.0+)** Enable or disable memory-mapped files for scanning.
+- `setTimeout(timeoutMs: number)` - **(v1.7.0+)** Set the scan timeout in milliseconds.
 
 ### CompilerOptions
 

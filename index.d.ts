@@ -25,6 +25,8 @@ export declare class YaraX {
    * * `use_mmap` - Whether to use memory-mapped files
    */
   setUseMmap(useMmap: boolean): void
+  /** Sets the scan timeout in milliseconds. */
+  setTimeout(timeoutMs: number): void
   /**
    * Scans the provided data using the compiled YARA rules.
    *
@@ -38,7 +40,7 @@ export declare class YaraX {
    *
    * A vector of matching rules
    */
-  scan(data: Buffer, variables?: Record<string, string | number>): Array<RuleMatch>
+  scan(data: Buffer, variables?: Record<string, string | number | boolean>): Array<RuleMatch>
   /**
    * Scans a file using the compiled YARA rules.
    *
@@ -52,7 +54,7 @@ export declare class YaraX {
    *
    * A vector of matching rules
    */
-  scanFile(filePath: string, variables?: Record<string, string | number>): Array<RuleMatch>
+  scanFile(filePath: string, variables?: Record<string, string | number | boolean>): Array<RuleMatch>
   /**
    * Emits a WASM file from the compiled YARA rules.
    *
@@ -351,6 +353,8 @@ export interface ScanOptions {
   maxMatchesPerPattern?: number
   /** Whether to use memory-mapped files for scanning. Disabling this is safer but slower. */
   useMmap?: boolean
+  /** Scan timeout in milliseconds. */
+  timeoutMs?: number
 }
 
 /**
