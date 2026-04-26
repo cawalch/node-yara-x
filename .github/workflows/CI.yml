@@ -24,29 +24,81 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      build_matrix: ${{ steps.set-matrix.outputs.build_matrix }}
+      test_matrix: ${{ steps.set-matrix.outputs.test_matrix }}
+    steps:
+      - id: set-matrix
+        run: |
+          # Define x64 targets (Linux, Windows, macOS)
+          X64_TARGETS='[
+            {
+              "host": "macos-latest",
+              "target": "x86_64-apple-darwin",
+              "build": "pnpm build --target x86_64-apple-darwin"
+            },
+            {
+              "host": "ubuntu-latest",
+              "target": "x86_64-unknown-linux-gnu",
+              "build": "pnpm build --target x86_64-unknown-linux-gnu --use-napi-cross"
+            },
+            {
+              "host": "windows-latest",
+              "target": "x86_64-pc-windows-msvc",
+              "build": "pnpm build --target x86_64-pc-windows-msvc"
+            }
+          ]'
+
+          # Define ARM/Cross targets
+          ARM_TARGETS='[
+            {
+              "host": "macos-latest",
+              "target": "aarch64-apple-darwin",
+              "build": "pnpm build --target aarch64-apple-darwin"
+            },
+            {
+              "host": "windows-latest",
+              "target": "aarch64-pc-windows-msvc",
+              "build": "pnpm build --target aarch64-pc-windows-msvc"
+            },
+            {
+              "host": "ubuntu-latest",
+              "target": "aarch64-unknown-linux-gnu",
+              "build": "pnpm build --target aarch64-unknown-linux-gnu --use-napi-cross"
+            }
+          ]'
+
+          # Test matrix for x64
+          TEST_X64='[
+            { "host": "macos-latest", "target": "x86_64-apple-darwin", "architecture": "x64" },
+            { "host": "ubuntu-latest", "target": "x86_64-unknown-linux-gnu", "architecture": "x64" },
+            { "host": "windows-latest", "target": "x86_64-pc-windows-msvc", "architecture": "x64" }
+          ]'
+
+          # Test matrix for ARM
+          TEST_ARM='[
+            { "host": "macos-latest", "target": "aarch64-apple-darwin", "architecture": "arm64" }
+          ]'
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # PR: Only x64
+            BUILD_MATRIX=$(echo "$X64_TARGETS" | jq -c .)
+            TEST_MATRIX=$(echo "$TEST_X64" | jq -c .)
+          else
+            # Push/Release: All targets
+            BUILD_MATRIX=$(jq -n -c --argjson x64 "$X64_TARGETS" --argjson arm "$ARM_TARGETS" '$x64 + $arm')
+            TEST_MATRIX=$(jq -n -c --argjson x64 "$TEST_X64" --argjson arm "$TEST_ARM" '$x64 + $arm')
+          fi
+
+          echo "build_matrix={\"settings\":$BUILD_MATRIX}" >> $GITHUB_OUTPUT
+          echo "test_matrix={\"settings\":$TEST_MATRIX,\"node\":[\"20\",\"22\"]}" >> $GITHUB_OUTPUT
   build:
+    needs: setup
     strategy:
       fail-fast: false
-      matrix:
-        settings:
-          - host: macos-latest
-            target: x86_64-apple-darwin
-            build: pnpm build --target x86_64-apple-darwin
-          - host: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            build: pnpm build --target x86_64-unknown-linux-gnu --use-napi-cross
-          - host: macos-latest
-            target: aarch64-apple-darwin
-            build: pnpm build --target aarch64-apple-darwin
-          - host: windows-latest
-            target: x86_64-pc-windows-msvc
-            build: pnpm build --target x86_64-pc-windows-msvc
-          - host: windows-latest
-            target: aarch64-pc-windows-msvc
-            build: pnpm build --target aarch64-pc-windows-msvc
-          - host: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            build: pnpm build --target aarch64-unknown-linux-gnu --use-napi-cross
+      matrix: ${{ fromJson(needs.setup.outputs.build_matrix) }}
     name: stable - ${{ matrix.settings.target }} - node@20
     runs-on: ${{ matrix.settings.host }}
     steps:
@@ -91,23 +143,7 @@ jobs:
       - build
     strategy:
       fail-fast: false
-      matrix:
-        settings:
-          - host: macos-latest
-            target: x86_64-apple-darwin
-            architecture: x64
-          - host: macos-latest
-            target: aarch64-apple-darwin
-            architecture: arm64
-          - host: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            architecture: x64
-          - host: windows-latest
-            target: x86_64-pc-windows-msvc
-            architecture: x64
-        node:
-          - "20"
-          - "22"
+      matrix: ${{ fromJson(needs.setup.outputs.test_matrix) }}
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
