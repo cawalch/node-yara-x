@@ -15,6 +15,22 @@
 npm install @litko/yara-x
 ```
 
+### Release Integrity
+
+Releases are built on GitHub-hosted runners and published to npm with Trusted Publishing and provenance. Native `.node` artifacts are also covered by GitHub artifact attestations.
+
+Verify npm registry signatures and provenance attestations after install:
+
+```bash
+npm audit signatures
+```
+
+Verify downloaded native artifacts against GitHub attestations:
+
+```bash
+gh attestation verify path/to/yara-x.*.node -R cawalch/node-yara-x
+```
+
 ### Basic Example
 
 ```javascript
