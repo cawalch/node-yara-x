@@ -9,6 +9,8 @@ name: Dependency Review
       - .github/workflows/**
 permissions:
   contents: read
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 jobs:
   dependency-review:
     name: Dependency Review
