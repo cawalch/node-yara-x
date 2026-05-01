@@ -1,0 +1,61 @@
+name: Create Release
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+permissions:
+  contents: write
+"on":
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: Publish with npm dist-tag next
+        required: true
+        default: false
+        type: boolean
+      notes:
+        description: Optional release notes
+        required: false
+        type: string
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+jobs:
+  create-release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    if: github.repository == 'cawalch/node-yara-x'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: main
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ github.event.inputs.prerelease || 'false' }}
+          RELEASE_NOTES: ${{ github.event.inputs.notes }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v${version}"
+
+          if git rev-parse --verify --quiet "refs/tags/${tag}" >/dev/null; then
+            echo "Tag ${tag} already exists."
+            exit 1
+          fi
+
+          args=(
+            "$tag"
+            --target main
+            --title "$tag"
+          )
+
+          if [[ "$PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+
+          if [[ -n "$RELEASE_NOTES" ]]; then
+            args+=(--notes "$RELEASE_NOTES")
+          else
+            args+=(--generate-notes)
+          fi
+
+          gh release create "${args[@]}"

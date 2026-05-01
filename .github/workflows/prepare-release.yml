@@ -1,0 +1,116 @@
+name: Prepare Release
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+permissions:
+  contents: write
+  pull-requests: write
+"on":
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Version bump type
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+      force:
+        description: Open a release PR even if there are no commits since the current version tag
+        required: true
+        default: false
+        type: boolean
+  schedule:
+    - cron: "17 14 1 * *"
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+jobs:
+  prepare-release:
+    name: Prepare release PR
+    runs-on: ubuntu-latest
+    if: github.repository == 'cawalch/node-yara-x'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: main
+      - name: setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+      - name: Setup node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22.14.0
+          cache: pnpm
+      - name: Decide whether a release PR is needed
+        id: release
+        env:
+          FORCE_RELEASE: ${{ github.event.inputs.force || 'false' }}
+        run: |
+          current_version=$(node -p "require('./package.json').version")
+          current_tag="v${current_version}"
+
+          if ! git rev-parse --verify --quiet "refs/tags/${current_tag}" >/dev/null; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=Version ${current_version} is already prepared and has no matching tag." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$FORCE_RELEASE" != "true" ]] && ! git log --format=%H "${current_tag}..HEAD" | grep -q .; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=No commits since ${current_tag}." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+      - name: Install dependencies
+        if: steps.release.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile
+      - name: Prepare version bump
+        if: steps.release.outputs.skip != 'true'
+        id: bump
+        env:
+          RELEASE_TYPE: ${{ github.event.inputs.release_type || 'patch' }}
+        run: |
+          next_version=$(node scripts/prepare-release.mjs "$RELEASE_TYPE")
+          echo "version=${next_version}" >> "$GITHUB_OUTPUT"
+      - name: Refresh lockfile
+        if: steps.release.outputs.skip != 'true'
+        run: pnpm install --lockfile-only --no-frozen-lockfile
+      - name: Verify release prep
+        if: steps.release.outputs.skip != 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          cargo metadata --locked --format-version 1 >/dev/null
+          pnpm test
+      - name: Open release pull request
+        if: steps.release.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXT_VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          branch="release/v${NEXT_VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -B "$branch"
+          git add package.json pnpm-lock.yaml npm/*/package.json
+          git commit -m "chore: prepare v${NEXT_VERSION} release"
+          git push --force-with-lease --set-upstream origin "$branch"
+
+          existing_pr=$(gh pr list --head "$branch" --base main --json number --jq '.[0].number // empty')
+          if [[ -n "$existing_pr" ]]; then
+            gh pr edit "$existing_pr" \
+              --title "chore: prepare v${NEXT_VERSION} release" \
+              --body "Prepares v${NEXT_VERSION} for release. This PR only bumps package versions and refreshes the pnpm lockfile. Publishing remains gated by creating the GitHub release after merge."
+          else
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "chore: prepare v${NEXT_VERSION} release" \
+              --body "Prepares v${NEXT_VERSION} for release. This PR only bumps package versions and refreshes the pnpm lockfile. Publishing remains gated by creating the GitHub release after merge."
+          fi
+      - name: Summarize skipped release
+        if: steps.release.outputs.skip == 'true'
+        run: echo "${{ steps.release.outputs.reason }}"

@@ -4,6 +4,7 @@ env:
   APP_NAME: yara-x
   MACOSX_DEPLOYMENT_TARGET: "10.13"
   CARGO_INCREMENTAL: "1"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 permissions:
   contents: read
 "on":
