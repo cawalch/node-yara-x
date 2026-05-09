@@ -28,7 +28,10 @@ jobs:
           # Iterate through all commits in the PR
           for commit in $(git rev-list origin/${{ github.base_ref }}..HEAD); do
             echo "Verifying commit $commit..."
-            gitsign verify "$commit"
+            gitsign verify \
+              --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/prepare-release.yml@refs/heads/main" \
+              --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+              "$commit"
             
             if [ $? -ne 0 ]; then
               echo "::error::Commit $commit is not signed with a valid Sigstore certificate."
