@@ -4,6 +4,7 @@ env:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
 "on":
   workflow_dispatch:
     inputs:
@@ -83,14 +84,9 @@ jobs:
           pnpm install --frozen-lockfile
           cargo metadata --locked --format-version 1 >/dev/null
           pnpm test
-      - name: Import GPG key
+      - name: Setup Keyless Signing (Gitsign)
         if: steps.release.outputs.skip != 'true'
-        uses: crazy-max/ghaction-import-gpg@v6
-        with:
-          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-          passphrase: ${{ secrets.GPG_PASSPHRASE }}
-          git_user_signingkey: true
-          git_commit_gpgsign: true
+        uses: chainguard-dev/actions/setup-gitsign@e15d862e315265ec7a421ab2ce8ec82bdcb312d8 # v1.5.0 pinned to SHA
       - name: Open release pull request
         if: steps.release.outputs.skip != 'true'
         env:
@@ -98,6 +94,9 @@ jobs:
           NEXT_VERSION: ${{ steps.bump.outputs.version }}
         run: |
           branch="release/v${NEXT_VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git checkout -B "$branch"
           git add package.json pnpm-lock.yaml npm/*/package.json
