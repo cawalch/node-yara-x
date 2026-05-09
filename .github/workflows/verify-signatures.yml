@@ -1,0 +1,49 @@
+name: Verify Sigstore Signatures
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  verify:
+    name: Verify Commits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Keyless Signing (Gitsign)
+        uses: chainguard-dev/actions/setup-gitsign@d67380d0b02c09412f8e17f660ec48870bd89e6e # v1.6.9
+
+      - name: Verify PR Commits
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "Verifying commits against base branch: origin/${{ github.base_ref }}"
+          
+          # Fetch the base branch so we have it locally
+          git fetch origin "${{ github.base_ref }}"
+          
+          # Iterate through all commits in the PR
+          for commit in $(git rev-list origin/${{ github.base_ref }}..HEAD); do
+            echo "Verifying commit $commit..."
+            gitsign verify "$commit"
+            
+            if [ $? -ne 0 ]; then
+              echo "::error::Commit $commit is not signed with a valid Sigstore certificate."
+              exit 1
+            fi
+          done
+          
+          echo "All commits successfully verified against the Sigstore transparency log!"
+
+      - name: Verify Push Commits
+        if: github.event_name == 'push'
+        run: |
+          # For a direct push, verify the latest commit
+          echo "Verifying latest commit: $GITHUB_SHA"
+          gitsign verify "$GITHUB_SHA"
