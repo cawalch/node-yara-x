@@ -83,6 +83,14 @@ jobs:
           pnpm install --frozen-lockfile
           cargo metadata --locked --format-version 1 >/dev/null
           pnpm test
+      - name: Import GPG key
+        if: steps.release.outputs.skip != 'true'
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          git_user_signingkey: true
+          git_commit_gpgsign: true
       - name: Open release pull request
         if: steps.release.outputs.skip != 'true'
         env:
@@ -91,12 +99,9 @@ jobs:
         run: |
           branch="release/v${NEXT_VERSION}"
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git checkout -B "$branch"
           git add package.json pnpm-lock.yaml npm/*/package.json
-          git commit -m "chore: prepare v${NEXT_VERSION} release"
+          git commit -S -m "chore: prepare v${NEXT_VERSION} release"
           git push --force-with-lease --set-upstream origin "$branch"
 
           existing_pr=$(gh pr list --head "$branch" --base main --json number --jq '.[0].number // empty')
