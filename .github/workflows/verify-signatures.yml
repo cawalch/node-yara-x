@@ -4,9 +4,6 @@ on:
   pull_request:
     branches:
       - main
-  push:
-    branches:
-      - main
 
 jobs:
   verify:
@@ -21,7 +18,6 @@ jobs:
         uses: chainguard-dev/actions/setup-gitsign@d67380d0b02c09412f8e17f660ec48870bd89e6e # v1.6.9
 
       - name: Verify PR Commits
-        if: github.event_name == 'pull_request'
         run: |
           echo "Verifying commits against base branch: origin/${{ github.base_ref }}"
           
@@ -40,10 +36,3 @@ jobs:
           done
           
           echo "All commits successfully verified against the Sigstore transparency log!"
-
-      - name: Verify Push Commits
-        if: github.event_name == 'push'
-        run: |
-          # For a direct push, verify the latest commit
-          echo "Verifying latest commit: $GITHUB_SHA"
-          gitsign verify "$GITHUB_SHA"
