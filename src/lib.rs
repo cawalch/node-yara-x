@@ -122,6 +122,7 @@ pub fn create() -> YaraXImpl {
     max_matches_per_pattern: None,
     use_mmap: None,
     timeout_ms: None,
+    match_context_size: None,
   }
 }
 
