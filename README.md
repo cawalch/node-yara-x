@@ -519,6 +519,41 @@ rules.setTimeout(5000);
 const matches = rules.scan(Buffer.from("test data"));
 ```
 
+### Match Context
+
+You can retrieve surrounding bytes around a match by setting the match context size. This is useful for analyzing matches within their broader context.
+
+```javascript
+import { compile } from "@litko/yara-x";
+
+const rules = compile(`
+  rule context_rule {
+    strings:
+      $a = "secret"
+    condition:
+      $a
+  }
+`);
+
+// Request 10 bytes of context before and after the match
+rules.setMatchContextSize(10);
+
+const data = Buffer.from("this is a top secret document containing sensitive info");
+const matches = rules.scan(data);
+
+if (matches.length > 0) {
+  matches[0].matches.forEach(match => {
+    console.log(`Match: ${match.data}`);
+    // "secret"
+    
+    console.log(`Context: ${match.contextData}`); 
+    // " a top secret document"
+    
+    console.log(`Match offset within context: ${match.contextMatchOffset}`);
+  });
+}
+```
+
 ## Performance Benchmarks
 
 `node-yara-x` delivers exceptional performance through intelligent scanner caching and optimized Rust implementation.
@@ -579,9 +614,10 @@ Methodology: Statistical analysis across multiple iterations with percentile rep
 - `addRuleSource(rules: string)` - Add rules from a string to an existing scanner.
 - `addRuleFile(filePath: string)` - Add rules from a file to an existing scanner.
 - `defineVariable(name: string, value: string)` - Define a variable for the YARA compiler.
-- `setMaxMatchesPerPattern(maxMatches: number)` - **(v1.7.0+)** Set the maximum number of matches per pattern.
-- `setUseMmap(useMmap: boolean)` - **(v1.6.0+)** Enable or disable memory-mapped files for scanning.
-- `setTimeout(timeoutMs: number)` - **(v1.7.0+)** Set the scan timeout in milliseconds.
+- `setMaxMatchesPerPattern(maxMatches: number)` - Set the maximum number of matches per pattern.
+- `setUseMmap(useMmap: boolean)` - Enable or disable memory-mapped files for scanning.
+- `setTimeout(timeoutMs: number)` - Set the scan timeout in milliseconds.
+- `setMatchContextSize(size: number)` - Set the number of context bytes to retrieve around the matched string.
 
 ### CompilerOptions
 

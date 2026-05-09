@@ -25,6 +25,7 @@ pub struct BaseYaraTask {
   max_matches_per_pattern: Option<usize>,
   use_mmap: Option<bool>,
   timeout_ms: Option<u32>,
+  match_context_size: Option<usize>,
 }
 
 impl BaseYaraTask {
@@ -35,6 +36,7 @@ impl BaseYaraTask {
     max_matches_per_pattern: Option<usize>,
     use_mmap: Option<bool>,
     timeout_ms: Option<u32>,
+    match_context_size: Option<usize>,
   ) -> Self {
     Self {
       rules,
@@ -42,6 +44,7 @@ impl BaseYaraTask {
       max_matches_per_pattern,
       use_mmap,
       timeout_ms,
+      match_context_size,
     }
   }
 
@@ -56,6 +59,9 @@ impl BaseYaraTask {
     }
     if let Some(timeout_ms) = self.timeout_ms {
       scanner.set_timeout(Duration::from_millis(timeout_ms as u64));
+    }
+    if let Some(match_context_size) = self.match_context_size {
+      scanner.match_context_size(match_context_size);
     }
     scanner.apply_variables_from_map(&self.variables)?;
     Ok(scanner)
@@ -96,9 +102,10 @@ impl ScanTask {
     variables: Option<VariableMap>,
     max_matches_per_pattern: Option<usize>,
     timeout_ms: Option<u32>,
+    match_context_size: Option<usize>,
   ) -> Self {
     Self {
-      base: BaseYaraTask::new(rules, variables, max_matches_per_pattern, None, timeout_ms),
+      base: BaseYaraTask::new(rules, variables, max_matches_per_pattern, None, timeout_ms, match_context_size),
       data,
     }
   }
@@ -135,6 +142,7 @@ impl ScanFileTask {
     max_matches_per_pattern: Option<usize>,
     use_mmap: Option<bool>,
     timeout_ms: Option<u32>,
+    match_context_size: Option<usize>,
   ) -> Self {
     Self {
       base: BaseYaraTask::new(
@@ -143,6 +151,7 @@ impl ScanFileTask {
         max_matches_per_pattern,
         use_mmap,
         timeout_ms,
+        match_context_size,
       ),
       file_path,
     }

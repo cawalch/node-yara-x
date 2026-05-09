@@ -43,6 +43,8 @@ pub struct YaraX {
   pub(crate) use_mmap: Option<bool>,
   /// Scan timeout in milliseconds
   pub(crate) timeout_ms: Option<u32>,
+  /// Match context size
+  pub(crate) match_context_size: Option<usize>,
 }
 
 impl YaraX {
@@ -84,6 +86,7 @@ impl YaraX {
       max_matches_per_pattern: None,
       use_mmap: None,
       timeout_ms: None,
+      match_context_size: None,
     })
   }
 
@@ -155,11 +158,28 @@ impl YaraX {
 
         let matched_data = String::from_utf8_lossy(match_item.data()).into_owned();
 
+        let (context_data_slice, context_range) = match_item.data_with_context();
+        let has_context = context_data_slice.len() > match_item.data().len();
+        
+        let context_data = if has_context {
+            Some(String::from_utf8_lossy(context_data_slice).into_owned())
+        } else {
+            None
+        };
+        
+        let context_match_offset = if has_context {
+            Some(context_range.start as u32)
+        } else {
+            None
+        };
+
         matches_vec.push(MatchData {
           offset: offset as u32,
           length: length as u32,
           data: matched_data,
           identifier: pattern_id.clone(),
+          context_data,
+          context_match_offset,
         });
       }
     }
@@ -199,6 +219,10 @@ impl YaraX {
 
       if let Some(timeout_ms) = self.timeout_ms {
         scanner.set_timeout(Duration::from_millis(timeout_ms as u64));
+      }
+
+      if let Some(match_context_size) = self.match_context_size {
+        scanner.match_context_size(match_context_size);
       }
 
       *cached = Some(scanner);
@@ -380,6 +404,13 @@ impl YaraX {
     self.invalidate_scanner_cache();
   }
 
+  /// Sets the match context size.
+  #[napi]
+  pub fn set_match_context_size(&mut self, size: u32) {
+    self.match_context_size = Some(size as usize);
+    self.invalidate_scanner_cache();
+  }
+
   /// Scans the provided data using the compiled YARA rules.
   ///
   /// # Arguments
@@ -500,6 +531,7 @@ impl YaraX {
       vars_map,
       self.max_matches_per_pattern,
       self.timeout_ms,
+      self.match_context_size,
     )))
   }
 
@@ -528,6 +560,7 @@ impl YaraX {
       self.max_matches_per_pattern,
       self.use_mmap,
       self.timeout_ms,
+      self.match_context_size,
     )))
   }
 
