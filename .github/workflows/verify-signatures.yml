@@ -1,5 +1,9 @@
 name: Verify Sigstore Signatures
 
+# This workflow only verifies commits on automated release/* branches.
+# Those branches are created exclusively by prepare-release.yml, which signs
+# commits with Gitsign (Sigstore keyless). Regular developer PRs are not
+# Gitsign-signed and must not be checked here.
 on:
   pull_request:
     branches:
@@ -8,6 +12,8 @@ on:
 jobs:
   verify:
     name: Verify Commits
+    # Only run on release/* branches — the only branches with Gitsign-signed commits.
+    if: startsWith(github.head_ref, 'release/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -21,10 +27,10 @@ jobs:
       - name: Verify PR Commits
         run: |
           echo "Verifying commits against base branch: origin/${{ github.base_ref }}"
-          
+
           # Fetch the base branch so we have it locally
           git fetch origin "${{ github.base_ref }}"
-          
+
           # Iterate through all commits in the PR
           for commit in $(git rev-list origin/${{ github.base_ref }}..HEAD); do
             echo "Verifying commit $commit..."
@@ -32,11 +38,11 @@ jobs:
               --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/prepare-release.yml@refs/heads/main" \
               --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
               "$commit"
-            
+
             if [ $? -ne 0 ]; then
               echo "::error::Commit $commit is not signed with a valid Sigstore certificate."
               exit 1
             fi
           done
-          
+
           echo "All commits successfully verified against the Sigstore transparency log!"
