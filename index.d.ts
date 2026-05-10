@@ -27,6 +27,8 @@ export declare class YaraX {
   setUseMmap(useMmap: boolean): void
   /** Sets the scan timeout in milliseconds. */
   setTimeout(timeoutMs: number): void
+  /** Sets the match context size. */
+  setMatchContextSize(size: number): void
   /**
    * Scans the provided data using the compiled YARA rules.
    *
@@ -115,8 +117,36 @@ export declare class YaraX {
    * # Returns
    *
    * Ok(()) on success, or an error if compilation fails
+   *
+   * # Performance Note
+   *
+   * This method recompiles all rules (existing + new) on each call, resulting
+   * in O(n) time per call and O(n²) total for n incremental additions.
+   * For better performance with many rules, use `compile()` with all sources
+   * at once, or use `add_rule_sources()` for batch addition.
    */
   addRuleSource(ruleSource: string, namespace?: string | undefined | null): void
+  /**
+   * Adds multiple rule sources to the YARA compiler in a single compilation pass.
+   *
+   * This is more efficient than calling `add_rule_source()` multiple times,
+   * as it compiles all sources in a single pass instead of recompiling
+   * existing rules for each addition.
+   *
+   * # Arguments
+   *
+   * * `rule_sources` - Vector of rule sources to add
+   *
+   * # Returns
+   *
+   * Ok(()) on success, or an error if compilation fails
+   *
+   * # Performance
+   *
+   * O(n + m) where n = existing rules, m = new rules (single compilation pass).
+   * Compared to calling `add_rule_source()` m times: O(n × m + m²).
+   */
+  addRuleSources(ruleSources: Array<RuleSource>): void
   /**
    * Adds a rule file to the YARA compiler.
    *
@@ -322,6 +352,10 @@ export interface MatchData {
   data: string
   /** The identifier of the pattern that matched. */
   identifier: string
+  /** The context around the matched data, if match_context_size is set. */
+  contextData?: string
+  /** The start offset of the actual match within the context data. */
+  contextMatchOffset?: number
 }
 
 /**
@@ -342,6 +376,14 @@ export interface RuleMatch {
   matches: Array<MatchData>
 }
 
+/** A YARA rule source and the namespace it belongs to. */
+export interface RuleSource {
+  /** The YARA rule source code. */
+  source: string
+  /** The namespace for the source. `None` means the default namespace. */
+  namespace?: string
+}
+
 /**
  * Options for configuring scanning operations.
  *
@@ -355,6 +397,8 @@ export interface ScanOptions {
   useMmap?: boolean
   /** Scan timeout in milliseconds. */
   timeoutMs?: number
+  /** Optional number of bytes to include before and after the match. */
+  matchContextSize?: number
 }
 
 /**

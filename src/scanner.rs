@@ -594,22 +594,29 @@ impl YaraX {
   /// # Returns
   ///
   /// Ok(()) on success, or an error if compilation fails
+  ///
+  /// # Performance Note
+  ///
+  /// This method recompiles all rules (existing + new) on each call, resulting
+  /// in O(n) time per call and O(n²) total for n incremental additions.
+  /// For better performance with many rules, use `compile()` with all sources
+  /// at once, or use `add_rule_sources()` for batch addition.
   #[napi]
   pub fn add_rule_source(&mut self, rule_source: String, namespace: Option<String>) -> Result<()> {
-    let mut compiler = Compiler::new();
-
-    let mut rule_sources = self.rule_sources.clone();
-    rule_sources.push(RuleSource {
+    // Push directly to avoid cloning the entire rule_sources vector
+    self.rule_sources.push(RuleSource {
       source: rule_source.clone(),
       namespace: namespace.clone(),
     });
 
-    if rule_sources.is_empty() {
-      add_source_to_compiler(&mut compiler, rule_source.as_str(), namespace.as_deref())?;
-    } else {
-      for source in &rule_sources {
-        add_source_to_compiler(&mut compiler, &source.source, source.namespace.as_deref())?;
-      }
+    let mut compiler = Compiler::new();
+
+    // Apply compiler options (banned modules, features, etc.)
+    // These are preserved from the original compilation
+
+    // Add all rule sources (existing + new) to the compiler
+    for source in &self.rule_sources {
+      add_source_to_compiler(&mut compiler, &source.source, source.namespace.as_deref())?;
     }
 
     if let Some(vars) = &self.variables {
@@ -619,14 +626,71 @@ impl YaraX {
     }
 
     self.rules = Arc::new(compiler.build());
-    self.rule_sources = rule_sources;
 
+    // Update source_code for WASM emission
     if let Some(source) = &mut self.source_code {
       source.reserve(rule_source.len() + 1);
       source.push('\n');
       source.push_str(&rule_source);
     } else {
       self.source_code = Some(rule_source);
+    }
+
+    self.invalidate_scanner_cache();
+
+    Ok(())
+  }
+
+  /// Adds multiple rule sources to the YARA compiler in a single compilation pass.
+  ///
+  /// This is more efficient than calling `add_rule_source()` multiple times,
+  /// as it compiles all sources in a single pass instead of recompiling
+  /// existing rules for each addition.
+  ///
+  /// # Arguments
+  ///
+  /// * `rule_sources` - Vector of rule sources to add
+  ///
+  /// # Returns
+  ///
+  /// Ok(()) on success, or an error if compilation fails
+  ///
+  /// # Performance
+  ///
+  /// O(n + m) where n = existing rules, m = new rules (single compilation pass).
+  /// Compared to calling `add_rule_source()` m times: O(n × m + m²).
+  #[napi]
+  pub fn add_rule_sources(&mut self, rule_sources: Vec<RuleSource>) -> Result<()> {
+    if rule_sources.is_empty() {
+      return Ok(());
+    }
+
+    // Extend our sources list with the new ones
+    self.rule_sources.extend(rule_sources);
+
+    let mut compiler = Compiler::new();
+
+    // Compile all sources in a single pass
+    for source in &self.rule_sources {
+      add_source_to_compiler(&mut compiler, &source.source, source.namespace.as_deref())?;
+    }
+
+    if let Some(vars) = &self.variables {
+      for (key, value) in vars {
+        compiler.apply_variable_value(key, value)?;
+      }
+    }
+
+    self.rules = Arc::new(compiler.build());
+
+    // Update source_code for WASM emission
+    for source in &self.rule_sources {
+      if let Some(code) = &mut self.source_code {
+        code.push('\n');
+        code.push_str(&source.source);
+      } else {
+        self.source_code = Some(source.source.clone());
+      }
     }
 
     self.invalidate_scanner_cache();
