@@ -17,7 +17,18 @@ permissions:
       - "**/*.gitignore"
       - .editorconfig
       - docs/**
-  pull_request: null
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "package.json"
+      - "index.js"
+      - "index.d.ts"
+      - "build.rs"
+      - ".github/workflows/CI.yml"
   release:
     types: [published]
 concurrency:
