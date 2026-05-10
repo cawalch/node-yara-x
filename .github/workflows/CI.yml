@@ -225,13 +225,30 @@ jobs:
       - name: List packages
         run: ls -R ./npm
         shell: bash
-      - name: Publish
+      - name: Publish platform sub-packages
+        # Publish each platform-specific sub-package from ./npm/*
+        # Uses OIDC trusted publishing (no NPM_TOKEN needed).
+        # --ignore-scripts prevents prepublishOnly from re-running napi prepublish
+        # which would attempt to re-create the GitHub release and fail with 422.
+        run: |
+          TAG_ARGS=""
+          if [[ "${{ github.event.release.prerelease }}" == "true" ]]; then
+            TAG_ARGS="--tag next"
+          fi
+          for pkg_dir in ./npm/*/; do
+            echo "Publishing $pkg_dir"
+            npm publish "$pkg_dir" $TAG_ARGS --access public --provenance --ignore-scripts
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish main package
+        # Publish root package last (--ignore-scripts skips prepublishOnly / napi prepublish
+        # which would try to create a GitHub release that already exists).
         run: |
           if [[ "${{ github.event.release.prerelease }}" == "true" ]]; then
-            npm publish --tag next --access public
+            npm publish --tag next --access public --provenance --ignore-scripts
           else
-            npm publish --access public
+            npm publish --access public --provenance --ignore-scripts
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_PROVENANCE: "true"
