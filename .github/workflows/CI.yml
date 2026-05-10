@@ -195,6 +195,7 @@ jobs:
     name: Publish
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
+    environment: main
     permissions:
       contents: write
       id-token: write
@@ -212,6 +213,7 @@ jobs:
         with:
           node-version: 22.14.0
           cache: pnpm
+          registry-url: https://registry.npmjs.org
       - name: Update npm
         run: npm install --global npm@^11.5.1
       - name: Print publish toolchain
