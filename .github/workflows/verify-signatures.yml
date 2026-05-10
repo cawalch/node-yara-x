@@ -4,6 +4,9 @@ name: Verify Sigstore Signatures
 # Those branches are created exclusively by prepare-release.yml, which signs
 # commits with Gitsign (Sigstore keyless). Regular developer PRs are not
 # Gitsign-signed and must not be checked here.
+permissions:
+  contents: read
+
 on:
   pull_request:
     branches:
