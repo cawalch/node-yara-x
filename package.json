@@ -21,7 +21,7 @@
     "@emnapi/runtime": "^1.10.0",
     "@napi-rs/cli": "^3.6.2",
     "@napi-rs/wasm-runtime": "^1.1.4",
-    "@types/node": "^25.6.0"
+    "@types/node": "^25.6.2"
   },
   "engines": {
     "node": ">= 20"
