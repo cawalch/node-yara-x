@@ -104,7 +104,7 @@ jobs:
           fi
 
           echo "build_matrix={\"settings\":$BUILD_MATRIX}" >> $GITHUB_OUTPUT
-          echo "test_matrix={\"settings\":$TEST_MATRIX,\"node\":[\"20\",\"22\"]}" >> $GITHUB_OUTPUT
+          echo "test_matrix={\"settings\":$TEST_MATRIX,\"node\":[\"22\"]}" >> $GITHUB_OUTPUT
   build:
     needs: setup
     permissions:
@@ -114,7 +114,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup.outputs.build_matrix) }}
-    name: stable - ${{ matrix.settings.target }} - node@20
+    name: stable - ${{ matrix.settings.target }} - node@22
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6

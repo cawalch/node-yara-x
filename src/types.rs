@@ -25,6 +25,7 @@ pub enum VariableValue {
 }
 
 /// A YARA rule source and the namespace it belongs to.
+#[napi(object)]
 #[derive(Debug, Clone)]
 pub struct RuleSource {
   /// The YARA rule source code.
