@@ -188,6 +188,7 @@ jobs:
     name: Publish
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
+    environment: npm-publish
     permissions:
       contents: write
       id-token: write
