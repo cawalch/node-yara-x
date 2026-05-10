@@ -142,7 +142,9 @@ jobs:
             ~/.napi-rs
             .cargo-cache
             target/
-          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
+          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'build.rs', 'src/**') }}
+          restore-keys: |
+            ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Verify Cargo lockfile
@@ -199,7 +201,6 @@ jobs:
     name: Publish
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
-    environment: npm-publish
     permissions:
       contents: write
       id-token: write

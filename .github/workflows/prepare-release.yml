@@ -43,6 +43,8 @@ jobs:
         with:
           node-version: 22.14.0
           cache: pnpm
+      - name: Ensure cache directory exists
+        run: mkdir -p $(pnpm store path --silent)
       - name: Decide whether a release PR is needed
         id: release
         env:
