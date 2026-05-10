@@ -3,7 +3,7 @@ env:
   DEBUG: napi:*
   APP_NAME: yara-x
   MACOSX_DEPLOYMENT_TARGET: "10.13"
-  CARGO_INCREMENTAL: "1"
+  CARGO_INCREMENTAL: "0"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 permissions:
   contents: read
@@ -133,18 +133,12 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.settings.target }}
       - name: Cache cargo
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: Swatinem/rust-cache@400e7407cfd7a091e5fbb6afec01ec146c432b7c # v2.7.7
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
+          shared-key: ${{ matrix.settings.target }}-${{ matrix.settings.host }}
+          cache-directories: |
             ~/.napi-rs
             .cargo-cache
-            target/
-          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'build.rs', 'src/**') }}
-          restore-keys: |
-            ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Verify Cargo lockfile
