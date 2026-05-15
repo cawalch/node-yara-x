@@ -8,8 +8,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # Enable napi4 and async features
-napi = { version = "3.8.6", default-features = false, features = ["napi4", "async"] }
-napi-derive = "3.5.5"
+napi = { version = "3.9.0", default-features = false, features = ["napi4", "async"] }
+napi-derive = "3.5.6"
 yara-x = "1.16.0"
 
 [build-dependencies]
