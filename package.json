@@ -21,7 +21,7 @@
     "@emnapi/runtime": "^1.10.0",
     "@napi-rs/cli": "^3.6.2",
     "@napi-rs/wasm-runtime": "^1.1.4",
-    "@types/node": "^25.6.2"
+    "@types/node": "^25.8.0"
   },
   "engines": {
     "node": ">= 20"
@@ -65,11 +65,11 @@
     "rust"
   ],
   "optionalDependencies": {
-    "@litko/yara-x-darwin-arm64": "0.5.1",
-    "@litko/yara-x-darwin-x64": "0.5.1",
-    "@litko/yara-x-linux-arm64-gnu": "0.5.1",
-    "@litko/yara-x-linux-x64-gnu": "0.5.1",
-    "@litko/yara-x-win32-arm64-msvc": "0.5.1",
-    "@litko/yara-x-win32-x64-msvc": "0.5.1"
+    "@litko/yara-x-darwin-arm64": "0.5.2",
+    "@litko/yara-x-darwin-x64": "0.5.2",
+    "@litko/yara-x-linux-arm64-gnu": "0.5.2",
+    "@litko/yara-x-linux-x64-gnu": "0.5.2",
+    "@litko/yara-x-win32-arm64-msvc": "0.5.2",
+    "@litko/yara-x-win32-x64-msvc": "0.5.2"
   }
 }

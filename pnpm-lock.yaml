@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  js-yaml@>=4.0.0 <4.1.1: '>=4.1.1'
+
 importers:
 
   .:
@@ -16,32 +19,32 @@ importers:
         version: 1.10.0
       '@napi-rs/cli':
         specifier: ^3.6.2
-        version: 3.6.2(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.6.2)
+        version: 3.6.2(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.8.0)
       '@napi-rs/wasm-runtime':
         specifier: ^1.1.4
         version: 1.1.4(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)
       '@types/node':
-        specifier: ^25.6.2
-        version: 25.6.2
+        specifier: ^25.8.0
+        version: 25.8.0
     optionalDependencies:
       '@litko/yara-x-darwin-arm64':
-        specifier: 0.5.1
-        version: 0.5.1
+        specifier: 0.5.2
+        version: 0.5.2
       '@litko/yara-x-darwin-x64':
-        specifier: 0.5.1
-        version: 0.5.1
+        specifier: 0.5.2
+        version: 0.5.2
       '@litko/yara-x-linux-arm64-gnu':
-        specifier: 0.5.1
-        version: 0.5.1
+        specifier: 0.5.2
+        version: 0.5.2
       '@litko/yara-x-linux-x64-gnu':
-        specifier: 0.5.1
-        version: 0.5.1
+        specifier: 0.5.2
+        version: 0.5.2
       '@litko/yara-x-win32-arm64-msvc':
-        specifier: 0.5.1
-        version: 0.5.1
+        specifier: 0.5.2
+        version: 0.5.2
       '@litko/yara-x-win32-x64-msvc':
-        specifier: 0.5.1
-        version: 0.5.1
+        specifier: 0.5.2
+        version: 0.5.2
 
 packages:
 
@@ -188,38 +191,38 @@ packages:
       '@types/node':
         optional: true
 
-  '@litko/yara-x-darwin-arm64@0.5.1':
-    resolution: {integrity: sha512-Kr3uYMgJq1kRVAxrAh0PhqbN7972lxsKTb9naNKyhgLRyQykYvbKkFJx5ykjZnDsBCriTCDlaHzBj1FVJHQE9g==}
+  '@litko/yara-x-darwin-arm64@0.5.2':
+    resolution: {integrity: sha512-OYKL3q22NVP+PB+nFuQDoJMdjxwhh5JTzIu+oD0HZL807WRvqaA3UFKc5d/m/wgKBNpH4JSTo1ruKRm8ZBdARA==}
     engines: {node: '>= 20'}
     cpu: [arm64]
     os: [darwin]
 
-  '@litko/yara-x-darwin-x64@0.5.1':
-    resolution: {integrity: sha512-23OK2FNK1Pu6oAhKj5MYRuBfi7Z36yqp05SUKACD/BTT/pbHDrWxfpf6VsvEG4Jz2GmTFmsMleNpNabFLDG+KQ==}
+  '@litko/yara-x-darwin-x64@0.5.2':
+    resolution: {integrity: sha512-UKp8q+EY+ZyZl4w3K+JWYaoAoycmfELdGzV5H/uAe2zUwb/xSZVLoH+/WI32YLcZj9yygc+KIITLCbbl7dW7OQ==}
     engines: {node: '>= 20'}
     cpu: [x64]
     os: [darwin]
 
-  '@litko/yara-x-linux-arm64-gnu@0.5.1':
-    resolution: {integrity: sha512-kF9Obc6a8pKuJO7sSGuEKvcS/POb7E/FMrl7p0hMr6xgCYCX4qXFXdiAVu/WEt6cjEugRp7KSRD4dla6lB1nsw==}
+  '@litko/yara-x-linux-arm64-gnu@0.5.2':
+    resolution: {integrity: sha512-IcsDM4HRRuPK2G5Qv2tuMXJsaCeLKxLrgadBYwsNV3UfqZ79dxpXCymHe1FviG3aWOXxveGfTJfBHktl9KEiyQ==}
     engines: {node: '>= 20'}
     cpu: [arm64]
     os: [linux]
 
-  '@litko/yara-x-linux-x64-gnu@0.5.1':
-    resolution: {integrity: sha512-H7DEQCXDOwYlKZUC4StvoTuM6DxqrtuSo6kidTcZlOiLT2Nfjmbrm0vuqRQt25XKui+cNmOw0RZKtl/HyFByGg==}
+  '@litko/yara-x-linux-x64-gnu@0.5.2':
+    resolution: {integrity: sha512-pmr67yMwjSRx3q7+GdS7m8UlZux3R4Cj63ttL2iJQAnLfmSVHFibgERPDm39m512DWXN6bd3axq2rtT1ptO1KQ==}
     engines: {node: '>= 20'}
     cpu: [x64]
     os: [linux]
 
-  '@litko/yara-x-win32-arm64-msvc@0.5.1':
-    resolution: {integrity: sha512-sLXsyObxaBu2WFXPFRck66BVPuuzxZDurYHqULV+qGIsf9KSoXlxWZ2JhhMidutJMbA1WCHSYywDH/RFbfB9GQ==}
+  '@litko/yara-x-win32-arm64-msvc@0.5.2':
+    resolution: {integrity: sha512-0UV8sqI3MPkF16fR9eGZbtN0wJExIny4Iww/pjx11cAvenD9CVGWRVXjc7XhSkph81CBbzgZ8b6dn4Ba5E/FpA==}
     engines: {node: '>= 20'}
     cpu: [arm64]
     os: [win32]
 
-  '@litko/yara-x-win32-x64-msvc@0.5.1':
-    resolution: {integrity: sha512-0OIzJKnSB29kNxtVphdjI607cJ8ZmPiczZ+ze93kSxWgvJpso14Hi3iWy7N6jSgcaT9PE5xkPvrL2rPuTOKkrQ==}
+  '@litko/yara-x-win32-x64-msvc@0.5.2':
+    resolution: {integrity: sha512-oh/NrufjDjiVaCvj9VeD9GCa+6uYMHeXcrtf7fQ4kNgC53lxqK6/w8dNJJmwkh92Gc+hYwYq5Z/0fQ+fhTmuUg==}
     engines: {node: '>= 20'}
     cpu: [x64]
     os: [win32]
@@ -615,8 +618,8 @@ packages:
   '@tybys/wasm-util@0.10.1':
     resolution: {integrity: sha512-9tTaPJLSiejZKx+Bmog4uSubteqTvFrVrURwkmHixBo0G4seD0zUxp98E1DzUBJxLQ3NPwXrGKDiVjwx/DpPsg==}
 
-  '@types/node@25.6.2':
-    resolution: {integrity: sha512-sokuT28dxf9JT5Kady1fsXOvI4HVpjZa95NKT5y9PNTIrs2AsobR4GFAA90ZG8M+nxVRLysCXsVj6eGC7Vbrlw==}
+  '@types/node@25.8.0':
+    resolution: {integrity: sha512-TCFSk8IZh+iLX1xtksoBVtdmgL+1IX0fC9BeU4QqFSuNdN/K+HUlhqOzEmSYYpZUVsLYcPqc9KX+60iDuninSQ==}
 
   argparse@2.0.1:
     resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
@@ -675,8 +678,8 @@ packages:
     resolution: {integrity: sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw==}
     engines: {node: '>=0.10.0'}
 
-  js-yaml@4.1.0:
-    resolution: {integrity: sha512-wpxZs9NoxZaJESJGIZTyDEaYpl0FKSA+FB9aJiyemKhMwkxQg63h4T1KJgUGHpTqPDNRcmmYLugrRjJlBtWvRA==}
+  js-yaml@4.1.1:
+    resolution: {integrity: sha512-qQKT4zQxXl8lLwBtHMWwaTcGfFOZviOJet3Oy/xmGk2gZH677CJM9EvtfdSkgWcATZhj/55JZ0rmy3myCT5lsA==}
     hasBin: true
 
   json-with-bigint@3.5.8:
@@ -710,8 +713,8 @@ packages:
   typanion@3.14.0:
     resolution: {integrity: sha512-ZW/lVMRabETuYCd9O9ZvMhAh8GslSqaUjxmK/JLPCh6l73CvLBiuXswj/+7LdnWOgYsQ130FqLzFz5aGT4I3Ug==}
 
-  undici-types@7.19.2:
-    resolution: {integrity: sha512-qYVnV5OEm2AW8cJMCpdV20CDyaN3g0AjDlOGf1OW4iaDEx8MwdtChUp4zu4H0VP3nDRF/8RKWH+IPp9uW0YGZg==}
+  undici-types@7.24.6:
+    resolution: {integrity: sha512-WRNW+sJgj5OBN4/0JpHFqtqzhpbnV0GuB+OozA9gCL7a993SmU+1JBZCzLNxYsbMfIeDL+lTsphD5jN5N+n0zg==}
 
   universal-user-agent@7.0.3:
     resolution: {integrity: sha512-TmnEAEAsBJVZM/AADELsK76llnwcf9vMKuPz8JflO1frO8Lchitr0fNaN9d+Ap0BjKtqWqd/J17qeDnXh8CL2A==}
@@ -733,144 +736,144 @@ snapshots:
 
   '@inquirer/ansi@2.0.5': {}
 
-  '@inquirer/checkbox@5.1.4(@types/node@25.6.2)':
+  '@inquirer/checkbox@5.1.4(@types/node@25.8.0)':
     dependencies:
       '@inquirer/ansi': 2.0.5
-      '@inquirer/core': 11.1.9(@types/node@25.6.2)
+      '@inquirer/core': 11.1.9(@types/node@25.8.0)
       '@inquirer/figures': 2.0.5
-      '@inquirer/type': 4.0.5(@types/node@25.6.2)
+      '@inquirer/type': 4.0.5(@types/node@25.8.0)
     optionalDependencies:
-      '@types/node': 25.6.2
+      '@types/node': 25.8.0
 
-  '@inquirer/confirm@6.0.12(@types/node@25.6.2)':
+  '@inquirer/confirm@6.0.12(@types/node@25.8.0)':
     dependencies:
-      '@inquirer/core': 11.1.9(@types/node@25.6.2)
-      '@inquirer/type': 4.0.5(@types/node@25.6.2)
+      '@inquirer/core': 11.1.9(@types/node@25.8.0)
+      '@inquirer/type': 4.0.5(@types/node@25.8.0)
     optionalDependencies:
-      '@types/node': 25.6.2
+      '@types/node': 25.8.0
 
-  '@inquirer/core@11.1.9(@types/node@25.6.2)':
+  '@inquirer/core@11.1.9(@types/node@25.8.0)':
     dependencies:
       '@inquirer/ansi': 2.0.5
       '@inquirer/figures': 2.0.5
-      '@inquirer/type': 4.0.5(@types/node@25.6.2)
+      '@inquirer/type': 4.0.5(@types/node@25.8.0)
       cli-width: 4.1.0
       fast-wrap-ansi: 0.2.0
       mute-stream: 3.0.0
       signal-exit: 4.1.0
     optionalDependencies:
-      '@types/node': 25.6.2
+      '@types/node': 25.8.0
 
-  '@inquirer/editor@5.1.1(@types/node@25.6.2)':
+  '@inquirer/editor@5.1.1(@types/node@25.8.0)':
     dependencies:
-      '@inquirer/core': 11.1.9(@types/node@25.6.2)
-      '@inquirer/external-editor': 3.0.0(@types/node@25.6.2)
-      '@inquirer/type': 4.0.5(@types/node@25.6.2)
+      '@inquirer/core': 11.1.9(@types/node@25.8.0)
+      '@inquirer/external-editor': 3.0.0(@types/node@25.8.0)
+      '@inquirer/type': 4.0.5(@types/node@25.8.0)
     optionalDependencies:
-      '@types/node': 25.6.2
+      '@types/node': 25.8.0
 
-  '@inquirer/expand@5.0.13(@types/node@25.6.2)':
+  '@inquirer/expand@5.0.13(@types/node@25.8.0)':
     dependencies:
-      '@inquirer/core': 11.1.9(@types/node@25.6.2)
-      '@inquirer/type': 4.0.5(@types/node@25.6.2)
+      '@inquirer/core': 11.1.9(@types/node@25.8.0)
+      '@inquirer/type': 4.0.5(@types/node@25.8.0)
     optionalDependencies:
-      '@types/node': 25.6.2
+      '@types/node': 25.8.0
 
-  '@inquirer/external-editor@3.0.0(@types/node@25.6.2)':
+  '@inquirer/external-editor@3.0.0(@types/node@25.8.0)':
     dependencies:
       chardet: 2.1.1
       iconv-lite: 0.7.2
     optionalDependencies:
-      '@types/node': 25.6.2
+      '@types/node': 25.8.0
 
   '@inquirer/figures@2.0.5': {}
 
-  '@inquirer/input@5.0.12(@types/node@25.6.2)':
+  '@inquirer/input@5.0.12(@types/node@25.8.0)':
     dependencies:
-      '@inquirer/core': 11.1.9(@types/node@25.6.2)
-      '@inquirer/type': 4.0.5(@types/node@25.6.2)
+      '@inquirer/core': 11.1.9(@types/node@25.8.0)
+      '@inquirer/type': 4.0.5(@types/node@25.8.0)
     optionalDependencies:
-      '@types/node': 25.6.2
+      '@types/node': 25.8.0
 
-  '@inquirer/number@4.0.12(@types/node@25.6.2)':
+  '@inquirer/number@4.0.12(@types/node@25.8.0)':
     dependencies:
-      '@inquirer/core': 11.1.9(@types/node@25.6.2)
-      '@inquirer/type': 4.0.5(@types/node@25.6.2)
+      '@inquirer/core': 11.1.9(@types/node@25.8.0)
+      '@inquirer/type': 4.0.5(@types/node@25.8.0)
     optionalDependencies:
-      '@types/node': 25.6.2
+      '@types/node': 25.8.0
 
-  '@inquirer/password@5.0.12(@types/node@25.6.2)':
-    dependencies:
-      '@inquirer/ansi': 2.0.5
-      '@inquirer/core': 11.1.9(@types/node@25.6.2)
-      '@inquirer/type': 4.0.5(@types/node@25.6.2)
-    optionalDependencies:
-      '@types/node': 25.6.2
-
-  '@inquirer/prompts@8.4.2(@types/node@25.6.2)':
-    dependencies:
-      '@inquirer/checkbox': 5.1.4(@types/node@25.6.2)
-      '@inquirer/confirm': 6.0.12(@types/node@25.6.2)
-      '@inquirer/editor': 5.1.1(@types/node@25.6.2)
-      '@inquirer/expand': 5.0.13(@types/node@25.6.2)
-      '@inquirer/input': 5.0.12(@types/node@25.6.2)
-      '@inquirer/number': 4.0.12(@types/node@25.6.2)
-      '@inquirer/password': 5.0.12(@types/node@25.6.2)
-      '@inquirer/rawlist': 5.2.8(@types/node@25.6.2)
-      '@inquirer/search': 4.1.8(@types/node@25.6.2)
-      '@inquirer/select': 5.1.4(@types/node@25.6.2)
-    optionalDependencies:
-      '@types/node': 25.6.2
-
-  '@inquirer/rawlist@5.2.8(@types/node@25.6.2)':
-    dependencies:
-      '@inquirer/core': 11.1.9(@types/node@25.6.2)
-      '@inquirer/type': 4.0.5(@types/node@25.6.2)
-    optionalDependencies:
-      '@types/node': 25.6.2
-
-  '@inquirer/search@4.1.8(@types/node@25.6.2)':
-    dependencies:
-      '@inquirer/core': 11.1.9(@types/node@25.6.2)
-      '@inquirer/figures': 2.0.5
-      '@inquirer/type': 4.0.5(@types/node@25.6.2)
-    optionalDependencies:
-      '@types/node': 25.6.2
-
-  '@inquirer/select@5.1.4(@types/node@25.6.2)':
+  '@inquirer/password@5.0.12(@types/node@25.8.0)':
     dependencies:
       '@inquirer/ansi': 2.0.5
-      '@inquirer/core': 11.1.9(@types/node@25.6.2)
-      '@inquirer/figures': 2.0.5
-      '@inquirer/type': 4.0.5(@types/node@25.6.2)
+      '@inquirer/core': 11.1.9(@types/node@25.8.0)
+      '@inquirer/type': 4.0.5(@types/node@25.8.0)
     optionalDependencies:
-      '@types/node': 25.6.2
+      '@types/node': 25.8.0
 
-  '@inquirer/type@4.0.5(@types/node@25.6.2)':
-    optionalDependencies:
-      '@types/node': 25.6.2
-
-  '@litko/yara-x-darwin-arm64@0.5.1':
-    optional: true
-
-  '@litko/yara-x-darwin-x64@0.5.1':
-    optional: true
-
-  '@litko/yara-x-linux-arm64-gnu@0.5.1':
-    optional: true
-
-  '@litko/yara-x-linux-x64-gnu@0.5.1':
-    optional: true
-
-  '@litko/yara-x-win32-arm64-msvc@0.5.1':
-    optional: true
-
-  '@litko/yara-x-win32-x64-msvc@0.5.1':
-    optional: true
-
-  '@napi-rs/cli@3.6.2(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.6.2)':
+  '@inquirer/prompts@8.4.2(@types/node@25.8.0)':
     dependencies:
-      '@inquirer/prompts': 8.4.2(@types/node@25.6.2)
+      '@inquirer/checkbox': 5.1.4(@types/node@25.8.0)
+      '@inquirer/confirm': 6.0.12(@types/node@25.8.0)
+      '@inquirer/editor': 5.1.1(@types/node@25.8.0)
+      '@inquirer/expand': 5.0.13(@types/node@25.8.0)
+      '@inquirer/input': 5.0.12(@types/node@25.8.0)
+      '@inquirer/number': 4.0.12(@types/node@25.8.0)
+      '@inquirer/password': 5.0.12(@types/node@25.8.0)
+      '@inquirer/rawlist': 5.2.8(@types/node@25.8.0)
+      '@inquirer/search': 4.1.8(@types/node@25.8.0)
+      '@inquirer/select': 5.1.4(@types/node@25.8.0)
+    optionalDependencies:
+      '@types/node': 25.8.0
+
+  '@inquirer/rawlist@5.2.8(@types/node@25.8.0)':
+    dependencies:
+      '@inquirer/core': 11.1.9(@types/node@25.8.0)
+      '@inquirer/type': 4.0.5(@types/node@25.8.0)
+    optionalDependencies:
+      '@types/node': 25.8.0
+
+  '@inquirer/search@4.1.8(@types/node@25.8.0)':
+    dependencies:
+      '@inquirer/core': 11.1.9(@types/node@25.8.0)
+      '@inquirer/figures': 2.0.5
+      '@inquirer/type': 4.0.5(@types/node@25.8.0)
+    optionalDependencies:
+      '@types/node': 25.8.0
+
+  '@inquirer/select@5.1.4(@types/node@25.8.0)':
+    dependencies:
+      '@inquirer/ansi': 2.0.5
+      '@inquirer/core': 11.1.9(@types/node@25.8.0)
+      '@inquirer/figures': 2.0.5
+      '@inquirer/type': 4.0.5(@types/node@25.8.0)
+    optionalDependencies:
+      '@types/node': 25.8.0
+
+  '@inquirer/type@4.0.5(@types/node@25.8.0)':
+    optionalDependencies:
+      '@types/node': 25.8.0
+
+  '@litko/yara-x-darwin-arm64@0.5.2':
+    optional: true
+
+  '@litko/yara-x-darwin-x64@0.5.2':
+    optional: true
+
+  '@litko/yara-x-linux-arm64-gnu@0.5.2':
+    optional: true
+
+  '@litko/yara-x-linux-x64-gnu@0.5.2':
+    optional: true
+
+  '@litko/yara-x-win32-arm64-msvc@0.5.2':
+    optional: true
+
+  '@litko/yara-x-win32-x64-msvc@0.5.2':
+    optional: true
+
+  '@napi-rs/cli@3.6.2(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.8.0)':
+    dependencies:
+      '@inquirer/prompts': 8.4.2(@types/node@25.8.0)
       '@napi-rs/cross-toolchain': 1.0.3(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)
       '@napi-rs/wasm-tools': 1.0.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)
       '@octokit/rest': 22.0.1
@@ -878,7 +881,7 @@ snapshots:
       colorette: 2.0.20
       emnapi: 1.10.0
       es-toolkit: 1.46.0
-      js-yaml: 4.1.0
+      js-yaml: 4.1.1
       obug: 2.1.1
       semver: 7.7.4
       typanion: 3.14.0
@@ -1200,9 +1203,9 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@types/node@25.6.2':
+  '@types/node@25.8.0':
     dependencies:
-      undici-types: 7.19.2
+      undici-types: 7.24.6
 
   argparse@2.0.1: {}
 
@@ -1242,7 +1245,7 @@ snapshots:
     dependencies:
       safer-buffer: 2.1.2
 
-  js-yaml@4.1.0:
+  js-yaml@4.1.1:
     dependencies:
       argparse: 2.0.1
 
@@ -1264,6 +1267,6 @@ snapshots:
 
   typanion@3.14.0: {}
 
-  undici-types@7.19.2: {}
+  undici-types@7.24.6: {}
 
   universal-user-agent@7.0.3: {}
