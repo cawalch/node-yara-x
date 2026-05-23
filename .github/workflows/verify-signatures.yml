@@ -25,7 +25,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Setup Keyless Signing (Gitsign)
-        uses: chainguard-dev/actions/setup-gitsign@d67380d0b02c09412f8e17f660ec48870bd89e6e # v1.6.9
+        uses: chainguard-dev/actions/setup-gitsign@c69a264ec2a5934c3186c618f368fc1c86f16cff # v1.6.19
 
       - name: Verify PR Commits
         run: |
