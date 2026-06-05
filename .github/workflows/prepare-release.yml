@@ -88,7 +88,7 @@ jobs:
           pnpm test
       - name: Setup Keyless Signing (Gitsign)
         if: steps.release.outputs.skip != 'true'
-        uses: chainguard-dev/actions/setup-gitsign@c69a264ec2a5934c3186c618f368fc1c86f16cff # v1.6.19
+        uses: chainguard-dev/actions/setup-gitsign@05fbd381f7c158bd33c9bbf3a28f67852269fdf8 # v1.6.21
       - name: Open release pull request
         if: steps.release.outputs.skip != 'true'
         env:
