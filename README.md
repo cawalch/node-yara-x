@@ -1,6 +1,6 @@
 # @litko/yara-x
 
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/github/cawalch/node-yara-x/badge)](https://scorecard.dev/viewer/?uri=github.com/cawalch/node-yara-x)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/cawalch/node-yara-x/badge)](https://scorecard.dev/viewer/?uri=github.com/cawalch/node-yara-x)
 
 ## Features
 

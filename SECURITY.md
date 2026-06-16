@@ -2,9 +2,13 @@
 
 ## Reporting a Vulnerability
 
-Please report suspected vulnerabilities privately through GitHub Security Advisories for this repository.
+Please report suspected vulnerabilities privately through [GitHub Security Advisories](https://github.com/cawalch/node-yara-x/security/advisories/new).
 
 Do not open a public issue for a suspected vulnerability. Include the affected version, a minimal reproduction if possible, and any relevant crash output or rule input.
+
+## Disclosure Timelines
+
+We aim to acknowledge vulnerability reports within 72 hours and to provide a fix or mitigation within 90 days of disclosure. Coordinated disclosure timelines may be adjusted by mutual agreement with the reporter.
 
 ## Supply Chain Controls
 
