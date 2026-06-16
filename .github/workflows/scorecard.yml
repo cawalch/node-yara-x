@@ -13,6 +13,8 @@ on:
       - main
   # Re-run when branch protection rules change (affects the Branch-Protection check).
   branch_protection_rule:
+  # Allow on-demand runs (e.g. after a branch-protection change).
+  workflow_dispatch:
   # Weekly scheduled run captures dependency/supply-chain drift between pushes.
   schedule:
     - cron: "33 6 * * 1"
