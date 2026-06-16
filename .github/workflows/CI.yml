@@ -242,6 +242,24 @@ jobs:
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Sync optionalDependencies to current version
+        # The native sub-packages were just published above. Sync the root
+        # optionalDependencies to the package version so installs resolve the
+        # matching native binaries, not a previous release's. This runs at
+        # publish time (not prepare time) because the new versions only exist
+        # on npm after the sub-package publish loop above.
+        run: |
+          node -e '
+            const fs = require("fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const v = pkg.version;
+            const prefix = pkg.name + "-";
+            for (const dep of Object.keys(pkg.optionalDependencies || {})) {
+              if (dep.startsWith(prefix)) pkg.optionalDependencies[dep] = v;
+            }
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+            console.log("Synced optionalDependencies to", v);
+          '
       - name: Publish main package
         # Publish root package last (--ignore-scripts skips prepublishOnly / napi prepublish
         # which would try to create a GitHub release that already exists).
