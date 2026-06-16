@@ -42,6 +42,20 @@ const packageJsonPath = join(root, "package.json");
 const packageJson = await readJson(packageJsonPath);
 const nextVersion = bumpVersion(packageJson.version, releaseType);
 
+// Keep the root optionalDependencies (the native binary sub-packages) in sync
+// with the package version. They must point at the same version the
+// npm/<platform>/ sub-packages are published at, otherwise installs resolve
+// to a previous release's native binaries (a real off-by-one version skew).
+const subPackagePrefix = `${packageJson.name}-`;
+
+if (packageJson.optionalDependencies) {
+  for (const dep of Object.keys(packageJson.optionalDependencies)) {
+    if (dep.startsWith(subPackagePrefix)) {
+      packageJson.optionalDependencies[dep] = nextVersion;
+    }
+  }
+}
+
 packageJson.version = nextVersion;
 
 await writeJson(packageJsonPath, packageJson);
