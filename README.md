@@ -1,5 +1,7 @@
 # @litko/yara-x
 
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/github/cawalch/node-yara-x/badge)](https://scorecard.dev/viewer/?uri=github.com/cawalch/node-yara-x)
+
 ## Features
 
 - High Performance: Built with [napi-rs](https://napi-rs.com) and [VirusTotal/yara-x](https://github.com/VirusTotal/yara-x)
