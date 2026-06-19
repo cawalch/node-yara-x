@@ -311,3 +311,44 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cosign
+        # Keyless Sigstore signing via the GitHub OIDC token (id-token: write).
+        # Used to sign the native .node artifacts attached to the release.
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign and attach release assets
+        # Attach the native .node binaries to the GitHub release and sign each
+        # one keyless with Sigstore (producing a .sigstore bundle). This is what
+        # the OpenSSF Scorecard 'Signed-Releases' check looks for (signature
+        # files among the release assets), and lets consumers verify downloads:
+        #   cosign verify-blob --bundle yara-x.<target>.node.sigstore \
+        #     yara-x.<target>.node \
+        #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+        # (the certificate identity is this repo's CI workflow, at the ref that
+        # ran the publish job). Runs after npm publish so a signing failure never
+        # blocks the package.
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG does not exist; skipping release-asset signing."
+            exit 0
+          fi
+          mkdir -p release-assets
+          # Flatten the platform-named .node binaries into one directory.
+          find npm -type f -name '*.node' -exec cp {} release-assets/ \;
+          echo "Collected $(ls release-assets/*.node | wc -l | tr -d ' ') native artifacts:"
+          ls -1 release-assets/
+          cd release-assets
+          # Sign each binary keyless; --bundle writes a Sigstore bundle (.sigstore).
+          for f in *.node; do
+            echo "Signing $f ..."
+            cosign sign-blob --yes --bundle "${f}.sigstore" "$f"
+          done
+          cd ..
+          gh release upload "$TAG" release-assets/*.node release-assets/*.sigstore --clobber
+          echo "Attached $(ls release-assets/*.sigstore | wc -l | tr -d ' ') signed assets to $TAG"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
