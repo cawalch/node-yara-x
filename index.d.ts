@@ -275,6 +275,31 @@ export interface CompilerOptions {
   errorOnSlowPattern?: boolean
   /** Whether to raise an error on slow loops. */
   errorOnSlowLoop?: boolean
+  /**
+   * Maximum number of warnings the compiler will report.
+   *
+   * When set, only the first `n` warnings are emitted; additional warnings
+   * are dropped. Useful for taming noisy rule corpora, particularly when
+   * the compiler warns on single-byte patterns and duplicate pattern values.
+   */
+  maxWarnings?: number
+  /**
+   * Warning codes to disable during compilation.
+   *
+   * Each entry must be a valid YARA-X warning code (e.g. `"slow_pattern"`,
+   * `"duplicate_pattern_value"`, `"potentially_slow_loop"`). An invalid
+   * code produces a compilation error.
+   */
+  disableWarnings?: Array<string>
+  /**
+   * Whether to enable or disable all compiler warnings.
+   *
+   * `true` (the default) leaves all warning types enabled. `false` silences
+   * every warning. Individual codes in `disable_warnings` are applied after
+   * this flag, so an explicitly disabled code stays off even when this is
+   * `true`.
+   */
+  enableAllWarnings?: boolean
   /** A list of directories where the compiler should look for included files. */
   includeDirectories?: Array<string>
   /** Whether to enable include statements in YARA rules. */

@@ -1,7 +1,7 @@
 import yarax from "../index.js";
 import { existsSync, mkdirSync, writeFileSync, rmSync, statSync } from "fs";
 import { join, dirname } from "path";
-import { strictEqual, ok, fail } from "assert";
+import { strictEqual, ok, fail, throws } from "assert";
 import { describe, it, before, after } from "node:test";
 import { fileURLToPath } from "url";
 
@@ -1362,6 +1362,27 @@ rule test_1 {
         rule: "rule test { condition: 1 }",
         warningCode: "non_bool_expr",
       },
+      {
+        name: "Slow Pattern (single-byte)",
+        rule: `rule test_slow_pattern {
+	strings:
+		$a = "a"
+	condition:
+		$a
+}`,
+        warningCode: "slow_pattern",
+      },
+      {
+        name: "Duplicate Pattern Value",
+        rule: `rule test_duplicate_pattern {
+	strings:
+		$a = "hello"
+		$b = "hello"
+	condition:
+		any of them
+}`,
+        warningCode: "duplicate_pattern_value",
+      },
     ];
 
     warningTestCases.forEach(({ name, rule, warningCode }) => {
@@ -1381,6 +1402,82 @@ rule test_1 {
         ok(
           result.warnings.some((warning) => warning.code === warningCode),
           `Should have warning code ${warningCode}`,
+        );
+      });
+    });
+
+    // These options map to the underlying YARA warning-control API:
+    //   Compiler::max_warnings / switch_all_warnings / switch_warning
+    describe("Warning controls", () => {
+      // Two distinct single-byte patterns => exactly two `slow_pattern` warnings.
+      const twoSlowPatternRule = `rule test_slow_patterns {
+	strings:
+		$a = "a"
+		$b = "b"
+	condition:
+		any of them
+}`;
+
+      it("should cap the number of reported warnings (maxWarnings)", () => {
+        // Baseline: this rule emits exactly 2 slow_pattern warnings.
+        const baseline = yarax.compile(twoSlowPatternRule).getWarnings();
+        strictEqual(
+          baseline.length,
+          2,
+          "baseline should emit 2 slow_pattern warnings",
+        );
+
+        const scanner = yarax.compile(twoSlowPatternRule, { maxWarnings: 1 });
+        const warnings = scanner.getWarnings();
+        ok(
+          warnings.length === 1,
+          `maxWarnings:1 should yield exactly 1 warning, got ${warnings.length}`,
+        );
+        strictEqual(
+          warnings[0].code,
+          "slow_pattern",
+          "Capped warning should be the first slow_pattern",
+        );
+      });
+
+      it("should disable a specific warning code (disableWarnings)", () => {
+        const scanner = yarax.compile(twoSlowPatternRule, {
+          disableWarnings: ["slow_pattern"],
+        });
+        const warnings = scanner.getWarnings();
+        ok(
+          warnings.length === 0,
+          "slow_pattern should be suppressed by disableWarnings",
+        );
+      });
+
+      it("should disable all warnings (enableAllWarnings: false)", () => {
+        const scanner = yarax.compile(twoSlowPatternRule, {
+          enableAllWarnings: false,
+        });
+        const warnings = scanner.getWarnings();
+        strictEqual(
+          warnings.length,
+          0,
+          "enableAllWarnings:false should suppress every warning",
+        );
+      });
+
+      it("should error on an invalid warning code in disableWarnings", () => {
+        throws(
+          () => yarax.compile(twoSlowPatternRule, {
+            disableWarnings: ["totally_made_up_code"],
+          }),
+          /is not a valid warning code/,
+          "An unknown warning code should surface a N-API error",
+        );
+      });
+
+      it("should validate with maxWarnings applied", () => {
+        const result = yarax.validate(twoSlowPatternRule, { maxWarnings: 1 });
+        ok(
+          result.warnings.length === 1,
+          `validate() maxWarnings:1 should yield exactly 1 warning, got ${result.warnings.length}`,
         );
       });
     });
