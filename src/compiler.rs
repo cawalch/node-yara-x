@@ -91,6 +91,28 @@ pub fn apply_compiler_options(
       .error_on_slow_pattern(opts.error_on_slow_pattern.unwrap_or(false))
       .error_on_slow_loop(opts.error_on_slow_loop.unwrap_or(false));
 
+    // Apply warning controls.
+    //
+    // `switch_all_warnings` toggles every warning type at once, while
+    // `switch_warning` flips an individual code. `switch_warning` returns
+    // `Err(InvalidWarningCode)` for an unknown code, which we surface as a
+    // N-API error via the Display impl rather than silently dropping it.
+    if let Some(max) = opts.max_warnings {
+      compiler.max_warnings(max as usize);
+    }
+
+    if let Some(enable_all) = opts.enable_all_warnings {
+      compiler.switch_all_warnings(enable_all);
+    }
+
+    if let Some(disabled) = &opts.disable_warnings {
+      for code in disabled {
+        compiler
+          .switch_warning(code, false)
+          .map_err(crate::error::to_napi_err)?;
+      }
+    }
+
     // Apply variables
     if let Some(vars) = &opts.define_variables {
       let property_names = Object::keys(vars)?;

@@ -128,6 +128,25 @@ pub struct CompilerOptions<'a> {
   pub error_on_slow_pattern: Option<bool>,
   /// Whether to raise an error on slow loops.
   pub error_on_slow_loop: Option<bool>,
+  /// Maximum number of warnings the compiler will report.
+  ///
+  /// When set, only the first `n` warnings are emitted; additional warnings
+  /// are dropped. Useful for taming noisy rule corpora, particularly when
+  /// the compiler warns on single-byte patterns and duplicate pattern values.
+  pub max_warnings: Option<u32>,
+  /// Warning codes to disable during compilation.
+  ///
+  /// Each entry must be a valid YARA-X warning code (e.g. `"slow_pattern"`,
+  /// `"duplicate_pattern_value"`, `"potentially_slow_loop"`). An invalid
+  /// code produces a compilation error.
+  pub disable_warnings: Option<Vec<String>>,
+  /// Whether to enable or disable all compiler warnings.
+  ///
+  /// `true` (the default) leaves all warning types enabled. `false` silences
+  /// every warning. Individual codes in `disable_warnings` are applied after
+  /// this flag, so an explicitly disabled code stays off even when this is
+  /// `true`.
+  pub enable_all_warnings: Option<bool>,
   /// A list of directories where the compiler should look for included files.
   pub include_directories: Option<Vec<String>>,
   /// Whether to enable include statements in YARA rules.
