@@ -71,6 +71,20 @@ jobs:
       - name: Install dependencies
         if: steps.release.outputs.skip != 'true'
         run: pnpm install --frozen-lockfile
+      - name: Install Rust toolchain
+        # Build the native binding from source so verification tests the
+        # current commit, not the previously-published optional-dependency
+        # binary. Without this, `pnpm test` resolves @litko/yara-x-<platform>
+        # from npm (a prior release built against an older yara-x) and any
+        # test exercising newer compiler behavior fails spuriously.
+        if: steps.release.outputs.skip != 'true'
+        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: stable
+      - name: Install native build dependencies
+        # yara-x's build requires protoc (protobuf-compiler).
+        if: steps.release.outputs.skip != 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
       - name: Prepare version bump
         if: steps.release.outputs.skip != 'true'
         id: bump
@@ -86,6 +100,7 @@ jobs:
         if: steps.release.outputs.skip != 'true'
         run: |
           pnpm install --frozen-lockfile
+          pnpm build:debug
           cargo metadata --locked --format-version 1 >/dev/null
           pnpm test
       - name: Setup Keyless Signing (Gitsign)
