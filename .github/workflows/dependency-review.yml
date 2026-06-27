@@ -1,12 +1,12 @@
 name: Dependency Review
 "on":
   pull_request:
-    paths:
-      - Cargo.lock
-      - Cargo.toml
-      - package.json
-      - pnpm-lock.yaml
-      - .github/workflows/**
+    # Runs on every PR. `actions/dependency-review-action` exits success
+    # when there are no dependency changes ("no dependency changes to
+    # review"), so this required check always reports and stays
+    # satisfiable for source-only PRs.
+    branches:
+      - main
 permissions:
   contents: read
 env:
