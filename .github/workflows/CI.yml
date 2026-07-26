@@ -167,7 +167,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - name: Install
-        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: stable
           targets: ${{ matrix.settings.target }}
@@ -186,7 +186,7 @@ jobs:
         run: ${{ matrix.settings.build }}
         shell: bash
       - name: Generate artifact attestation
-        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: "*.node"
       - name: Upload artifact
