@@ -61,3 +61,26 @@ jobs:
           fi
 
           gh release create "${args[@]}"
+      - name: Ensure publish pipeline triggers
+        # The `release: [published]` event is occasionally dropped by GitHub
+        # (observed once for v0.7.1 — the tag existed but no release-event CI
+        # run spawned). Poll briefly for the release-event CI run on the new
+        # tag; if it never appears, dispatch CI.yml manually. Its publish job
+        # accepts workflow_dispatch on main, and the publish steps skip
+        # versions that already exist on npm, so a late event cannot
+        # double-publish.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v${version}"
+          for i in $(seq 1 18); do
+            run_id=$(gh run list --workflow CI.yml --event release --branch "$tag" --json databaseId --jq '.[0].databaseId // empty')
+            if [[ -n "$run_id" ]]; then
+              echo "Release-event CI run $run_id found for $tag."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "No release-event CI run within 180s; dispatching CI.yml on main."
+          gh workflow run CI.yml --ref main
