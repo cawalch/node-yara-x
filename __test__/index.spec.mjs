@@ -1,7 +1,7 @@
 import yarax from "../index.js";
-import { existsSync, mkdirSync, writeFileSync, rmSync, statSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, rmSync, statSync, readFileSync } from "fs";
 import { join, dirname } from "path";
-import { strictEqual, ok, fail, throws } from "assert";
+import { strictEqual, ok, fail, throws, deepStrictEqual } from "assert";
 import { describe, it, before, after } from "node:test";
 import { fileURLToPath } from "url";
 
@@ -1724,5 +1724,126 @@ rule test_1 {
         ok(matches2.length > 0, "Should match rule from second include dir");
       });
     });
+
+    describe("Rules Serialization (serialize/deserialize)", () => {
+    const serializeRule = `
+      rule serialized_rule {
+        meta:
+          author = "test"
+        strings:
+          $a = "needle"
+          $b = /needle[0-9]+/
+        condition:
+          any of them
+      }
+      rule serialized_other {
+        strings:
+          $c = "haystack"
+        condition:
+          $c and not serialized_rule
+      }
+    `;
+
+    it("should serialize compiled rules to a Buffer with YARA-X magic", () => {
+      const rules = yarax.compile(serializeRule);
+      const blob = rules.serialize();
+      ok(Buffer.isBuffer(blob), "serialize() should return a Buffer");
+      ok(blob.length > 0, "serialized blob should not be empty");
+      ok(
+        blob.subarray(0, 6).toString("utf8").startsWith("YARA-X"),
+        "blob should start with the YARA-X magic",
+      );
+    });
+
+    it("should round-trip rules with identical scan results", () => {
+      const rules = yarax.compile(serializeRule);
+      const restored = yarax.deserialize(rules.serialize());
+
+      const payload = Buffer.from("a needle in a haystack needle42");
+      const original = rules.scan(payload);
+      const roundTripped = restored.scan(payload);
+
+      strictEqual(roundTripped.length, original.length, "same number of matching rules");
+      strictEqual(roundTripped[0].ruleIdentifier, original[0].ruleIdentifier);
+      strictEqual(roundTripped[0].matches.length, original[0].matches.length);
+      strictEqual(roundTripped[0].matches[0].data, original[0].matches[0].data);
+      strictEqual(roundTripped[0].matches[0].offset, original[0].matches[0].offset);
+      deepStrictEqual(roundTripped[0].meta, original[0].meta, "metadata should survive");
+      strictEqual(restored.scan(Buffer.from("nothing here")).length, 0);
+    });
+
+    it("should scan files with deserialized rules", () => {
+      const rules = yarax.compile(
+        `rule file_rule { strings: $a = "file content" condition: $a }`,
+      );
+      const restored = yarax.deserialize(rules.serialize());
+      const tempFile = createTempFile("This is file content for serialized scanning");
+      const matches = restored.scanFile(tempFile);
+      strictEqual(matches.length, 1);
+      strictEqual(matches[0].ruleIdentifier, "file_rule");
+    });
+
+    it("should scan asynchronously with deserialized rules", async () => {
+      const rules = yarax.compile(`rule async_rule { strings: $a = "async" condition: $a }`);
+      const restored = yarax.deserialize(rules.serialize());
+      const matches = await restored.scanAsync(Buffer.from("scan async here"));
+      strictEqual(matches.length, 1);
+      strictEqual(matches[0].ruleIdentifier, "async_rule");
+    });
+
+    it("should preserve compile-time variables in the serialized blob", () => {
+      const rule = `rule var_rule { condition: test_var == 100 }`;
+      const rules = yarax.compile(rule, { defineVariables: { test_var: "100" } });
+      const restored = yarax.deserialize(rules.serialize());
+      const matches = restored.scan(Buffer.from("x"));
+      strictEqual(matches.length, 1, "variable should survive serialization");
+    });
+
+    it("should apply scan-time options to deserialized rules", () => {
+      const rules = yarax.compile(`rule m { strings: $a = "a" condition: $a }`);
+      const restored = yarax.deserialize(rules.serialize());
+      restored.setMaxMatchesPerPattern(1);
+      const matches = restored.scan(Buffer.from("aaa"));
+      strictEqual(matches.length, 1);
+      strictEqual(matches[0].matches.length, 1, "max matches per pattern should apply");
+    });
+
+    it("should reject garbage input on deserialize", () => {
+      throws(() => yarax.deserialize(Buffer.from("not a yara-x blob")), /deserialize/i);
+      throws(() => yarax.deserialize(Buffer.alloc(0)), /deserialize/i);
+    });
+
+    it("should reject the emitWasmFile debug artifact on deserialize", () => {
+      const rules = yarax.compile(serializeRule);
+      const wasmPath = join(__tempDir, `serialized-${Date.now()}.wasm`);
+      rules.emitWasmFile(wasmPath);
+      const wasmBytes = readFileSync(wasmPath);
+      ok(
+        wasmBytes.subarray(0, 4).equals(Buffer.from([0, 97, 115, 109])),
+        "emitWasmFile should produce a wasm module",
+      );
+      throws(
+        () => yarax.deserialize(wasmBytes),
+        /deserialize/i,
+        "wasm debug artifact is not a serialized rules blob",
+      );
+    });
+
+    it("should report that source code is unavailable after deserialize", () => {
+      const rules = yarax.compile(`rule r { strings: $a = "x" condition: $a }`);
+      const restored = yarax.deserialize(rules.serialize());
+      const wasmPath = join(__tempDir, `nosource-${Date.now()}.wasm`);
+      throws(() => restored.emitWasmFile(wasmPath), /source code not available/i);
+    });
+
+    it("should round-trip a blob written to and read from disk", () => {
+      const rules = yarax.compile(serializeRule);
+      const blobPath = join(__tempDir, `rules-${Date.now()}.yarx`);
+      writeFileSync(blobPath, rules.serialize());
+      const restored = yarax.deserialize(readFileSync(blobPath));
+      strictEqual(restored.scan(Buffer.from("needle")).length, 1);
+      strictEqual(restored.scan(Buffer.from("haystack")).length, 1);
+    });
+  });
   });
 });

@@ -506,6 +506,28 @@ impl YaraX {
     }
   }
 
+  /// Serializes the compiled YARA rules to a portable binary blob.
+  ///
+  /// The serialized blob is self-contained (patterns, regex data, globals, and
+  /// the compiled WASM conditions) and can be restored on any platform with
+  /// the [`deserialize`](crate::deserialize) function, provided the same
+  /// YARA-X version is used on both sides.
+  ///
+  /// # Returns
+  ///
+  /// A Buffer containing the serialized rules
+  #[napi]
+  pub fn serialize(&self) -> Result<Buffer> {
+    let bytes = self.rules.serialize().map_err(|e| {
+      Error::new(
+        Status::GenericFailure,
+        format!("Failed to serialize rules: {e}"),
+      )
+    })?;
+
+    Ok(Buffer::from(bytes))
+  }
+
   /// Scans the provided data asynchronously using the compiled YARA rules.
   ///
   /// # Arguments

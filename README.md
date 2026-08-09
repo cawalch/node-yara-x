@@ -201,6 +201,48 @@ compiledRules.emitWasmFile("./output/instance_rules.wasm");
 await compiledRules.emitWasmFileAsync("./output/async_rules.wasm");
 ```
 
+> **Note:** `emitWasmFile` produces a debug artifact (the raw WASM module of
+> compiled conditions) for inspection with tools like `wasm2wat`. It is **not**
+> a distributable rules format. Use `serialize()` / `deserialize()` below to
+> ship compiled rules between machines.
+
+## Rules Serialization
+
+Compiled rules can be serialized to a compact, self-contained binary blob and
+restored on any platform that uses the same YARA-X version (1.19.x). The blob
+carries the patterns, regex data, global variables, and compiled WASM
+conditions; conditions are recompiled for the local platform on load (~1-2ms).
+
+```javascript
+import { compile, deserialize } from "@litko/yara-x";
+
+// Producer: compile once, ship the blob
+const rules = compile(`
+  rule example {
+    strings:
+      $a = "malware"
+    condition:
+      $a
+  }
+`);
+const blob = rules.serialize();            // Buffer, a few KiB for typical rule sets
+await Bun.write("./rules.yarx", blob);    // or writeFileSync / DB / CDN
+
+// Consumer: restore and scan at native speed
+const restored = deserialize(await Bun.file("./rules.yarx").arrayBuffer());
+restored.scan(buffer);                    // all scan APIs work: scan,
+restored.scanFile("./suspect.bin");      // scanFile, scanAsync, scanFileAsync
+```
+
+Notes:
+
+- The blob is version-locked: producer and consumer must use the same YARA-X
+  version, and must be built with the same set of modules (e.g. rules using
+  `import "pe"` need the `pe` module in the consumer's build).
+- Serialization is **not** obfuscation: rule strings remain extractable.
+- Deserializing a blob produced by `emitWasmFile` (or arbitrary bytes) fails
+  with a clear error.
+
 ## Incremental Rule Building
 
 ```javascript
