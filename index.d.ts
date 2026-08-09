@@ -70,6 +70,19 @@ export declare class YaraX {
    */
   emitWasmFile(outputPath: string): void
   /**
+   * Serializes the compiled YARA rules to a portable binary blob.
+   *
+   * The serialized blob is self-contained (patterns, regex data, globals, and
+   * the compiled WASM conditions) and can be restored on any platform with
+   * the [`deserialize`](crate::deserialize) function, provided the same
+   * YARA-X version is used on both sides.
+   *
+   * # Returns
+   *
+   * A Buffer containing the serialized rules
+   */
+  serialize(): Buffer
+  /**
    * Scans the provided data asynchronously using the compiled YARA rules.
    *
    * # Arguments
@@ -348,6 +361,25 @@ export declare function compileToWasm(ruleSource: string, outputPath: string, op
  * A new YaraX instance with empty rules
  */
 export declare function create(): YaraXImpl
+
+/**
+ * Creates a new YaraX instance from a serialized rules blob.
+ *
+ * The blob must have been produced by [`YaraX::serialize`] (or
+ * `yara_x::Rules::serialize`) using the same YARA-X version. The rules are
+ * restored with full scanning capability (including WASM condition
+ * recompilation for the current platform) and can be used with `scan`,
+ * `scan_file`, `scan_async`, and `scan_file_async`.
+ *
+ * # Arguments
+ *
+ * * `data` - Buffer containing the serialized rules
+ *
+ * # Returns
+ *
+ * A YaraX instance with the restored rules
+ */
+export declare function deserialize(data: Buffer): YaraXImpl
 
 /**
  * Creates a new YaraX instance from a file containing YARA rules.

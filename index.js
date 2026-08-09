@@ -705,5 +705,6 @@ module.exports.compile = nativeBinding.compile
 module.exports.compileFileToWasm = nativeBinding.compileFileToWasm
 module.exports.compileToWasm = nativeBinding.compileToWasm
 module.exports.create = nativeBinding.create
+module.exports.deserialize = nativeBinding.deserialize
 module.exports.fromFile = nativeBinding.fromFile
 module.exports.validate = nativeBinding.validate

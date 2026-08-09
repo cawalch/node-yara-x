@@ -47,7 +47,8 @@ pub use types::{
 // Internal imports
 use compiler::{add_source_to_compiler, apply_compiler_options};
 use error::io_error_to_napi;
-use napi::Result;
+use napi::bindgen_prelude::Buffer;
+use napi::{Error, Result, Status};
 use napi_derive::napi;
 use scanner::YaraX as YaraXImpl;
 use std::path::Path;
@@ -142,6 +143,48 @@ pub fn from_file(rule_path: String, options: Option<CompilerOptionsType>) -> Res
     .map_err(|e| io_error_to_napi(e, &format!("reading file {rule_path}")))?;
 
   YaraXImpl::create_scanner_from_source(file_content, options)
+}
+
+/// Creates a new YaraX instance from a serialized rules blob.
+///
+/// The blob must have been produced by [`YaraX::serialize`] (or
+/// `yara_x::Rules::serialize`) using the same YARA-X version. The rules are
+/// restored with full scanning capability (including WASM condition
+/// recompilation for the current platform) and can be used with `scan`,
+/// `scan_file`, `scan_async`, and `scan_file_async`.
+///
+/// # Arguments
+///
+/// * `data` - Buffer containing the serialized rules
+///
+/// # Returns
+///
+/// A YaraX instance with the restored rules
+#[napi]
+pub fn deserialize(data: Buffer) -> Result<YaraXImpl> {
+  use std::cell::RefCell;
+  use std::sync::Arc;
+  use yara_x::Rules;
+
+  let rules = Rules::deserialize(data.as_ref()).map_err(|e| {
+    Error::new(
+      Status::InvalidArg,
+      format!("Failed to deserialize rules: {e}"),
+    )
+  })?;
+
+  Ok(YaraXImpl {
+    rules: Arc::new(rules),
+    source_code: None,
+    rule_sources: Vec::new(),
+    warnings: Vec::new(),
+    variables: None,
+    cached_scanner: RefCell::new(None),
+    max_matches_per_pattern: None,
+    use_mmap: None,
+    timeout_ms: None,
+    match_context_size: None,
+  })
 }
 
 /// Compiles a YARA rule source string to a WASM file.
