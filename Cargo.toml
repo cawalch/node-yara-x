@@ -10,7 +10,14 @@ crate-type = ["cdylib"]
 # Enable napi4 and async features
 napi = { version = "3.12.0", default-features = false, features = ["napi4", "async"] }
 napi-derive = "3.6.2"
-yara-x = "1.19.0"
+yara-x = { version = "1.19.0", default-features = false, features = [
+  "console-module", "pe-module", "elf-module", "macho-module", "math-module",
+  "hash-module", "string-module", "time-module", "dotnet-module",
+  "constant-folding", "exact-atoms", "fast-regexp", "wasmi-runtime",
+] }
+
+[patch.crates-io]
+yara-x = { path = "vendor/yara-x" }
 
 [build-dependencies]
 napi-build = "2.4.0"
