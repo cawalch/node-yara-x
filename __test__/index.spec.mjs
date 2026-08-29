@@ -609,7 +609,7 @@ describe("yarax Tests", () => {
       );
     });
 
-    it("should warn when rules depend on ignored modules", () => {
+    it("should report rules that depend on an ignored module", () => {
       const rule = `rule test_pe {
         condition:
           pe.is_pe
@@ -621,6 +621,131 @@ describe("yarax Tests", () => {
       ok(
         warnings.some((w) => w.code === "unsupported_module"),
         "Should have an unsupported_module warning",
+      );
+      deepStrictEqual(
+        scanner.getIgnoredRules(),
+        [{ name: "test_pe", reason: "ignored_module", detail: "pe" }],
+        "Ignored-module rules should be reported without ignoreInvalidRules",
+      );
+    });
+
+    it("should report rules that depend on another ignored rule", () => {
+      const rule = `rule test_pe {
+        condition:
+          pe.is_pe
+      }
+
+      rule test_dep {
+        condition:
+          test_pe
+      }`;
+
+      const scanner = yarax.compile(rule, { ignoreModules: ["pe"] });
+
+      deepStrictEqual(
+        scanner.getIgnoredRules(),
+        [
+          { name: "test_pe", reason: "ignored_module", detail: "pe" },
+          { name: "test_dep", reason: "ignored_rule", detail: "test_pe" },
+        ],
+        "Rules depending on an ignored rule should be reported",
+      );
+    });
+
+    it("should report source-level errors via getCompilationErrors", () => {
+      const scanner = yarax.compile(validRule + "\n" + brokenRule, {
+        ignoreInvalidRules: true,
+      });
+
+      const errors = scanner.getCompilationErrors();
+      strictEqual(errors.length, 1, "Should have one compilation error");
+      ok(
+        errors[0].message.includes("undefined_variable_xyz"),
+        "Compilation error message should mention the broken rule",
+      );
+      ok(
+        scanner.getIgnoredRules().some((r) => r.name === "test_bad"),
+        "Per-rule failures stay attributed to the ignored rule report",
+      );
+    });
+
+    it("should report syntax errors via getCompilationErrors instead of silently dropping them", () => {
+      const scanner = yarax.compile('rule bad { condition: true', {
+        ignoreInvalidRules: true,
+      });
+
+      strictEqual(
+        scanner.getIgnoredRules().length,
+        0,
+        "A syntax error is not a per-rule failure",
+      );
+      const errors = scanner.getCompilationErrors();
+      ok(
+        errors.length > 0,
+        "Syntax errors should be surfaced, not silently dropped",
+      );
+      ok(
+        scanner.scan(Buffer.from("x")).length === 0,
+        "Scanner should have no compiled rules",
+      );
+    });
+
+    it("should return an empty getCompilationErrors when nothing was dropped", () => {
+      const scanner = yarax.compile(validRule, {
+        ignoreInvalidRules: true,
+      });
+      deepStrictEqual(
+        scanner.getCompilationErrors(),
+        [],
+        "No errors should be reported for a clean compile",
+      );
+    });
+
+    it("should surface banned-module import errors via getCompilationErrors", () => {
+      const scanner = yarax.compile('import "pe"\nrule test_pe { condition: pe.is_pe }', {
+        ignoreInvalidRules: true,
+        bannedModules: [{ name: "pe", errorTitle: "no pe", errorMessage: "pe is banned" }],
+      });
+
+      const errors = scanner.getCompilationErrors();
+      ok(
+        errors.some((e) => e.message.includes("no pe")),
+        "Banned-module errors should be surfaced",
+      );
+    });
+
+    it("should throw on source-level errors in tolerant WASM compilation", () => {
+      const wasmFile = join(__tempDir, `test-ignored-throws-${Date.now()}.wasm`);
+      throws(
+        () =>
+          yarax.compileToWasm(
+            "rule bad { condition: true",
+            wasmFile,
+            { ignoreInvalidRules: true },
+          ),
+        /Compilation error/,
+        "Tolerant WASM compilation should fail on source-level errors",
+      );
+      strictEqual(
+        existsSync(wasmFile),
+        false,
+        "No WASM file should be written on failure",
+      );
+    });
+
+    it("should keep per-rule failures tolerant in WASM compilation", () => {
+      const wasmFile = join(__tempDir, `test-ignored-valid-${Date.now()}.wasm`);
+      yarax.compileToWasm(validRule + "\n" + brokenRule, wasmFile, {
+        ignoreInvalidRules: true,
+      });
+      strictEqual(
+        existsSync(wasmFile),
+        true,
+        "WASM should still be emitted with the valid rules",
+      );
+      ok(
+        statSync(wasmFile).size > 0,
+        "WASM file should not be empty",
       );
     });
   });

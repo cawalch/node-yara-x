@@ -24,6 +24,24 @@ export declare class YaraX {
    */
   getIgnoredRules(): Array<IgnoredRule>
   /**
+   * Gets the errors generated while compiling the rules, when compilation
+   * was performed with `ignore_invalid_rules: true`.
+   *
+   * In tolerant mode, per-rule failures are reported by
+   * [`get_ignored_rules`](Self::get_ignored_rules) (where the same error
+   * also appears in the entry's `detail`) and the remaining rules are
+   * compiled. Every error the compiler generated is collected here,
+   * including source-level errors that cannot be attributed to a single
+   * skipped rule (syntax errors, invalid UTF-8, banned or unknown module
+   * imports, include failures) — in strict mode those abort compilation
+   * instead. Mirrors the upstream Python binding's `Compiler.errors()`.
+   *
+   * # Returns
+   *
+   * A vector of `CompilerError` objects (empty when no errors occurred)
+   */
+  getCompilationErrors(): Array<CompilerError>
+  /**
    * Sets the maximum number of matches per pattern.
    *
    * # Arguments
@@ -306,12 +324,16 @@ export interface CompilerOptions {
    * Whether to skip rules that fail to compile instead of failing the whole
    * compilation.
    *
-   * When `true`, a rule that fails to compile (or depends on an ignored or
-   * banned module) is skipped and the remaining rules are compiled. The
-   * skipped rules, along with the reason, are reported by
-   * [`YaraX::get_ignored_rules`](crate::YaraX::get_ignored_rules). When
-   * `false` (the default), any rule that fails to compile aborts the
-   * compilation with an error.
+   * When `true`, a rule that fails to compile is skipped and the remaining
+   * rules are compiled. The skipped rules, along with the reason, are
+   * reported by
+   * [`YaraX::get_ignored_rules`](crate::YaraX::get_ignored_rules). Errors
+   * that can't be attributed to a single skipped rule (syntax errors,
+   * invalid UTF-8, banned or unknown module imports, include failures) are
+   * reported by
+   * [`YaraX::get_compilation_errors`](crate::YaraX::get_compilation_errors)
+   * instead of aborting the compilation. When `false` (the default), any
+   * rule that fails to compile aborts the compilation with an error.
    */
   ignoreInvalidRules?: boolean
   /**
@@ -424,8 +446,11 @@ export declare function fromFile(rulePath: string, options?: CompilerOptionsType
 /**
  * A rule that was skipped during compilation.
  *
- * Present only when compilation was performed with
- * `ignore_invalid_rules: true`. See
+ * Populated whenever rules were skipped: because compilation was performed
+ * with `ignore_invalid_rules: true` and some rules failed to compile, or
+ * because rules depend on an ignored module (see
+ * [`CompilerOptions::ignore_modules`](CompilerOptions::ignore_modules)) or
+ * on a rule that was itself skipped. See
  * [`CompilerOptions::ignore_invalid_rules`](CompilerOptions::ignore_invalid_rules).
  */
 export interface IgnoredRule {

@@ -79,9 +79,7 @@ impl BaseYaraTask {
   /// Scans a file on the current thread and returns thread-safe results.
   pub fn scan_file_to_data(&self, file_path: &str) -> Result<Vec<RuleMatchData>> {
     let mut scanner = self.create_scanner()?;
-    let results = scanner
-      .scan_file(file_path)
-      .map_err(scan_error_to_napi)?;
+    let results = scanner.scan_file(file_path).map_err(scan_error_to_napi)?;
     Ok(YaraX::extract_scan_data(results))
   }
 }
@@ -105,7 +103,14 @@ impl ScanTask {
     match_context_size: Option<usize>,
   ) -> Self {
     Self {
-      base: BaseYaraTask::new(rules, variables, max_matches_per_pattern, None, timeout_ms, match_context_size),
+      base: BaseYaraTask::new(
+        rules,
+        variables,
+        max_matches_per_pattern,
+        None,
+        timeout_ms,
+        match_context_size,
+      ),
       data,
     }
   }

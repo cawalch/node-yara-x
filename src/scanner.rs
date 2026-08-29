@@ -8,9 +8,12 @@ use crate::compiler::{
 };
 use crate::error::{io_error_to_napi, scan_error_to_napi};
 use crate::types::{
-  CompilerOptions, CompilerWarning, IgnoredRule, MatchData, RuleMatch, RuleSource, VariableValue,
+  CompilerError, CompilerOptions, CompilerWarning, IgnoredRule, MatchData, RuleMatch, RuleSource,
+  VariableValue,
 };
-use crate::variables::{convert_variables_to_map, get_compiler_warnings, VariableHandler};
+use crate::variables::{
+  convert_variables_to_map, get_compiler_errors, get_compiler_warnings, VariableHandler,
+};
 use napi::bindgen_prelude::{AsyncTask, Buffer, JsObjectValue, Object};
 use napi::{Env, Error, Result, Status};
 use napi_derive::napi;
@@ -46,6 +49,14 @@ pub struct YaraX {
   /// Whether rule compilation errors are tolerated (rules skipped and
   /// reported via `ignored_rules`) instead of aborting compilation.
   pub(crate) ignore_invalid_rules: bool,
+  /// Errors generated while compiling the rules that could not be attributed
+  /// to a single skipped rule (syntax errors, invalid UTF-8, banned or
+  /// unknown module imports, include failures).
+  ///
+  /// Populated when compilation ran with `ignore_invalid_rules`; the errors
+  /// are otherwise surfaced by aborting compilation. Mirrors the upstream
+  /// Python binding's `Compiler.errors()`.
+  pub(crate) compilation_errors: Vec<CompilerError>,
   /// Cached scanner for reuse (thread-local, not Send/Sync safe)
   pub(crate) cached_scanner: RefCell<Option<Scanner<'static>>>,
   /// Maximum number of matches per pattern
@@ -92,8 +103,11 @@ impl YaraX {
     let warnings = get_compiler_warnings(&compiler)?;
     // Rules can be skipped even without `ignore_invalid_rules` (e.g. when
     // they depend on ignored modules), so the report is collected
-    // unconditionally.
+    // unconditionally. Compilation errors are only survivable in tolerant
+    // mode (otherwise `add_source` aborts above), so collect them from the
+    // compiler regardless and keep the ones that remain.
     let ignored_rules = collect_ignored_rules(&compiler);
+    let compilation_errors = get_compiler_errors(&compiler)?;
     let rules = compiler.build();
     let rule_sources = vec![RuleSource {
       source: source.clone(),
@@ -108,6 +122,7 @@ impl YaraX {
       variables: stored_variables,
       ignored_rules,
       ignore_invalid_rules,
+      compilation_errors,
       cached_scanner: RefCell::new(None),
       max_matches_per_pattern: None,
       use_mmap: None,
@@ -186,17 +201,17 @@ impl YaraX {
 
         let (context_data_slice, context_range) = match_item.data_with_context();
         let has_context = context_data_slice.len() > match_item.data().len();
-        
+
         let context_data = if has_context {
-            Some(String::from_utf8_lossy(context_data_slice).into_owned())
+          Some(String::from_utf8_lossy(context_data_slice).into_owned())
         } else {
-            None
+          None
         };
-        
+
         let context_match_offset = if has_context {
-            Some(context_range.start as u32)
+          Some(context_range.start as u32)
         } else {
-            None
+          None
         };
 
         matches_vec.push(MatchData {
@@ -309,9 +324,7 @@ impl YaraX {
   }
 
   /// Extracts scan results into thread-safe `RuleMatchData` structs.
-  pub fn extract_scan_data(
-    results: yara_x::ScanResults,
-  ) -> Vec<crate::types::RuleMatchData> {
+  pub fn extract_scan_data(results: yara_x::ScanResults) -> Vec<crate::types::RuleMatchData> {
     use crate::types::{MetaValueData, RuleMatchData};
 
     let matching_rules = results.matching_rules();
@@ -415,6 +428,26 @@ impl YaraX {
   #[napi]
   pub fn get_ignored_rules(&self) -> Vec<IgnoredRule> {
     self.ignored_rules.clone()
+  }
+
+  /// Gets the errors generated while compiling the rules, when compilation
+  /// was performed with `ignore_invalid_rules: true`.
+  ///
+  /// In tolerant mode, per-rule failures are reported by
+  /// [`get_ignored_rules`](Self::get_ignored_rules) (where the same error
+  /// also appears in the entry's `detail`) and the remaining rules are
+  /// compiled. Every error the compiler generated is collected here,
+  /// including source-level errors that cannot be attributed to a single
+  /// skipped rule (syntax errors, invalid UTF-8, banned or unknown module
+  /// imports, include failures) — in strict mode those abort compilation
+  /// instead. Mirrors the upstream Python binding's `Compiler.errors()`.
+  ///
+  /// # Returns
+  ///
+  /// A vector of `CompilerError` objects (empty when no errors occurred)
+  #[napi]
+  pub fn get_compilation_errors(&self) -> Vec<CompilerError> {
+    self.compilation_errors.clone()
   }
 
   /// Sets the maximum number of matches per pattern.
@@ -695,6 +728,7 @@ impl YaraX {
     }
 
     self.ignored_rules = collect_ignored_rules(&compiler);
+    self.compilation_errors = get_compiler_errors(&compiler)?;
     self.rules = Arc::new(compiler.build());
 
     // Update source_code for WASM emission
@@ -757,6 +791,7 @@ impl YaraX {
     }
 
     self.ignored_rules = collect_ignored_rules(&compiler);
+    self.compilation_errors = get_compiler_errors(&compiler)?;
     self.rules = Arc::new(compiler.build());
 
     // Update source_code for WASM emission
@@ -816,12 +851,7 @@ impl YaraX {
     if self.rule_sources.is_empty() {
       let source = self.source_code.as_deref().unwrap_or_default();
       if !source.is_empty() {
-        add_source_to_compiler_tolerant(
-          &mut compiler,
-          source,
-          None,
-          self.ignore_invalid_rules,
-        )?;
+        add_source_to_compiler_tolerant(&mut compiler, source, None, self.ignore_invalid_rules)?;
       }
     }
 
@@ -836,6 +866,7 @@ impl YaraX {
     }
 
     self.ignored_rules = collect_ignored_rules(&compiler);
+    self.compilation_errors = get_compiler_errors(&compiler)?;
     let rules = compiler.build();
     self.rules = Arc::new(rules);
 

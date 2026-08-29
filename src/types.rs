@@ -131,12 +131,16 @@ pub struct CompilerOptions<'a> {
   /// Whether to skip rules that fail to compile instead of failing the whole
   /// compilation.
   ///
-  /// When `true`, a rule that fails to compile (or depends on an ignored or
-  /// banned module) is skipped and the remaining rules are compiled. The
-  /// skipped rules, along with the reason, are reported by
-  /// [`YaraX::get_ignored_rules`](crate::YaraX::get_ignored_rules). When
-  /// `false` (the default), any rule that fails to compile aborts the
-  /// compilation with an error.
+  /// When `true`, a rule that fails to compile is skipped and the remaining
+  /// rules are compiled. The skipped rules, along with the reason, are
+  /// reported by
+  /// [`YaraX::get_ignored_rules`](crate::YaraX::get_ignored_rules). Errors
+  /// that can't be attributed to a single skipped rule (syntax errors,
+  /// invalid UTF-8, banned or unknown module imports, include failures) are
+  /// reported by
+  /// [`YaraX::get_compilation_errors`](crate::YaraX::get_compilation_errors)
+  /// instead of aborting the compilation. When `false` (the default), any
+  /// rule that fails to compile aborts the compilation with an error.
   pub ignore_invalid_rules: Option<bool>,
   /// Maximum number of warnings the compiler will report.
   ///
@@ -165,8 +169,11 @@ pub struct CompilerOptions<'a> {
 
 /// A rule that was skipped during compilation.
 ///
-/// Present only when compilation was performed with
-/// `ignore_invalid_rules: true`. See
+/// Populated whenever rules were skipped: because compilation was performed
+/// with `ignore_invalid_rules: true` and some rules failed to compile, or
+/// because rules depend on an ignored module (see
+/// [`CompilerOptions::ignore_modules`](CompilerOptions::ignore_modules)) or
+/// on a rule that was itself skipped. See
 /// [`CompilerOptions::ignore_invalid_rules`](CompilerOptions::ignore_invalid_rules).
 #[napi(object)]
 #[derive(Clone, Debug)]

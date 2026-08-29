@@ -99,15 +99,24 @@ impl<'a> VariableHandler for Scanner<'a> {
   }
 
   fn apply_bool_variable(&mut self, name: &str, value: bool) -> Result<()> {
-    self.set_global(name, value).map(|_| ()).map_err(to_napi_err)
+    self
+      .set_global(name, value)
+      .map(|_| ())
+      .map_err(to_napi_err)
   }
 
   fn apply_integer_variable(&mut self, name: &str, value: i64) -> Result<()> {
-    self.set_global(name, value).map(|_| ()).map_err(to_napi_err)
+    self
+      .set_global(name, value)
+      .map(|_| ())
+      .map_err(to_napi_err)
   }
 
   fn apply_float_variable(&mut self, name: &str, value: f64) -> Result<()> {
-    self.set_global(name, value).map(|_| ()).map_err(to_napi_err)
+    self
+      .set_global(name, value)
+      .map(|_| ())
+      .map_err(to_napi_err)
   }
 }
 
@@ -133,15 +142,24 @@ impl<'a> VariableHandler for Compiler<'a> {
   }
 
   fn apply_bool_variable(&mut self, name: &str, value: bool) -> Result<()> {
-    self.define_global(name, value).map(|_| ()).map_err(to_napi_err)
+    self
+      .define_global(name, value)
+      .map(|_| ())
+      .map_err(to_napi_err)
   }
 
   fn apply_integer_variable(&mut self, name: &str, value: i64) -> Result<()> {
-    self.define_global(name, value).map(|_| ()).map_err(to_napi_err)
+    self
+      .define_global(name, value)
+      .map(|_| ())
+      .map_err(to_napi_err)
   }
 
   fn apply_float_variable(&mut self, name: &str, value: f64) -> Result<()> {
-    self.define_global(name, value).map(|_| ()).map_err(to_napi_err)
+    self
+      .define_global(name, value)
+      .map(|_| ())
+      .map_err(to_napi_err)
   }
 }
 

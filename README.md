@@ -649,6 +649,8 @@ Methodology: Statistical analysis across multiple iterations with percentile rep
 ### YaraX Methods
 
 - `getWarnings()` - Get compiler warnings.
+- `getIgnoredRules()` - Get the rules that were skipped during compilation, with the reason each one was ignored (`ignored_module`, `ignored_rule`, or `compile_error`). Populated when rules depend on ignored modules, or when `ignoreInvalidRules` is enabled.
+- `getCompilationErrors()` - Get the errors generated while compiling, when `ignoreInvalidRules` is enabled. Includes source-level errors (syntax errors, banned/unknown module imports, include failures) that can't be attributed to a single skipped rule.
 - `scan(data: Buffer, variables?: Record<string, string | number | boolean>)` - Scan a buffer.
 - `scanFile(filePath: string, variables?: Record<string, string | number | boolean>)` - Scan a file.
 - `scanAsync(data: Buffer, variables?: Record<string, object | undefined | null>)` - Scan a buffer asynchronously.
@@ -666,6 +668,7 @@ Methodology: Statistical analysis across multiple iterations with percentile rep
 ### CompilerOptions
 
 - `defineVariables?: object` - Define global variables for the YARA rules.
+- `ignoreInvalidRules?: boolean` - Skip rules that fail to compile instead of failing the whole compilation. Skipped rules are reported by `getIgnoredRules()`; source-level errors that can't be attributed to a single rule are reported by `getCompilationErrors()`.
 - `ignoreModules?: string[]` - List of module names to ignore during compilation.
 - `bannedModules?: BannedModule[]` - List of banned modules that cannot be used.
 - `features?: string[]` - List of features to enable for the YARA rules.
