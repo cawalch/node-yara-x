@@ -40,8 +40,8 @@ mod variables;
 // Re-export public types
 pub use scanner::YaraX;
 pub use types::{
-  BannedModule, CompileResult, CompilerError, CompilerOptions, CompilerWarning, MatchData,
-  RuleMatch, ScanOptions,
+  BannedModule, CompileResult, CompilerError, CompilerOptions, CompilerWarning, IgnoredRule,
+  MatchData, RuleMatch, ScanOptions,
 };
 
 // Internal imports
@@ -119,6 +119,9 @@ pub fn create() -> YaraXImpl {
     rule_sources: Vec::new(),
     warnings: Vec::new(),
     variables: None,
+    ignored_rules: Vec::new(),
+    ignore_invalid_rules: false,
+    compilation_errors: Vec::new(),
     cached_scanner: RefCell::new(None),
     max_matches_per_pattern: None,
     use_mmap: None,
@@ -179,6 +182,9 @@ pub fn deserialize(data: Buffer) -> Result<YaraXImpl> {
     rule_sources: Vec::new(),
     warnings: Vec::new(),
     variables: None,
+    ignored_rules: Vec::new(),
+    ignore_invalid_rules: false,
+    compilation_errors: Vec::new(),
     cached_scanner: RefCell::new(None),
     max_matches_per_pattern: None,
     use_mmap: None,

@@ -4,13 +4,14 @@
 //! including applying compiler options and generating WASM output.
 
 use crate::error::compile_error_to_napi;
-use crate::types::{CompilerOptions, RuleSource, VariableMap};
+use crate::types::{CompilerError, CompilerOptions, IgnoredRule, RuleSource, VariableMap};
 use crate::variables::{get_variable_value, VariableHandler};
 use napi::bindgen_prelude::Object;
 use napi::{Error, Result, Status};
 use std::collections::HashMap;
 use std::path::Path;
-use yara_x::Compiler;
+use yara_x::errors::CompileError;
+use yara_x::{Compiler, IgnoredRuleReason};
 
 /// Adds a source string to the compiler, switching namespaces when requested.
 pub fn add_source_to_compiler(
@@ -27,6 +28,107 @@ pub fn add_source_to_compiler(
     .map_err(|e| compile_error_to_napi(&e))?;
 
   Ok(())
+}
+
+/// Adds a source string to the compiler, optionally tolerating per-rule
+/// compilation errors so that the remaining rules can still be compiled.
+///
+/// When `tolerate` is `true`, a rule that fails to compile is skipped and
+/// tracked by the compiler (reportable via
+/// [`collect_ignored_rules`](Self::collect_ignored_rules)) instead of
+/// propagating the error. When `false`, the first error is returned, exactly
+/// like [`add_source_to_compiler`](Self::add_source_to_compiler).
+///
+/// Errors that cannot be attributed to a single skipped rule (syntax errors,
+/// invalid UTF-8, banned or unknown module imports, include failures) are not
+/// recorded by the compiler as ignored rules; callers surfacing them via
+/// [`uncovered_compiler_errors`](Self::uncovered_compiler_errors) or
+/// [`crate::variables::get_compiler_errors`].
+pub fn add_source_to_compiler_tolerant(
+  compiler: &mut Compiler<'_>,
+  source: &str,
+  namespace: Option<&str>,
+  tolerate: bool,
+) -> Result<()> {
+  if let Some(namespace) = namespace {
+    compiler.new_namespace(namespace);
+  }
+
+  if tolerate {
+    let _ = compiler.add_source(source);
+    Ok(())
+  } else {
+    compiler
+      .add_source(source)
+      .map(|_| ())
+      .map_err(|e| compile_error_to_napi(&e))
+  }
+}
+
+/// Collects the rules that were skipped during compilation, along with the
+/// reason each one was ignored.
+///
+/// The report is only populated when rules were actually skipped (e.g. because
+/// compilation was performed with `ignore_invalid_rules`, or because the
+/// rules depend on ignored modules).
+pub fn collect_ignored_rules(compiler: &Compiler) -> Vec<IgnoredRule> {
+  compiler
+    .ignored_rules()
+    .map(|(name, reason)| match reason {
+      IgnoredRuleReason::IgnoredModule(module) => IgnoredRule {
+        name: name.to_string(),
+        reason: "ignored_module".to_string(),
+        detail: Some(module.to_string()),
+      },
+      IgnoredRuleReason::IgnoredRule(rule) => IgnoredRule {
+        name: name.to_string(),
+        reason: "ignored_rule".to_string(),
+        detail: Some(rule.to_string()),
+      },
+      IgnoredRuleReason::CompileError(err) => IgnoredRule {
+        name: name.to_string(),
+        reason: "compile_error".to_string(),
+        detail: Some(err.to_string()),
+      },
+    })
+    .collect()
+}
+
+/// Collects the compilation errors that are **not** attributable to a skipped
+/// rule recorded by [`Compiler::ignored_rules`].
+///
+/// yara-x only records per-rule failures (unknown identifiers, linter errors)
+/// as ignored rules; errors that affect the whole source or import/include
+/// processing — syntax errors, invalid UTF-8, banned or unknown module imports
+/// — are pushed to the compiler's error list without a matching
+/// `IgnoredRuleReason::CompileError` entry. This helper returns exactly those
+/// errors so callers that tolerate compilation failures can surface them
+/// instead of silently dropping them.
+pub fn uncovered_compiler_errors(compiler: &Compiler) -> Vec<CompilerError> {
+  let covered: Vec<*const CompileError> = compiler
+    .ignored_rules()
+    .filter_map(|(_, reason)| match reason {
+      IgnoredRuleReason::CompileError(err) => Some(err as *const CompileError),
+      _ => None,
+    })
+    .collect();
+
+  compiler
+    .errors()
+    .iter()
+    .filter(|err| {
+      !covered
+        .iter()
+        .any(|covered| std::ptr::eq(*covered, *err as *const CompileError))
+    })
+    .map(|err| CompilerError {
+      code: err.code().to_string(),
+      message: err.to_string(),
+      source: None,
+      line: None,
+      column: None,
+    })
+    .collect()
 }
 
 /// Applies compiler options to a YARA compiler instance.
@@ -178,12 +280,38 @@ pub fn compile_sources_to_wasm(
 
   apply_compiler_options(&mut compiler, options, false)?;
 
+  let ignore_invalid_rules = options
+    .as_ref()
+    .and_then(|opts| opts.ignore_invalid_rules)
+    .unwrap_or(false);
+
   for rule_source in sources {
-    add_source_to_compiler(
+    add_source_to_compiler_tolerant(
       &mut compiler,
       &rule_source.source,
       rule_source.namespace.as_deref(),
+      ignore_invalid_rules,
     )?;
+  }
+
+  // When tolerating invalid rules, errors that cannot be attributed to a
+  // single skipped rule (syntax errors, banned or unknown module imports,
+  // include failures) would otherwise be silently dropped. There is no
+  // report channel on the one-shot WASM path, so surface them as an error
+  // instead of emitting a WASM module that silently lacks rules.
+  if ignore_invalid_rules {
+    let uncovered = uncovered_compiler_errors(&compiler);
+    if !uncovered.is_empty() {
+      let details = uncovered
+        .iter()
+        .map(|e| format!("{}: {}", e.code, e.message))
+        .collect::<Vec<_>>()
+        .join("\n");
+      return Err(Error::new(
+        Status::GenericFailure,
+        format!("Compilation error(s) not attributable to a skipped rule: {details}"),
+      ));
+    }
   }
 
   compiler

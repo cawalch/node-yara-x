@@ -128,6 +128,20 @@ pub struct CompilerOptions<'a> {
   pub error_on_slow_pattern: Option<bool>,
   /// Whether to raise an error on slow loops.
   pub error_on_slow_loop: Option<bool>,
+  /// Whether to skip rules that fail to compile instead of failing the whole
+  /// compilation.
+  ///
+  /// When `true`, a rule that fails to compile is skipped and the remaining
+  /// rules are compiled. The skipped rules, along with the reason, are
+  /// reported by
+  /// [`YaraX::get_ignored_rules`](crate::YaraX::get_ignored_rules). Errors
+  /// that can't be attributed to a single skipped rule (syntax errors,
+  /// invalid UTF-8, banned or unknown module imports, include failures) are
+  /// reported by
+  /// [`YaraX::get_compilation_errors`](crate::YaraX::get_compilation_errors)
+  /// instead of aborting the compilation. When `false` (the default), any
+  /// rule that fails to compile aborts the compilation with an error.
+  pub ignore_invalid_rules: Option<bool>,
   /// Maximum number of warnings the compiler will report.
   ///
   /// When set, only the first `n` warnings are emitted; additional warnings
@@ -151,6 +165,27 @@ pub struct CompilerOptions<'a> {
   pub include_directories: Option<Vec<String>>,
   /// Whether to enable include statements in YARA rules.
   pub enable_includes: Option<bool>,
+}
+
+/// A rule that was skipped during compilation.
+///
+/// Populated whenever rules were skipped: because compilation was performed
+/// with `ignore_invalid_rules: true` and some rules failed to compile, or
+/// because rules depend on an ignored module (see
+/// [`CompilerOptions::ignore_modules`](CompilerOptions::ignore_modules)) or
+/// on a rule that was itself skipped. See
+/// [`CompilerOptions::ignore_invalid_rules`](CompilerOptions::ignore_invalid_rules).
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct IgnoredRule {
+  /// The identifier of the ignored rule.
+  pub name: String,
+  /// Why the rule was ignored: `"ignored_module"`, `"ignored_rule"`, or
+  /// `"compile_error"`.
+  pub reason: String,
+  /// Details depending on the reason: the name of the ignored module, the name
+  /// of the ignored rule this one depends on, or the compilation error message.
+  pub detail: Option<String>,
 }
 
 /// Represents a module that is banned from being used in YARA rules.
