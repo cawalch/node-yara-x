@@ -2185,6 +2185,28 @@ rule test_1 {
       strictEqual(restored.scan(Buffer.from("needle")).length, 1);
       strictEqual(restored.scan(Buffer.from("haystack")).length, 1);
     });
+
+    it("should report match offsets and context offsets as numbers", () => {
+      const scanner = yarax.compile(
+        'rule r { strings: $a = "needle" condition: $a }',
+      );
+      scanner.setMatchContextSize(8);
+
+      const [match] = scanner.scan(Buffer.from("hay needle stack"));
+      const [pattern] = match.matches;
+      strictEqual(pattern.offset, 4, "Match offset should be exact");
+      strictEqual(pattern.length, 6, "Match length should be exact");
+      strictEqual(typeof pattern.offset, "number", "Offset should be a number");
+      ok(
+        pattern.contextData.startsWith("hay ne"),
+        "Context should include bytes before the match",
+      );
+      strictEqual(
+        pattern.contextMatchOffset,
+        4,
+        "Context match offset should point at the match within the context",
+      );
+    });
   });
   });
 });

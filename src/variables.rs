@@ -171,7 +171,11 @@ pub fn get_variable_value(vars: &Object, key: &str) -> Result<VariableValue> {
     ValueType::Boolean => Ok(VariableValue::Bool(unsafe { value.cast::<bool>()? })),
     ValueType::Number => {
       let value = unsafe { value.cast::<f64>()? };
-      if value.fract() == 0.0 && value >= i64::MIN as f64 && value <= i64::MAX as f64 {
+      // Only whole numbers strictly below 2^63 are convertible to i64
+      // exactly. `i64::MAX as f64` rounds up to 2^63, so a value at or above
+      // that boundary would silently saturate to i64::MAX in an `as i64`
+      // cast — treat it as a float instead.
+      if value.fract() == 0.0 && value >= i64::MIN as f64 && value < i64::MAX as f64 {
         Ok(VariableValue::Integer(value as i64))
       } else {
         Ok(VariableValue::Float(value))

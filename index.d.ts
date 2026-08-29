@@ -515,23 +515,6 @@ export interface RuleSource {
 }
 
 /**
- * Options for configuring scanning operations.
- *
- * These options control resource usage and performance characteristics
- * during rule scanning.
- */
-export interface ScanOptions {
-  /** Maximum number of matches per pattern. When a pattern reaches this limit, it won't produce more matches. */
-  maxMatchesPerPattern?: number
-  /** Whether to use memory-mapped files for scanning. Disabling this is safer but slower. */
-  useMmap?: boolean
-  /** Scan timeout in milliseconds. */
-  timeoutMs?: number
-  /** Optional number of bytes to include before and after the match. */
-  matchContextSize?: number
-}
-
-/**
  * Compiles a YARA rule source string and returns any warnings or errors generated during the
  * compilation process.
  *
