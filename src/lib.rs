@@ -41,7 +41,7 @@ mod variables;
 pub use scanner::YaraX;
 pub use types::{
   BannedModule, CompileResult, CompilerError, CompilerOptions, CompilerWarning, IgnoredRule,
-  MatchData, RuleMatch, ScanOptions,
+  MatchData, RuleMatch,
 };
 
 // Internal imports

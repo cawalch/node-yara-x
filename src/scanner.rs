@@ -221,14 +221,14 @@ impl YaraX {
         };
 
         let context_match_offset = if has_context {
-          Some(context_range.start as u32)
+          Some(context_range.start as i64)
         } else {
           None
         };
 
         matches_vec.push(MatchData {
-          offset: offset as u32,
-          length: length as u32,
+          offset: offset as i64,
+          length: length as i64,
           data: matched_data,
           identifier: pattern_id.clone(),
           context_data,
