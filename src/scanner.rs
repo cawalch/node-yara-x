@@ -4,7 +4,8 @@
 //! scanning data with compiled YARA rules, including scanner caching for performance.
 
 use crate::compiler::{
-  add_source_to_compiler_tolerant, apply_compiler_options, collect_ignored_rules,
+  add_source_to_compiler_tolerant, apply_compiler_options, apply_stored_compiler_options,
+  collect_ignored_rules, replay_sources_to_wasm, stored_options_from, StoredCompilerOptions,
 };
 use crate::error::{io_error_to_napi, scan_error_to_napi};
 use crate::types::{
@@ -57,6 +58,15 @@ pub struct YaraX {
   /// are otherwise surfaced by aborting compilation. Mirrors the upstream
   /// Python binding's `Compiler.errors()`.
   pub(crate) compilation_errors: Vec<CompilerError>,
+  /// The compiler options the rules were compiled with, minus the fields
+  /// tracked separately (`namespace`, `define_variables`, and
+  /// `ignore_invalid_rules`).
+  ///
+  /// Replayed on every incremental recompilation (`add_rule_source`,
+  /// `add_rule_sources`, `define_variable`) and on WASM emission so the
+  /// resulting rules behave exactly like a one-shot compilation of the same
+  /// sources with the same options.
+  pub(crate) stored_options: StoredCompilerOptions,
   /// Cached scanner for reuse (thread-local, not Send/Sync safe)
   pub(crate) cached_scanner: RefCell<Option<Scanner<'static>>>,
   /// Maximum number of matches per pattern
@@ -86,6 +96,7 @@ impl YaraX {
   ) -> Result<Self> {
     let mut compiler = Compiler::new();
 
+    let stored_options = stored_options_from(options.as_ref());
     let stored_variables = apply_compiler_options(&mut compiler, options.as_ref(), true)?;
     let namespace = options.as_ref().and_then(|opts| opts.namespace.as_deref());
     let ignore_invalid_rules = options
@@ -123,6 +134,7 @@ impl YaraX {
       ignored_rules,
       ignore_invalid_rules,
       compilation_errors,
+      stored_options,
       cached_scanner: RefCell::new(None),
       max_matches_per_pattern: None,
       use_mmap: None,
@@ -226,6 +238,78 @@ impl YaraX {
     }
 
     matches_vec
+  }
+
+  /// Applies this scanner's stored compiler options and stored global
+  /// variables to a compiler, then adds all rule sources in order.
+  ///
+  /// Variables are applied **before** the sources — yara-x requires globals
+  /// to be defined before compiling the rules that reference them — mirroring
+  /// [`create_scanner_from_source`](Self::create_scanner_from_source).
+  fn compile_all_sources(&self, compiler: &mut Compiler<'_>) -> Result<()> {
+    apply_stored_compiler_options(compiler, &self.stored_options)?;
+
+    if let Some(vars) = &self.variables {
+      for (key, value) in vars {
+        compiler.apply_variable_value(key, value)?;
+      }
+    }
+
+    for source in &self.rule_sources {
+      add_source_to_compiler_tolerant(
+        compiler,
+        &source.source,
+        source.namespace.as_deref(),
+        self.ignore_invalid_rules,
+      )?;
+    }
+
+    if self.rule_sources.is_empty() {
+      let source = self.source_code.as_deref().unwrap_or_default();
+      if !source.is_empty() {
+        add_source_to_compiler_tolerant(compiler, source, None, self.ignore_invalid_rules)?;
+      }
+    }
+
+    Ok(())
+  }
+
+  /// Consumes the compiler produced by a recompilation, refreshing the
+  /// warnings, ignored-rules report and compilation errors, and publishing
+  /// the rebuilt rules.
+  fn refresh_compilation_state(&mut self, compiler: Compiler<'_>) -> Result<()> {
+    self.warnings = get_compiler_warnings(&compiler)?;
+    self.ignored_rules = collect_ignored_rules(&compiler);
+    self.compilation_errors = get_compiler_errors(&compiler)?;
+    self.rules = Arc::new(compiler.build());
+    self.invalidate_scanner_cache();
+    Ok(())
+  }
+
+  /// Rebuilds `source_code` from the current rule sources (used by WASM
+  /// emission when replaying a concatenated source).
+  fn rebuild_source_code(&mut self) {
+    self.source_code = Some(
+      self
+        .rule_sources
+        .iter()
+        .map(|s| s.source.as_str())
+        .collect::<Vec<_>>()
+        .join("\n"),
+    );
+  }
+
+  /// Returns the rule sources to compile, or falls back to `source_code` for
+  /// scanners built incrementally without any recorded sources.
+  fn sources_for_emit(&self) -> Vec<RuleSource> {
+    if self.rule_sources.is_empty() {
+      vec![RuleSource {
+        source: self.source_code.clone().unwrap_or_default(),
+        namespace: None,
+      }]
+    } else {
+      self.rule_sources.clone()
+    }
   }
 
   /// Gets or creates a cached scanner for reuse.
@@ -567,18 +651,24 @@ impl YaraX {
   /// Ok(()) on success, or an error if emission fails
   #[napi]
   pub fn emit_wasm_file(&self, output_path: String) -> Result<()> {
-    let source = self.source_code.as_ref().ok_or_else(|| {
-      Error::new(
+    if self.source_code.is_none() {
+      return Err(Error::new(
         Status::InvalidArg,
         "Cannot emit WASM file: source code not available",
-      )
-    })?;
-
-    if self.rule_sources.is_empty() {
-      crate::compiler::compile_source_to_wasm(source, &output_path, None)
-    } else {
-      crate::compiler::compile_sources_to_wasm(&self.rule_sources, &output_path, None)
+      ));
     }
+
+    let sources = self.sources_for_emit();
+
+    // Replay the stored options and variables so the emitted module matches
+    // the scanner's compilation semantics (including `ignore_invalid_rules`).
+    replay_sources_to_wasm(
+      &sources,
+      &output_path,
+      &self.stored_options,
+      self.variables.as_ref(),
+      self.ignore_invalid_rules,
+    )
   }
 
   /// Serializes the compiled YARA rules to a portable binary blob.
@@ -679,6 +769,9 @@ impl YaraX {
       source_code: self.source_code.clone(),
       rule_sources: self.rule_sources.clone(),
       output_path,
+      stored_options: self.stored_options.clone(),
+      variables: self.variables.clone(),
+      ignore_invalid_rules: self.ignore_invalid_rules,
     }))
   }
 
@@ -707,40 +800,14 @@ impl YaraX {
     });
 
     let mut compiler = Compiler::new();
+    // Replay the stored options and variables (in the same order as the
+    // original compilation) and recompile all sources in a single pass.
+    self.compile_all_sources(&mut compiler)?;
 
-    // Apply compiler options (banned modules, features, etc.)
-    // These are preserved from the original compilation
+    self.refresh_compilation_state(compiler)?;
 
-    // Add all rule sources (existing + new) to the compiler
-    for source in &self.rule_sources {
-      add_source_to_compiler_tolerant(
-        &mut compiler,
-        &source.source,
-        source.namespace.as_deref(),
-        self.ignore_invalid_rules,
-      )?;
-    }
-
-    if let Some(vars) = &self.variables {
-      for (key, value) in vars {
-        compiler.apply_variable_value(key, value)?;
-      }
-    }
-
-    self.ignored_rules = collect_ignored_rules(&compiler);
-    self.compilation_errors = get_compiler_errors(&compiler)?;
-    self.rules = Arc::new(compiler.build());
-
-    // Update source_code for WASM emission
-    if let Some(source) = &mut self.source_code {
-      source.reserve(rule_source.len() + 1);
-      source.push('\n');
-      source.push_str(&rule_source);
-    } else {
-      self.source_code = Some(rule_source);
-    }
-
-    self.invalidate_scanner_cache();
+    // Keep source_code in sync for WASM emission
+    self.rebuild_source_code();
 
     Ok(())
   }
@@ -773,38 +840,14 @@ impl YaraX {
     self.rule_sources.extend(rule_sources);
 
     let mut compiler = Compiler::new();
+    // Replay the stored options and variables and recompile all sources in a
+    // single pass.
+    self.compile_all_sources(&mut compiler)?;
 
-    // Compile all sources in a single pass
-    for source in &self.rule_sources {
-      add_source_to_compiler_tolerant(
-        &mut compiler,
-        &source.source,
-        source.namespace.as_deref(),
-        self.ignore_invalid_rules,
-      )?;
-    }
+    self.refresh_compilation_state(compiler)?;
 
-    if let Some(vars) = &self.variables {
-      for (key, value) in vars {
-        compiler.apply_variable_value(key, value)?;
-      }
-    }
-
-    self.ignored_rules = collect_ignored_rules(&compiler);
-    self.compilation_errors = get_compiler_errors(&compiler)?;
-    self.rules = Arc::new(compiler.build());
-
-    // Update source_code for WASM emission
-    for source in &self.rule_sources {
-      if let Some(code) = &mut self.source_code {
-        code.push('\n');
-        code.push_str(&source.source);
-      } else {
-        self.source_code = Some(source.source.clone());
-      }
-    }
-
-    self.invalidate_scanner_cache();
+    // Keep source_code in sync for WASM emission
+    self.rebuild_source_code();
 
     Ok(())
   }
@@ -837,7 +880,18 @@ impl YaraX {
   /// Ok(()) on success, or an error if compilation fails
   #[napi]
   pub fn define_variable(&mut self, name: String, value: String) -> Result<()> {
+    // Stage the variable in a local copy so `self.variables` is only updated
+    // once the recompilation succeeds (the rules that reference the variable
+    // must be compiled with it defined).
+    let mut variables = self.variables.clone().unwrap_or_default();
+    variables.insert(name.clone(), VariableValue::String(value.clone()));
+
     let mut compiler = Compiler::new();
+    apply_stored_compiler_options(&mut compiler, &self.stored_options)?;
+
+    for (key, value) in &variables {
+      compiler.apply_variable_value(key, value)?;
+    }
 
     for source in &self.rule_sources {
       add_source_to_compiler_tolerant(
@@ -855,22 +909,8 @@ impl YaraX {
       }
     }
 
-    compiler.apply_variable(&name, &value)?;
-
-    if let Some(vars) = &mut self.variables {
-      vars.insert(name, VariableValue::String(value));
-    } else {
-      let mut vars = HashMap::new();
-      vars.insert(name, VariableValue::String(value));
-      self.variables = Some(vars);
-    }
-
-    self.ignored_rules = collect_ignored_rules(&compiler);
-    self.compilation_errors = get_compiler_errors(&compiler)?;
-    let rules = compiler.build();
-    self.rules = Arc::new(rules);
-
-    self.invalidate_scanner_cache();
+    self.refresh_compilation_state(compiler)?;
+    self.variables = Some(variables);
 
     Ok(())
   }

@@ -4,7 +4,9 @@
 //! including applying compiler options and generating WASM output.
 
 use crate::error::compile_error_to_napi;
-use crate::types::{CompilerError, CompilerOptions, IgnoredRule, RuleSource, VariableMap};
+use crate::types::{
+  BannedModule, CompilerError, CompilerOptions, IgnoredRule, RuleSource, VariableMap,
+};
 use crate::variables::{get_variable_value, VariableHandler};
 use napi::bindgen_prelude::Object;
 use napi::{Error, Result, Status};
@@ -13,15 +15,127 @@ use std::path::Path;
 use yara_x::errors::CompileError;
 use yara_x::{Compiler, IgnoredRuleReason};
 
+/// The compiler options that affect how rule sources are compiled, excluding
+/// the fields handled separately by [`crate::scanner::YaraX`] (namespace,
+/// `define_variables`, `ignore_invalid_rules`).
+///
+/// Unlike [`CompilerOptions`] this is plain owned data with no N-API object
+/// references, so it can be stored on the scanner and replayed across
+/// incremental recompilations and WASM emission.
+#[derive(Debug, Clone, Default)]
+pub struct StoredCompilerOptions {
+  pub ignore_modules: Vec<String>,
+  pub banned_modules: Vec<BannedModule>,
+  pub features: Vec<String>,
+  pub relaxed_re_syntax: bool,
+  pub condition_optimization: bool,
+  pub error_on_slow_pattern: bool,
+  pub error_on_slow_loop: bool,
+  pub max_warnings: Option<usize>,
+  pub disable_warnings: Vec<String>,
+  pub enable_all_warnings: Option<bool>,
+  pub include_directories: Vec<String>,
+  pub enable_includes: Option<bool>,
+}
+
+/// Extracts the persisted compiler options from a [`CompilerOptions`] object.
+///
+/// `namespace`, `define_variables` and `ignore_invalid_rules` are excluded:
+/// they are tracked separately by the scanner.
+pub fn stored_options_from(options: Option<&CompilerOptions<'_>>) -> StoredCompilerOptions {
+  let mut stored = StoredCompilerOptions::default();
+
+  if let Some(opts) = options {
+    if let Some(modules) = &opts.ignore_modules {
+      stored.ignore_modules = modules.clone();
+    }
+    if let Some(modules) = &opts.banned_modules {
+      stored.banned_modules = modules.clone();
+    }
+    if let Some(features) = &opts.features {
+      stored.features = features.clone();
+    }
+    stored.relaxed_re_syntax = opts.relaxed_re_syntax.unwrap_or(false);
+    stored.condition_optimization = opts.condition_optimization.unwrap_or(false);
+    stored.error_on_slow_pattern = opts.error_on_slow_pattern.unwrap_or(false);
+    stored.error_on_slow_loop = opts.error_on_slow_loop.unwrap_or(false);
+    stored.max_warnings = opts.max_warnings.map(|m| m as usize);
+    if let Some(codes) = &opts.disable_warnings {
+      stored.disable_warnings = codes.clone();
+    }
+    stored.enable_all_warnings = opts.enable_all_warnings;
+    if let Some(dirs) = &opts.include_directories {
+      stored.include_directories = dirs.clone();
+    }
+    stored.enable_includes = opts.enable_includes;
+  }
+
+  stored
+}
+
+/// Applies previously-stored compiler options to a compiler instance.
+///
+/// This is the persisted counterpart of the option half of
+/// [`apply_compiler_options`], used when replaying a scanner's compilation
+/// state during incremental recompilation or WASM emission.
+pub fn apply_stored_compiler_options(
+  compiler: &mut Compiler<'_>,
+  stored: &StoredCompilerOptions,
+) -> Result<()> {
+  for module in &stored.ignore_modules {
+    let _ = compiler.ignore_module(module);
+  }
+
+  for banned in &stored.banned_modules {
+    let _ = compiler.ban_module(&banned.name, &banned.error_title, &banned.error_message);
+  }
+
+  for feature in &stored.features {
+    let _ = compiler.enable_feature(feature);
+  }
+
+  for dir in &stored.include_directories {
+    compiler.add_include_dir(dir);
+  }
+
+  if let Some(enable_includes) = stored.enable_includes {
+    compiler.enable_includes(enable_includes);
+  }
+
+  compiler
+    .relaxed_re_syntax(stored.relaxed_re_syntax)
+    .condition_optimization(stored.condition_optimization)
+    .error_on_slow_pattern(stored.error_on_slow_pattern)
+    .error_on_slow_loop(stored.error_on_slow_loop);
+
+  if let Some(max) = stored.max_warnings {
+    compiler.max_warnings(max);
+  }
+
+  if let Some(enable_all) = stored.enable_all_warnings {
+    compiler.switch_all_warnings(enable_all);
+  }
+
+  for code in &stored.disable_warnings {
+    compiler
+      .switch_warning(code, false)
+      .map_err(crate::error::to_napi_err)?;
+  }
+
+  Ok(())
+}
+
 /// Adds a source string to the compiler, switching namespaces when requested.
+///
+/// A `None` namespace means the default namespace; the compiler switches to
+/// it explicitly so that a source without a namespace never inherits the
+/// namespace of a previously added source.
 pub fn add_source_to_compiler(
   compiler: &mut Compiler<'_>,
   source: &str,
   namespace: Option<&str>,
 ) -> Result<()> {
-  if let Some(namespace) = namespace {
-    compiler.new_namespace(namespace);
-  }
+  compiler.new_namespace(namespace.unwrap_or("default"));
 
   compiler
     .add_source(source)
@@ -50,9 +164,9 @@ pub fn add_source_to_compiler_tolerant(
   namespace: Option<&str>,
   tolerate: bool,
 ) -> Result<()> {
-  if let Some(namespace) = namespace {
-    compiler.new_namespace(namespace);
-  }
+  // A `None` namespace means the default namespace; switch to it explicitly
+  // so a source without a namespace never inherits a previously set one.
+  compiler.new_namespace(namespace.unwrap_or("default"));
 
   if tolerate {
     let _ = compiler.add_source(source);
@@ -153,67 +267,8 @@ pub fn apply_compiler_options(
   let mut stored_variables = None;
 
   if let Some(opts) = options {
-    // Configure ignored modules
-    if let Some(ignored_modules) = &opts.ignore_modules {
-      for module in ignored_modules {
-        let _ = compiler.ignore_module(module);
-      }
-    }
-
-    // Configure banned modules
-    if let Some(banned_modules) = &opts.banned_modules {
-      for banned in banned_modules {
-        let _ = compiler.ban_module(&banned.name, &banned.error_title, &banned.error_message);
-      }
-    }
-
-    // Enable features
-    if let Some(features) = &opts.features {
-      for feature in features {
-        let _ = compiler.enable_feature(feature);
-      }
-    }
-
-    // Add include directories
-    if let Some(include_dirs) = &opts.include_directories {
-      for dir in include_dirs {
-        compiler.add_include_dir(dir);
-      }
-    }
-
-    // Enable or disable includes
-    if let Some(enable_includes) = opts.enable_includes {
-      compiler.enable_includes(enable_includes);
-    }
-
-    // Apply compiler flags
-    compiler
-      .relaxed_re_syntax(opts.relaxed_re_syntax.unwrap_or(false))
-      .condition_optimization(opts.condition_optimization.unwrap_or(false))
-      .error_on_slow_pattern(opts.error_on_slow_pattern.unwrap_or(false))
-      .error_on_slow_loop(opts.error_on_slow_loop.unwrap_or(false));
-
-    // Apply warning controls.
-    //
-    // `switch_all_warnings` toggles every warning type at once, while
-    // `switch_warning` flips an individual code. `switch_warning` returns
-    // `Err(InvalidWarningCode)` for an unknown code, which we surface as a
-    // N-API error via the Display impl rather than silently dropping it.
-    if let Some(max) = opts.max_warnings {
-      compiler.max_warnings(max as usize);
-    }
-
-    if let Some(enable_all) = opts.enable_all_warnings {
-      compiler.switch_all_warnings(enable_all);
-    }
-
-    if let Some(disabled) = &opts.disable_warnings {
-      for code in disabled {
-        compiler
-          .switch_warning(code, false)
-          .map_err(crate::error::to_napi_err)?;
-      }
-    }
+    let stored = stored_options_from(Some(opts));
+    apply_stored_compiler_options(compiler, &stored)?;
 
     // Apply variables
     if let Some(vars) = &opts.define_variables {
@@ -285,6 +340,45 @@ pub fn compile_sources_to_wasm(
     .and_then(|opts| opts.ignore_invalid_rules)
     .unwrap_or(false);
 
+  add_sources_and_emit(compiler, sources, ignore_invalid_rules, output_path)
+}
+
+/// Replays a scanner's persisted compilation state (stored options and
+/// variables) and emits the resulting WASM module from its rule sources.
+///
+/// This is the WASM counterpart of the scanner's incremental recompilation:
+/// it applies the same stored compiler options and the same global variables
+/// (in the same order, variables before sources) so the emitted module
+/// matches the scanner's semantics — including `ignore_invalid_rules`.
+pub fn replay_sources_to_wasm(
+  sources: &[RuleSource],
+  output_path: &str,
+  stored: &StoredCompilerOptions,
+  variables: Option<&VariableMap>,
+  ignore_invalid_rules: bool,
+) -> Result<()> {
+  let mut compiler = Compiler::new();
+
+  apply_stored_compiler_options(&mut compiler, stored)?;
+
+  if let Some(vars) = variables {
+    for (key, value) in vars {
+      compiler.apply_variable_value(key, value)?;
+    }
+  }
+
+  add_sources_and_emit(compiler, sources, ignore_invalid_rules, output_path)
+}
+
+/// Adds all sources to the compiler and emits the WASM module, rejecting
+/// source-level errors when tolerating invalid rules (there is no report
+/// channel on the one-shot WASM path).
+fn add_sources_and_emit(
+  mut compiler: Compiler<'_>,
+  sources: &[RuleSource],
+  ignore_invalid_rules: bool,
+  output_path: &str,
+) -> Result<()> {
   for rule_source in sources {
     add_source_to_compiler_tolerant(
       &mut compiler,
