@@ -522,6 +522,109 @@ describe("yarax Tests", () => {
     );
   });
 
+  describe("ignore invalid rules", () => {
+    const validRule = `rule test_good {
+      strings:
+        $a = "hello world"
+      condition:
+        $a
+    }`;
+    const brokenRule = `rule test_bad {
+      condition:
+        undefined_variable_xyz
+    }`;
+
+    it("should throw when invalid rules are not ignored", () => {
+      throws(
+        () => yarax.compile(validRule + "\n" + brokenRule),
+        /undefined_variable_xyz/,
+        "Compiling an invalid rule should throw without ignoreInvalidRules",
+      );
+    });
+
+    it("should skip invalid rules when ignoreInvalidRules is set", () => {
+      const scanner = yarax.compile(validRule + "\n" + brokenRule, {
+        ignoreInvalidRules: true,
+      });
+
+      const ignored = scanner.getIgnoredRules();
+      strictEqual(ignored.length, 1, "Should have one ignored rule");
+      strictEqual(ignored[0].name, "test_bad", "Rule name should match");
+      strictEqual(
+        ignored[0].reason,
+        "compile_error",
+        "Reason should be compile_error",
+      );
+      ok(
+        ignored[0].detail.includes("undefined_variable_xyz"),
+        "Ignored rule detail should mention the error",
+      );
+
+      const buffer = Buffer.from("This is a test with hello world in it");
+      const matches = scanner.scan(buffer);
+      strictEqual(matches.length, 1, "Valid rule should still match");
+      strictEqual(
+        matches[0].ruleIdentifier,
+        "test_good",
+        "Rule identifier should match",
+      );
+    });
+
+    it("should report empty ignored rules when nothing is skipped", () => {
+      const scanner = yarax.compile(validRule, {
+        ignoreInvalidRules: true,
+      });
+
+      strictEqual(
+        scanner.getIgnoredRules().length,
+        0,
+        "No rules should be ignored",
+      );
+    });
+
+    it("should keep the tolerant behavior and report across incremental compilation", () => {
+      const scanner = yarax.compile(brokenRule, {
+        ignoreInvalidRules: true,
+      });
+
+      deepStrictEqual(
+        scanner.getIgnoredRules().map((r) => r.name),
+        ["test_bad"],
+        "Broken rule should be reported after creation",
+      );
+
+      scanner.addRuleSource(
+        'rule test_added {\n  strings:\n    $a = "found me"\n  condition:\n    $a\n}',
+      );
+
+      deepStrictEqual(
+        scanner.getIgnoredRules().map((r) => r.name),
+        ["test_bad"],
+        "Report should be refreshed after addRuleSource",
+      );
+      strictEqual(
+        scanner.scan(Buffer.from("found me"))[0].ruleIdentifier,
+        "test_added",
+        "New rule should match",
+      );
+    });
+
+    it("should warn when rules depend on ignored modules", () => {
+      const rule = `rule test_pe {
+        condition:
+          pe.is_pe
+      }`;
+
+      const scanner = yarax.compile(rule, { ignoreModules: ["pe"] });
+
+      const warnings = scanner.getWarnings();
+      ok(
+        warnings.some((w) => w.code === "unsupported_module"),
+        "Should have an unsupported_module warning",
+      );
+    });
+  });
+
   it("should handle relaxed regular expression syntax", () => {
     const rule = `
       rule test_relaxed_re {

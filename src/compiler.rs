@@ -4,13 +4,13 @@
 //! including applying compiler options and generating WASM output.
 
 use crate::error::compile_error_to_napi;
-use crate::types::{CompilerOptions, RuleSource, VariableMap};
+use crate::types::{CompilerOptions, IgnoredRule, RuleSource, VariableMap};
 use crate::variables::{get_variable_value, VariableHandler};
 use napi::bindgen_prelude::Object;
 use napi::{Error, Result, Status};
 use std::collections::HashMap;
 use std::path::Path;
-use yara_x::Compiler;
+use yara_x::{Compiler, IgnoredRuleReason};
 
 /// Adds a source string to the compiler, switching namespaces when requested.
 pub fn add_source_to_compiler(
@@ -27,6 +27,64 @@ pub fn add_source_to_compiler(
     .map_err(|e| compile_error_to_napi(&e))?;
 
   Ok(())
+}
+
+/// Adds a source string to the compiler, optionally tolerating per-rule
+/// compilation errors so that the remaining rules can still be compiled.
+///
+/// When `tolerate` is `true`, a rule that fails to compile is skipped and
+/// tracked by the compiler (reportable via
+/// [`collect_ignored_rules`](Self::collect_ignored_rules)) instead of
+/// propagating the error. When `false`, the first error is returned, exactly
+/// like [`add_source_to_compiler`](Self::add_source_to_compiler).
+pub fn add_source_to_compiler_tolerant(
+  compiler: &mut Compiler<'_>,
+  source: &str,
+  namespace: Option<&str>,
+  tolerate: bool,
+) -> Result<()> {
+  if let Some(namespace) = namespace {
+    compiler.new_namespace(namespace);
+  }
+
+  if tolerate {
+    let _ = compiler.add_source(source);
+    Ok(())
+  } else {
+    compiler
+      .add_source(source)
+      .map(|_| ())
+      .map_err(|e| compile_error_to_napi(&e))
+  }
+}
+
+/// Collects the rules that were skipped during compilation, along with the
+/// reason each one was ignored.
+///
+/// The report is only populated when rules were actually skipped (e.g. because
+/// compilation was performed with `ignore_invalid_rules`, or because the
+/// rules depend on ignored modules).
+pub fn collect_ignored_rules(compiler: &Compiler) -> Vec<IgnoredRule> {
+  compiler
+    .ignored_rules()
+    .map(|(name, reason)| match reason {
+      IgnoredRuleReason::IgnoredModule(module) => IgnoredRule {
+        name: name.to_string(),
+        reason: "ignored_module".to_string(),
+        detail: Some(module.to_string()),
+      },
+      IgnoredRuleReason::IgnoredRule(rule) => IgnoredRule {
+        name: name.to_string(),
+        reason: "ignored_rule".to_string(),
+        detail: Some(rule.to_string()),
+      },
+      IgnoredRuleReason::CompileError(err) => IgnoredRule {
+        name: name.to_string(),
+        reason: "compile_error".to_string(),
+        detail: Some(err.to_string()),
+      },
+    })
+    .collect()
 }
 
 /// Applies compiler options to a YARA compiler instance.
@@ -178,11 +236,17 @@ pub fn compile_sources_to_wasm(
 
   apply_compiler_options(&mut compiler, options, false)?;
 
+  let ignore_invalid_rules = options
+    .as_ref()
+    .and_then(|opts| opts.ignore_invalid_rules)
+    .unwrap_or(false);
+
   for rule_source in sources {
-    add_source_to_compiler(
+    add_source_to_compiler_tolerant(
       &mut compiler,
       &rule_source.source,
       rule_source.namespace.as_deref(),
+      ignore_invalid_rules,
     )?;
   }
 
