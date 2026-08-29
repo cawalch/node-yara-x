@@ -750,6 +750,119 @@ describe("yarax Tests", () => {
     });
   });
 
+  describe("incremental compilation state", () => {
+    it("should allow redefining a variable via defineVariable", () => {
+      const scanner = yarax.compile("rule r { condition: x == 5 }", {
+        defineVariables: { x: 5 },
+      });
+      strictEqual(scanner.scan(Buffer.from("x")).length, 1, "Initial value should match");
+
+      scanner.defineVariable("x", "6");
+      strictEqual(
+        scanner.scan(Buffer.from("x")).length,
+        0,
+        "Redefined value should no longer match x == 5",
+      );
+    });
+
+    it("should support create + defineVariable + addRuleSource", async () => {
+      const scanner = yarax.create();
+      scanner.defineVariable("x", "5");
+      scanner.addRuleSource("rule r { condition: x == 5 }");
+
+      strictEqual(scanner.scan(Buffer.from("x")).length, 1, "Sync scan should match");
+      const asyncMatches = await scanner.scanAsync(Buffer.from("x"));
+      strictEqual(asyncMatches.length, 1, "Async scan should match");
+    });
+
+    it("should keep global variables when adding rule sources", () => {
+      const scanner = yarax.compile("rule r { condition: x == 5 }", {
+        defineVariables: { x: 5 },
+      });
+      scanner.addRuleSource("rule ok { condition: true }");
+
+      const matches = scanner.scan(Buffer.from("x"));
+      strictEqual(matches.length, 2, "Both rules should be present");
+      ok(
+        matches.some((m) => m.ruleIdentifier === "ok"),
+        "New rule should match",
+      );
+      ok(
+        matches.some((m) => m.ruleIdentifier === "r"),
+        "Existing globals-based rule should still match",
+      );
+    });
+
+    it("should preserve compiler options across incremental compilation", () => {
+      const scanner = yarax.compile("rule r { strings: $a = /xyz{/ condition: $a }", {
+        relaxedReSyntax: true,
+      });
+      scanner.addRuleSource("rule ok { condition: true }");
+
+      strictEqual(
+        scanner.scan(Buffer.from("xyz{"))[0].ruleIdentifier,
+        "r",
+        "Relaxed-regex rule should survive the recompile",
+      );
+      ok(
+        scanner.scan(Buffer.from("zzz")).some((m) => m.ruleIdentifier === "ok"),
+        "Added rule should match too",
+      );
+    });
+
+    it("should emit WASM reproducing scanner options and toleration", async () => {
+      const wasmFile = join(__tempDir, `test-state-${Date.now()}.wasm`);
+      const asyncWasmFile = join(__tempDir, `test-state-async-${Date.now()}.wasm`);
+
+      const relaxed = yarax.compile("rule r { strings: $a = /xyz{/ condition: $a }", {
+        relaxedReSyntax: true,
+      });
+      relaxed.emitWasmFile(wasmFile);
+      ok(statSync(wasmFile).size > 0, "Relaxed scanner should emit WASM");
+
+      const tolerant = yarax.compile(
+        'rule good { strings: $a = "hi" condition: $a }\nrule bad { condition: nope }',
+        { ignoreInvalidRules: true },
+      );
+      await tolerant.emitWasmFileAsync(asyncWasmFile);
+      ok(
+        statSync(asyncWasmFile).size > 0,
+        "Tolerant scanner should emit WASM with the surviving rules",
+      );
+    });
+
+    it("should keep sources out of previously-set namespaces", () => {
+      const scanner = yarax.compile("rule in_x { condition: true }", {
+        namespace: "x",
+      });
+      scanner.addRuleSource("rule in_default { condition: true }");
+
+      const namespaces = scanner.scan(Buffer.from("x")).map((m) => m.namespace);
+      deepStrictEqual(
+        [...new Set(namespaces)].sort(),
+        ["default", "x"],
+        "Unnamed sources should land in the default namespace",
+      );
+    });
+
+    it("should refresh warnings and ignored-rules after incremental compilation", () => {
+      const scanner = yarax.compile("rule ok { condition: true }", {
+        ignoreModules: ["pe"],
+      });
+      scanner.addRuleSource("rule p { condition: pe.is_pe }");
+
+      ok(
+        scanner.getWarnings().some((w) => w.code === "unsupported_module"),
+        "Warnings should reflect the current rules",
+      );
+      deepStrictEqual(
+        scanner.getIgnoredRules().map((i) => i.name),
+        ["p"],
+        "Ignored-rules report should reflect the current rules",
+      );
+    });
+  });
+
   it("should handle relaxed regular expression syntax", () => {
     const rule = `
       rule test_relaxed_re {

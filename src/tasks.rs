@@ -6,6 +6,7 @@
 //! Scanning is performed in `compute()` (worker thread) using thread-safe `RuleMatchData`,
 //! then converted to N-API `RuleMatch` objects in `resolve()` (main thread).
 
+use crate::compiler::{replay_sources_to_wasm, StoredCompilerOptions};
 use crate::error::scan_error_to_napi;
 use crate::scanner::YaraX;
 use crate::types::{RuleMatch, RuleMatchData, RuleSource, VariableMap};
@@ -183,6 +184,13 @@ pub struct EmitWasmFileTask {
   pub source_code: Option<String>,
   pub rule_sources: Vec<RuleSource>,
   pub output_path: String,
+  /// The scanner's stored compiler options, replayed so the emitted module
+  /// matches the scanner's compilation semantics.
+  pub stored_options: StoredCompilerOptions,
+  /// The scanner's stored global variables, applied before the sources.
+  pub variables: Option<VariableMap>,
+  /// Whether per-rule compilation errors are tolerated (skipped rules).
+  pub ignore_invalid_rules: bool,
 }
 
 impl Task for EmitWasmFileTask {
@@ -198,9 +206,24 @@ impl Task for EmitWasmFileTask {
     })?;
 
     if self.rule_sources.is_empty() {
-      crate::compiler::compile_source_to_wasm(source, &self.output_path, None)?;
+      crate::compiler::replay_sources_to_wasm(
+        &[crate::types::RuleSource {
+          source: source.clone(),
+          namespace: None,
+        }],
+        &self.output_path,
+        &self.stored_options,
+        self.variables.as_ref(),
+        self.ignore_invalid_rules,
+      )?;
     } else {
-      crate::compiler::compile_sources_to_wasm(&self.rule_sources, &self.output_path, None)?;
+      replay_sources_to_wasm(
+        &self.rule_sources,
+        &self.output_path,
+        &self.stored_options,
+        self.variables.as_ref(),
+        self.ignore_invalid_rules,
+      )?;
     }
     Ok(())
   }
