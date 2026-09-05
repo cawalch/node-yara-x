@@ -10,12 +10,73 @@ crate-type = ["cdylib"]
 # Enable napi4 and async features
 napi = { version = "3.12.0", default-features = false, features = ["napi4", "async"] }
 napi-derive = "3.6.2"
-yara-x = "1.20.0"
+yara-x = { version = "1.20.0", default-features = false, features = [
+  "console-module", "pe-module", "elf-module", "macho-module", "math-module",
+  "hash-module", "string-module", "time-module", "dotnet-module",
+  "constant-folding", "exact-atoms", "fast-regexp",
+] }
 
 [build-dependencies]
 napi-build = "2.4.0"
 
 [profile.release]
 lto = true
+opt-level = "z"
 strip = "symbols"
 codegen-units = 1
+
+# Size-optimize the compile-time JIT compiler and parser machinery
+# while keeping the scanning hot path (yara-x pattern matching + napi) at O3.
+[profile.release.package.wasmtime]
+opt-level = "z"
+[profile.release.package.wasmtime-environ]
+opt-level = "z"
+[profile.release.package.wasmtime-internal-core]
+opt-level = "z"
+[profile.release.package.wasmtime-internal-cranelift]
+opt-level = "z"
+[profile.release.package.wasmtime-internal-fiber]
+opt-level = "z"
+[profile.release.package.wasmtime-internal-jit-debug]
+opt-level = "z"
+[profile.release.package.wasmtime-internal-jit-icache-coherence]
+opt-level = "z"
+[profile.release.package.wasmtime-internal-unwinder]
+opt-level = "z"
+[profile.release.package.cranelift-codegen]
+opt-level = "z"
+[profile.release.package.cranelift-codegen-meta]
+opt-level = "z"
+[profile.release.package.cranelift-codegen-shared]
+opt-level = "z"
+[profile.release.package.cranelift-control]
+opt-level = "z"
+[profile.release.package.cranelift-entity]
+opt-level = "z"
+[profile.release.package.cranelift-frontend]
+opt-level = "z"
+[profile.release.package.cranelift-isle]
+opt-level = "z"
+[profile.release.package.cranelift-native]
+opt-level = "z"
+[profile.release.package.cranelift-bforest]
+opt-level = "z"
+[profile.release.package.cranelift-bitset]
+opt-level = "z"
+[profile.release.package.cranelift-assembler-x64]
+opt-level = "z"
+[profile.release.package.cranelift-assembler-x64-meta]
+opt-level = "z"
+[profile.release.package.cranelift-srcgen]
+opt-level = "z"
+[profile.release.package.regalloc2]
+opt-level = "z"
+[profile.release.package.pulley-interpreter]
+opt-level = "z"
+[profile.release.package.pulley-macros]
+opt-level = "z"
+[profile.release.package.wasmparser]
+opt-level = "z"
+[profile.release.package.wasm-encoder]
+opt-level = "z"
+
