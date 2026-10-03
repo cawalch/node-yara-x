@@ -213,7 +213,7 @@ console.log(`Matches from restored rules: ${matches.length}`);
 ```
 
 > [!NOTE]
-> Serialized blobs require identical YARA-X versions (`1.20.x`) and compiled module feature sets between producer and consumer environments. Serialization stores compiled bytecode and pattern tables, but does not obfuscate pattern strings.
+> Serialized blobs require identical YARA-X versions (`1.21.x`) and compiled module feature sets between producer and consumer environments. Serialization stores compiled bytecode and pattern tables, but does not obfuscate pattern strings.
 
 ## Build rules incrementally
 
