@@ -2,130 +2,136 @@
 
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/cawalch/node-yara-x/badge)](https://scorecard.dev/viewer/?uri=github.com/cawalch/node-yara-x)
 
-## Features
+The `@litko/yara-x` package provides Node.js bindings for [VirusTotal/yara-x](https://github.com/VirusTotal/yara-x) powered by [napi-rs](https://napi-rs.com). It offers pattern matching and rule evaluation across in-memory buffers and files with zero external runtime dependencies.
 
-- High Performance: Built with [napi-rs](https://napi-rs.com) and [VirusTotal/yara-x](https://github.com/VirusTotal/yara-x)
-- Async Support: First-class support for asynchronous scanning
-- WASM Compilation: Compile rules to WebAssembly for portable execution
-- Zero Dependencies: No external runtime dependencies
+## Key features
 
-## Usage
+- **High performance**: Native Rust execution with thread-safe scanner caching.
+- **Asynchronous scanning**: Non-blocking asynchronous buffer and file scanning for high-throughput applications.
+- **Rules serialization**: Fast zero-copy rule serialization and restoration across processes.
+- **WebAssembly compilation**: Compile conditions to WebAssembly for inspection and sandboxed environments.
+- **Zero runtime dependencies**: Ships precompiled native binaries for macOS, Linux, and Windows.
 
-### Installation
+## Installation
 
-```bash
+Install `@litko/yara-x` using your package manager of choice:
+
+```sh
 npm install @litko/yara-x
 ```
 
-### Release Integrity
+### Verify release integrity
 
-Releases are built on GitHub-hosted runners and published to npm with Trusted Publishing and provenance. Native `.node` artifacts are also covered by GitHub artifact attestations.
+Releases are built on GitHub-hosted runners and published to npm with Trusted Publishing and provenance. Native `.node` binaries include GitHub artifact attestations.
 
-Verify npm registry signatures and provenance attestations after install:
+To verify npm registry signatures and provenance attestations:
 
-```bash
+```sh
 npm audit signatures
 ```
 
-Verify downloaded native artifacts against GitHub attestations:
+To verify downloaded native binaries against GitHub artifact attestations:
 
-```bash
+```sh
 gh attestation verify path/to/yara-x.*.node -R cawalch/node-yara-x
 ```
 
-### Basic Example
+## Quickstart
+
+To compile a YARA rule from a string and scan an in-memory buffer:
 
 ```javascript
 import { compile } from "@litko/yara-x";
 
-// Compile yara rules
+// Compile a rule from source text.
 const rules = compile(`
-  rule test_rule {
+  rule HelloWorld {
     strings:
-      $a = "hello world"
+      $greeting = "hello world"
     condition:
-      $a
+      $greeting
   }
 `);
 
-// Scan a buffer
+// Scan an in-memory buffer.
 const buffer = Buffer.from("This is a test with hello world in it");
 const matches = rules.scan(buffer);
 
-// Process matches
 if (matches.length > 0) {
-  console.log(`Found ${matches.length} matching rules:`);
-  matches.forEach((match) => {
+  console.log(`Found ${matches.length} matching rule(s):`);
+  for (const match of matches) {
     console.log(`- Rule: ${match.ruleIdentifier}`);
-    match.matches.forEach((stringMatch) => {
-      console.log(
-        `  * Match at offset ${stringMatch.offset}: ${stringMatch.data}`,
-      );
-    });
-  });
+    for (const stringMatch of match.matches) {
+      console.log(`  * Offset ${stringMatch.offset}: ${stringMatch.data}`);
+    }
+  }
 } else {
-  console.log("No matches found");
+  console.log("No matches found.");
 }
 ```
 
-## Scanning Files
+## Scan files
+
+To scan a file on disk without reading the entire contents into Node.js heap memory:
 
 ```javascript
-import { fromFile, compile } from "@litko/yara-x";
-import { readFileSync } from "fs";
+import { fromFile } from "@litko/yara-x";
 
-// Load rules from a file
+// Compile rules directly from a file.
 const rules = fromFile("./rules/malware_rules.yar");
 
 try {
-  // Scan a file directly
+  // Scan a file path synchronously.
   const matches = rules.scanFile("./samples/suspicious_file.exe");
-
-  console.log(`Found ${matches.length} matching rules`);
+  console.log(`Found ${matches.length} matching rule(s).`);
 } catch (error) {
   console.error(`Scanning error: ${error.message}`);
 }
 ```
 
-## Asynchronous Scanning
+## Scan asynchronously
+
+To avoid blocking the Node.js event loop during large file or buffer scans:
 
 ```javascript
 import { compile } from "@litko/yara-x";
 
-async function scanLargeFile() {
-  const rules = compile(`rule large_file_rule {
-      strings:
-        $a = "sensitive data"
-      condition:
-        $a
-    }
-  `);
+const rules = compile(`
+  rule LargeFileDetection {
+    strings:
+      $pattern = "sensitive payload"
+    condition:
+      $pattern
+  }
+`);
 
+async function scanTarget(filePath) {
   try {
-    // Scan a file asynchronously
-    const matches = await rules.scanFileAsync("./samples/large_file.bin");
-    console.log(`Found ${matches.length} matching rules`);
+    const matches = await rules.scanFileAsync(filePath);
+    console.log(`Found ${matches.length} matching rule(s).`);
   } catch (error) {
-    console.error(`Async scanning error: ${error.message}`);
+    console.error(`Async scan error: ${error.message}`);
   }
 }
 
-scanLargeFile();
+await scanTarget("./samples/large_file.bin");
 ```
 
-## Variables
+## Define and override variables
+
+You can define global variables during compilation and optionally override them at scan time:
 
 ```javascript
 import { compile } from "@litko/yara-x";
 
-// Create a scanner with variables
+// Define global variables at compile time.
 const rules = compile(
   `
-  rule variable_rule {
+  rule VariableRule {
     condition:
       string_var contains "secret" and int_var > 10 and bool_var
   }
-`,
+  `,
   {
     defineVariables: {
       string_var: "this is a secret message",
@@ -135,12 +141,12 @@ const rules = compile(
   },
 );
 
-// Scan with default variables
-let matches = rules.scan(Buffer.from("test data"));
+// Scan using default variable values.
+let matches = rules.scan(Buffer.from("test payload"));
 console.log(`Matches with default variables: ${matches.length}`);
 
-// Override variables at scan time
-matches = rules.scan(Buffer.from("test data"), {
+// Override variable values for this scan operation.
+matches = rules.scan(Buffer.from("test payload"), {
   string_var: "no secrets here",
   int_var: 5,
   bool_var: false,
@@ -148,127 +154,94 @@ matches = rules.scan(Buffer.from("test data"), {
 console.log(`Matches with overridden variables: ${matches.length}`);
 ```
 
-## Namespaces
+## Organize rules with namespaces
+
+Namespaces isolate rule identifiers, preventing naming collisions across rule sets:
 
 ```javascript
 import { compile, create } from "@litko/yara-x";
 
-// Compile a source into a YARA namespace
+// Compile rules into a specific namespace.
 const rules = compile(
   `
-  rule namespaced_rule {
+  rule NamespacedRule {
     strings:
-      $a = "namespace test"
+      $pattern = "namespace indicator"
     condition:
-      $a
+      $pattern
   }
-`,
+  `,
   { namespace: "alpha" },
 );
 
-const [match] = rules.scan(Buffer.from("namespace test"));
-console.log(match.namespace); // "alpha"
+const [match] = rules.scan(Buffer.from("namespace indicator"));
+console.log(`Matched rule namespace: ${match.namespace}`); // "alpha"
 
-// Add sources incrementally into separate namespaces
+// Add rules into separate namespaces on an incremental scanner.
 const scanner = create();
-scanner.addRuleSource('rule shared { strings: $a = "one" condition: $a }', "one");
-scanner.addRuleSource('rule shared { strings: $a = "two" condition: $a }', "two");
+scanner.addRuleSource('rule SharedName { strings: $a = "one" condition: $a }', "first_ns");
+scanner.addRuleSource('rule SharedName { strings: $a = "two" condition: $a }', "second_ns");
 ```
 
-## WASM Compilation
+## Serialize and restore compiled rules
 
-```javascript
-import { compile, compileToWasm } from "@litko/yara-x";
-
-// Compile rules to WASM
-const rule = `
-  rule wasm_test {
-    strings:
-      $a = "compile to wasm"
-    condition:
-      $a
-  }
-`;
-
-// Static compilation
-compileToWasm(rule, "./output/rules.wasm");
-
-// Or from a compiled rules instance
-const compiledRules = compile(rule);
-compiledRules.emitWasmFile("./output/instance_rules.wasm");
-
-// Async compilation
-await compiledRules.emitWasmFileAsync("./output/async_rules.wasm");
-```
-
-> **Note:** `emitWasmFile` produces a debug artifact (the raw WASM module of
-> compiled conditions) for inspection with tools like `wasm2wat`. It is **not**
-> a distributable rules format. Use `serialize()` / `deserialize()` below to
-> ship compiled rules between machines.
-
-## Rules Serialization
-
-Compiled rules can be serialized to a compact, self-contained binary blob and
-restored on any platform that uses the same YARA-X version (1.20.x). The blob
-carries the patterns, regex data, global variables, and compiled WASM
-conditions; conditions are recompiled for the local platform on load (~1-2ms).
+You can serialize compiled rules into a compact, self-contained binary `Buffer` and restore them in another process or worker thread without re-parsing rule source text. Conditions are recompiled for the local platform in 1–2 ms on load:
 
 ```javascript
 import { compile, deserialize } from "@litko/yara-x";
+import { readFile, writeFile } from "node:fs/promises";
 
-// Producer: compile once, ship the blob
+// Producer: compile rules once and serialize to a Buffer.
 const rules = compile(`
-  rule example {
+  rule ProductionIndicator {
     strings:
-      $a = "malware"
+      $target = "malicious payload"
     condition:
-      $a
+      $target
   }
 `);
-const blob = rules.serialize();            // Buffer, a few KiB for typical rule sets
-await Bun.write("./rules.yarx", blob);    // or writeFileSync / DB / CDN
+const blob = rules.serialize();
+await writeFile("./rules.yarx", blob);
 
-// Consumer: restore and scan at native speed
-const restored = deserialize(await Bun.file("./rules.yarx").arrayBuffer());
-restored.scan(buffer);                    // all scan APIs work: scan,
-restored.scanFile("./suspect.bin");      // scanFile, scanAsync, scanFileAsync
+// Consumer: restore compiled rules without parsing source text.
+const diskBlob = await readFile("./rules.yarx");
+const restoredRules = deserialize(diskBlob);
+
+// All scanning methods function identically on restored rules.
+const matches = restoredRules.scan(Buffer.from("malicious payload"));
+console.log(`Matches from restored rules: ${matches.length}`);
 ```
 
-Notes:
+> [!NOTE]
+> Serialized blobs require identical YARA-X versions (`1.20.x`) and compiled module feature sets between producer and consumer environments. Serialization stores compiled bytecode and pattern tables, but does not obfuscate pattern strings.
 
-- The blob is version-locked: producer and consumer must use the same YARA-X
-  version, and must be built with the same set of modules (e.g. rules using
-  `import "pe"` need the `pe` module in the consumer's build).
-- Serialization is **not** obfuscation: rule strings remain extractable.
-- Deserializing a blob produced by `emitWasmFile` (or arbitrary bytes) fails
-  with a clear error.
+## Build rules incrementally
 
-## Incremental Rule Building
+To construct a scanner dynamically from multiple strings or files:
 
 ```javascript
 import { create } from "@litko/yara-x";
 
-// Create an empty scanner
 const scanner = create();
 
-// Add rules incrementally
+// Add an individual rule string.
 scanner.addRuleSource(`
-  rule first_rule {
+  rule FirstRule {
     strings:
-      $a = "first pattern"
+      $pattern = "first pattern"
     condition:
-      $a
+      $pattern
   }
 `);
 
-// Add rules from a file (optional namespace supported)
+// Add rules from an external file with an optional namespace.
 scanner.addRuleFile("./rules/more_rules.yar", "custom_namespace");
 
-// Add multiple rules in a single pass (O(n) batch compilation vs O(n²) incremental)
+// Add multiple rule sources in a single pass for optimal performance.
 scanner.addRuleSources([
   {
     source: `
-      rule batch_rule_1 {
+      rule BatchRule1 {
         condition: true
       }
     `,
@@ -276,272 +249,145 @@ scanner.addRuleSources([
   },
   {
     source: `
-      rule batch_rule_2 {
+      rule BatchRule2 {
         condition: true
       }
     `,
   },
 ]);
 
-// Add another rule
-scanner.addRuleSource(`
-  rule another_rule {
-    strings:
-      $a = "another pattern"
-    condition:
-      $a
-  }
-`);
-
-// Now scan with all the rules
 const matches = scanner.scan(Buffer.from("test data with first pattern"));
+console.log(`Found ${matches.length} matching rule(s).`);
 ```
 
-## Rule Validation
+> [!TIP]
+> Use `addRuleSources()` when loading multiple rule sources dynamically. It compiles all sources in a single pass ($O(n)$) rather than recompiling the accumulated rule set on each addition ($O(n^2)$).
+
+## Validate rules
+
+To validate rule syntax and semantic correctness without creating an active scanner instance:
 
 ```javascript
 import { validate } from "@litko/yara-x";
 
-// Validate rules without executing them
 const result = validate(`
-  rule valid_rule {
+  rule ValidationExample {
     strings:
-      $a = "valid"
+      $pattern = "valid pattern"
     condition:
-      $a
-    }
+      $pattern
+  }
 `);
 
 if (result.errors.length === 0) {
-  console.log("Rules are valid!");
+  console.log("Rules are valid.");
 } else {
   console.error("Rule validation failed:");
-  result.errors.forEach((error) => {
-    console.error(`- ${error.code}: ${error.message}`);
-  });
-}
-```
-
-## Advanced Options
-
-```javascript
-import { compile } from "@litko/yara-x";
-
-// Create a scanner with advanced options
-const rules = compile(
-  `
-  rule advanced_rule {
-    strings:
-      $a = /hello[[:space:]]world/ // Using POSIX character class
-    condition:
-      $a and test_var > 10
+  for (const error of result.errors) {
+    console.error(`- [${error.code}] line ${error.line}, col ${error.column}: ${error.message}`);
   }
-`,
-  {
-    // Define variables
-    defineVariables: {
-      test_var: "20",
-    },
-
-    // Compile these rules into a YARA namespace
-    namespace: "research",
-
-    // Enable relaxed regular expression syntax
-    relaxedReSyntax: true,
-
-    // Enable condition optimization
-    conditionOptimization: true,
-
-    // Ignore specific modules
-    ignoreModules: ["pe"],
-
-    // Error on potentially slow patterns
-    errorOnSlowPattern: true,
-
-    // Error on potentially slow loops
-    errorOnSlowLoop: true,
-
-    // Specify directories for include statements (v1.5.0+)
-    includeDirectories: ["./rules/includes", "./rules/common"],
-
-    // Enable or disable include statements (v1.5.0+)
-    enableIncludes: true,
-
-    // Maximum number of warnings to report
-    maxWarnings: 10,
-
-    // Silence specific noisy warning codes
-    disableWarnings: ["slow_pattern", "duplicate_pattern_value"],
-
-    // Toggle all compiler warnings (default: true)
-    enableAllWarnings: true,
-
-    // Skip rules that fail to compile instead of failing the whole compilation
-    ignoreInvalidRules: true,
-  },
-);
-```
-
-## Error Handling
-
-### Compilation Errors
-
-```javascript
-import { compile } from "@litko/yara-x";
-
-try {
-  // This will throw an error due to invalid syntax
-  const rules = compile(`
-    rule invalid_rule {
-      strings:
-        $a = "unclosed string
-      condition:
-        $a
-    }
-  `);
-} catch (error) {
-  console.error(`Compilation error: ${error.message}`);
-  // Output: Compilation error: error[E001]: syntax error
-  //  --> line:3:28
-  //   |
-  // 3 |         $a = "unclosed string
-  //   |                            ^ expecting `"`, found end of file
-  // 278:  }
 }
 ```
 
-### Scanning errors
+## Manage compiler warnings
+
+Inspect warnings generated during compilation, or configure warning limits for noisy rule corpora:
 
 ```javascript
 import { compile } from "@litko/yara-x";
 
+// Retrieve compiler warnings.
 const rules = compile(`
-  rule test_rule {
+  rule WarningRule {
+    strings:
+      $unused = "unused string"
     condition:
-      true
+      true // Triggers invariant boolean warning
   }
 `);
 
-try {
-  // This will throw if the file doesn't exist
-  rules.scanFile("/path/to/nonexistent/file.bin");
-} catch (error) {
-  console.error(`Scanning error: ${error.message}`);
-  // Output: Scanning error: Error reading file: No such file or directory (os error 2)
-}
-```
-
-### Async Errors
-
-```javascript
-import { compile, compileToWasm } from "@litko/yara-x";
-
-async function handleAsyncErrors() {
-  const rules = compile(`
-    rule test_rule {
-      condition:
-        true
-    }
-  `);
-
-  try {
-    await rules.scanFileAsync("/path/to/nonexistent/file.bin");
-  } catch (error) {
-    console.error(`Async scanning error: ${error.message}`);
-  }
-
-  try {
-    await compileToWasm(
-      "rule test { condition: true }",
-      "/invalid/path/rules.wasm",
-    );
-  } catch (error) {
-    console.error(`WASM compilation error: ${error.message}`);
-  }
-}
-
-handleAsyncErrors();
-```
-
-## Compiler Warnings
-
-```javascript
-import { compile } from "@litko/yara-x";
-
-// Create a scanner with a rule that generates warnings
-const rules = compile(`
-  rule warning_rule {
-    strings:
-      $a = "unused string"
-    condition:
-      true  // Warning: invariant expression
-    }
-`);
-
-// Get and display warnings
 const warnings = rules.getWarnings();
-if (warnings.length > 0) {
-  console.log("Compiler warnings:");
-  warnings.forEach((warning) => {
-    console.log(`- ${warning.code}: ${warning.message}`);
-  });
+for (const warning of warnings) {
+  console.log(`Warning [${warning.code}]: ${warning.message}`);
 }
 
-// Controlling warnings on large corpora:
-const quietRules = compile(ruleSource, {
-  // Cap the total number of emitted warnings
-  maxWarnings: 5,
+// Suppress specific warnings or cap reporting.
+const quietRules = compile(sourceText, {
+  // Cap the total number of warnings emitted.
+  maxWarnings: 10,
 
-  // Silence specific noisy warning codes (e.g. slow_pattern, duplicate_pattern_value)
+  // Silence specific noisy warning codes.
   disableWarnings: ["slow_pattern", "duplicate_pattern_value"],
 
-  // Or disable all compiler warnings entirely
+  // Or disable all compiler warnings entirely.
   // enableAllWarnings: false,
 });
 ```
 
-## Include Directories
+## Fault-tolerant compilation
+
+To compile large rule corpora without aborting the entire compilation when individual rules contain errors, set `ignoreInvalidRules`:
 
 ```javascript
 import { compile } from "@litko/yara-x";
 
-// Create a main rule that includes other rules
+const rules = compile(mixedCorpus, {
+  ignoreInvalidRules: true,
+});
+
+// Inspect rules that were skipped due to compilation errors or missing modules.
+const ignored = rules.getIgnoredRules();
+for (const rule of ignored) {
+  console.log(`Skipped rule "${rule.name}" (${rule.reason}): ${rule.detail}`);
+}
+
+// Inspect source-level errors that could not be attributed to an individual rule.
+const sourceErrors = rules.getCompilationErrors();
+for (const err of sourceErrors) {
+  console.log(`Source error [${err.code}]: ${err.message}`);
+}
+```
+
+## Configure include directories
+
+To resolve external files referenced via `include "..."` statements:
+
+```javascript
+import { compile } from "@litko/yara-x";
+
 const mainRule = `
   include "common/strings.yar"
-  include "malware/pe_patterns.yar"
+  include "malware/patterns.yar"
 
-  rule main_detection {
+  rule MainDetection {
     condition:
-      common_string_rule or pe_malware_rule
+      common_string_rule or malware_rule
   }
 `;
 
-// Compile with include directories
 const rules = compile(mainRule, {
+  enableIncludes: true,
   includeDirectories: [
-    "./rules", // Base directory
-    "./rules/common", // Additional include path
-    "./rules/malware", // Another include path
+    "./rules",
+    "./rules/common",
+    "./rules/malware",
   ],
 });
-
-// Scan as usual
-const matches = rules.scan(Buffer.from("test data"));
 ```
 
-## Scan Performance Options
+## Tune scan performance
 
-Control scanning behavior for better performance or safety.
+Configure runtime controls to protect against resource exhaustion and optimize execution.
 
-### Limiting Matches Per Pattern
+### Limit matches per pattern
 
-Prevent excessive memory usage by limiting the number of matches per pattern:
+Cap the number of matches captured per pattern to prevent unbounded memory growth on repeated bytes:
 
 ```javascript
 import { compile } from "@litko/yara-x";
 
 const rules = compile(`
-  rule find_pattern {
+  rule MatchLimiter {
     strings:
       $a = "pattern"
     condition:
@@ -549,193 +395,176 @@ const rules = compile(`
   }
 `);
 
-// Limit to 1000 matches per pattern
+// Collect at most 1,000 matches per pattern.
 rules.setMaxMatchesPerPattern(1000);
 
-// Scan data with many occurrences
 const data = Buffer.from("pattern ".repeat(10000));
 const matches = rules.scan(data);
 
-// Will only return up to 1000 matches per pattern
-console.log(`Found ${matches[0].matches.length} matches (limited to 1000)`);
+console.log(`Matches collected: ${matches[0].matches.length}`); // 1000
 ```
 
-### Memory-Mapped File Control
+### Memory-mapped file scanning
 
-Control whether to use memory-mapped files for scanning:
+Control whether file scans use memory-mapped I/O (`mmap`). Disabling `mmap` uses standard streaming file reads, which is safer when scanning untrusted files that could be modified concurrently:
 
 ```javascript
-import { compile } from "@litko/yara-x";
-
-const rules = compile(`
-  rule test {
-    strings:
-      $a = "test"
-    condition:
-      $a
-  }
-`);
-
-// Disable memory-mapped files for safer scanning
-// (slower but safer for untrusted files)
+// Disable memory-mapped files.
 rules.setUseMmap(false);
 
-// Scan file without memory mapping
-const matches = rules.scanFile("./sample.bin");
+const matches = rules.scanFile("./untrusted_sample.bin");
 ```
 
-### Scan Timeout
+### Scan execution timeout
 
-Set a timeout for scan operations to prevent runaway scans:
+Enforce a timeout on scan operations to protect against pathological regular expressions:
 
 ```javascript
-import { compile } from "@litko/yara-x";
-
-const rules = compile(`
-  rule slow_rule {
-    strings:
-      $a = /(.+)*\1/
-    condition:
-      $a
-  }
-`);
-
-// Set a 5-second timeout
+// Timeout in milliseconds.
 rules.setTimeout(5000);
 
-const matches = rules.scan(Buffer.from("test data"));
-```
-
-### Match Context
-
-You can retrieve surrounding bytes around a match by setting the match context size. This is useful for analyzing matches within their broader context.
-
-```javascript
-import { compile } from "@litko/yara-x";
-
-const rules = compile(`
-  rule context_rule {
-    strings:
-      $a = "secret"
-    condition:
-      $a
-  }
-`);
-
-// Request 10 bytes of context before and after the match
-rules.setMatchContextSize(10);
-
-const data = Buffer.from("this is a top secret document containing sensitive info");
-const matches = rules.scan(data);
-
-if (matches.length > 0) {
-  matches[0].matches.forEach(match => {
-    console.log(`Match: ${match.data}`);
-    // "secret"
-    
-    console.log(`Context: ${match.contextData}`); 
-    // " a top secret document"
-    
-    console.log(`Match offset within context: ${match.contextMatchOffset}`);
-  });
+try {
+  const matches = rules.scan(largeBuffer);
+} catch (error) {
+  console.error(`Scan aborted: ${error.message}`);
 }
 ```
 
-## Performance Benchmarks
+### Capture match context
 
-`node-yara-x` delivers exceptional performance through intelligent scanner caching and optimized Rust implementation.
+Retrieve surrounding bytes around a match for triage and reporting:
 
-### Benchmark Results
+```javascript
+// Capture 10 bytes before and after each pattern match.
+rules.setMatchContextSize(10);
 
-Test Environment: MacBook Pro M3 Max, 36GB RAM, Release build with LTO
-Methodology: Statistical analysis across multiple iterations with percentile reporting
+const data = Buffer.from("header data confidential payload trailer info");
+const matches = rules.scan(data);
 
-#### Scanner Creation Performance
+for (const match of matches[0]?.matches ?? []) {
+  console.log(`Match: "${match.data}"`);
+  console.log(`Surrounding context: "${match.contextData}"`);
+  console.log(`Match offset within context: ${match.contextMatchOffset}`);
+}
+```
 
-| Rule Type      | Mean   | p50    | p95    | p99    |
-| -------------- | ------ | ------ | ------ | ------ |
-| Simple Rule    | 2.43ms | 2.41ms | 2.87ms | 3.11ms |
-| Complex Rule   | 2.57ms | 2.52ms | 2.96ms | 3.06ms |
-| Regex Rule     | 7.57ms | 7.47ms | 8.29ms | 8.70ms |
-| Multiple Rules | 2.05ms | 2.03ms | 2.24ms | 2.42ms |
+## WebAssembly compilation
 
-#### Scanning Performance by Data Size
+You can compile rules directly to WebAssembly for inspection or sandboxed execution:
 
-| Data Size | Rule Type      | Mean  | Throughput |
-| --------- | -------------- | ----- | ---------- |
-| 64 bytes  | Simple         | 3μs   | ~21 MB/s   |
-| 100KB     | Simple         | 6μs   | ~16.7 GB/s |
-| 100KB     | Complex        | 73μs  | ~1.4 GB/s  |
-| 100KB     | Regex          | 7μs   | ~14.3 GB/s |
-| 100KB     | Multiple Rules | 73μs  | ~1.4 GB/s  |
-| 10MB      | Simple         | 204μs | ~49 GB/s   |
+```javascript
+import { compile, compileToWasm } from "@litko/yara-x";
 
-#### Advanced Features Performance
+// Compile rules directly to a WASM binary file.
+compileToWasm(ruleString, "./output/rules.wasm");
 
-| Feature           | Mean | Notes                      |
-| ----------------- | ---- | -------------------------- |
-| Variable Scanning | 1μs  | Pre-compiled variables     |
-| Runtime Variables | 2μs  | Variables set at scan time |
-| Async Scanning    | 11μs | Non-blocking operations    |
+// Or emit WASM from an existing compiled scanner instance.
+const rules = compile(ruleString);
+rules.emitWasmFile("./output/instance.wasm");
+await rules.emitWasmFileAsync("./output/async_instance.wasm");
+```
 
-## API Reference
+> [!NOTE]
+> `emitWasmFile` produces a raw WebAssembly debug artifact containing compiled conditions for inspection with tools like `wasm2wat`. To distribute compiled rules across machines, use `serialize()` and `deserialize()`.
+
+## Performance benchmarks
+
+The following benchmarks demonstrate scanner creation, scanning throughput, and feature overhead.
+
+### Benchmark environment
+
+- **Hardware**: Apple Silicon M3 Max, 36 GB RAM
+- **Build**: Release build with Link-Time Optimization (LTO)
+- **Methodology**: Statistical analysis across repeated runs with percentile reporting
+
+### Scanner creation performance
+
+| Rule type | Mean | p50 | p95 | p99 |
+| :--- | :--- | :--- | :--- | :--- |
+| Simple rule | 2.43 ms | 2.41 ms | 2.87 ms | 3.11 ms |
+| Complex rule | 2.57 ms | 2.52 ms | 2.96 ms | 3.06 ms |
+| Regex rule | 7.57 ms | 7.47 ms | 8.29 ms | 8.70 ms |
+| Multiple rules | 2.05 ms | 2.03 ms | 2.24 ms | 2.42 ms |
+
+### Scanning performance by payload size
+
+| Payload size | Rule type | Mean duration | Throughput |
+| :--- | :--- | :--- | :--- |
+| 64 B | Simple | 3 µs | ~21 MB/s |
+| 100 KB | Simple | 6 µs | ~16.7 GB/s |
+| 100 KB | Complex | 73 µs | ~1.4 GB/s |
+| 100 KB | Regex | 7 µs | ~14.3 GB/s |
+| 100 KB | Multiple rules | 73 µs | ~1.4 GB/s |
+| 10 MB | Simple | 204 µs | ~49 GB/s |
+
+### Feature overhead
+
+| Feature | Mean duration | Notes |
+| :--- | :--- | :--- |
+| Variable scanning | 1 µs | Pre-compiled variables |
+| Runtime variables | 2 µs | Variables set at scan time |
+| Asynchronous scanning | 11 µs | Non-blocking async event loop delegation |
+
+## API reference
 
 ### Functions
 
-- `compile(ruleSource: string, options?: CompilerOptions)` - Compiles yara rules from a string.
-- `compileToWasm(ruleSource: string, outputPath: string, options?: CompilerOptions)` - Compiles yara rules from a string to WASM file.
-- `compileFileToWasm(rulesPath: string, outputPath: string, options?: CompilerOptions)` - Compiles yara rules from a file to WASM file.
-- `validate(ruleSource: string, options?: CompilerOptions)` - Validates yara rules without executing them.
-- `create()` - Creates an empty rules scanner to add rules incrementally.
-- `deserialize(data: Buffer)` - Creates a new rules scanner from a serialized rules Buffer.
-- `fromFile(rulePath: string, options?: CompilerOptions)` - Compiles yara rules from a file.
+| Function | Description |
+| :--- | :--- |
+| `compile(ruleSource, options?)` | Compiles YARA rules from a string and returns a `YaraX` scanner instance. |
+| `fromFile(rulePath, options?)` | Compiles YARA rules from a file path and returns a `YaraX` scanner instance. |
+| `create()` | Creates an empty `YaraX` scanner instance for incremental rule compilation. |
+| `deserialize(data)` | Restores a `YaraX` scanner instance from a serialized binary `Buffer`. |
+| `validate(ruleSource, options?)` | Validates YARA rules from a string without creating an executable scanner. |
+| `compileToWasm(ruleSource, outputPath, options?)` | Compiles rules from a string and writes the WebAssembly module to `outputPath`. |
+| `compileFileToWasm(rulesPath, outputPath, options?)` | Compiles rules from a file and writes the WebAssembly module to `outputPath`. |
 
-### YaraX Methods
+### YaraX methods
 
-- `getWarnings()` - Get compiler warnings.
-- `getIgnoredRules()` - Get the rules that were skipped during compilation, with the reason each one was ignored (`ignored_module`, `ignored_rule`, or `compile_error`). Populated when rules depend on ignored modules, or when `ignoreInvalidRules` is enabled.
-- `getCompilationErrors()` - Get the errors generated while compiling, when `ignoreInvalidRules` is enabled. Includes source-level errors (syntax errors, banned/unknown module imports, include failures) that can't be attributed to a single skipped rule.
-- `scan(data: Buffer, variables?: Record<string, string | number | boolean>)` - Scan a buffer.
-- `scanFile(filePath: string, variables?: Record<string, string | number | boolean>)` - Scan a file.
-- `scanAsync(data: Buffer, variables?: Record<string, object | undefined | null>)` - Scan a buffer asynchronously.
-- `scanFileAsync(filePath: string, variables?: Record<string, object | undefined | null>)` - Scan a file asynchronously.
-- `emitWasmFile(filePath: string)` - Emit compiled rules to WASM file synchronously.
-- `emitWasmFileAsync(filePath: string)` - Emit compiled rules to WASM file asynchronously.
-- `serialize(): Buffer` - Serializes compiled rules to a portable binary Buffer.
-- `addRuleSource(ruleSource: string, namespace?: string)` - Add rules from a string to an existing scanner.
-- `addRuleSources(ruleSources: RuleSource[])` - Adds multiple rule sources in a single compilation pass for batch addition.
-- `addRuleFile(filePath: string, namespace?: string)` - Add rules from a file to an existing scanner.
-- `defineVariable(name: string, value: string)` - Define a variable for the YARA compiler.
-- `setMaxMatchesPerPattern(maxMatches: number)` - Set the maximum number of matches per pattern.
-- `setUseMmap(useMmap: boolean)` - Enable or disable memory-mapped files for scanning.
-- `setTimeout(timeoutMs: number)` - Set the scan timeout in milliseconds.
-- `setMatchContextSize(size: number)` - Set the number of context bytes to retrieve around the matched string.
+| Method | Description |
+| :--- | :--- |
+| `scan(data, variables?)` | Scans a `Buffer` synchronously and returns matching rules. |
+| `scanFile(filePath, variables?)` | Scans a file on disk synchronously and returns matching rules. |
+| `scanAsync(data, variables?)` | Scans a `Buffer` asynchronously and returns a `Promise` resolving to matching rules. |
+| `scanFileAsync(filePath, variables?)` | Scans a file asynchronously and returns a `Promise` resolving to matching rules. |
+| `serialize()` | Serializes compiled rules into a portable binary `Buffer`. |
+| `addRuleSource(ruleSource, namespace?)` | Adds a rule string to an existing scanner instance. |
+| `addRuleSources(ruleSources)` | Adds multiple rule sources in a single compilation pass ($O(n)$ batch addition). |
+| `addRuleFile(filePath, namespace?)` | Adds rules from a file to an existing scanner instance. |
+| `defineVariable(name, value)` | Defines a global variable on an incremental scanner. |
+| `getWarnings()` | Returns compiler warnings generated during compilation. |
+| `getIgnoredRules()` | Returns rules skipped during tolerant compilation or due to ignored modules. |
+| `getCompilationErrors()` | Returns source-level errors collected during tolerant compilation (`ignoreInvalidRules: true`). |
+| `setMaxMatchesPerPattern(maxMatches)` | Sets the maximum number of matches collected per pattern. |
+| `setUseMmap(useMmap)` | Enables or disables memory-mapped files for file scanning. |
+| `setTimeout(timeoutMs)` | Sets the scan execution timeout in milliseconds. |
+| `setMatchContextSize(size)` | Sets the number of context bytes retrieved around each match. |
+| `emitWasmFile(outputPath)` | Writes the compiled WebAssembly condition module synchronously to disk. |
+| `emitWasmFileAsync(outputPath)` | Writes the compiled WebAssembly condition module asynchronously to disk. |
 
 ### CompilerOptions
 
-- `namespace?: string` - The namespace where the YARA rules should be compiled.
-- `defineVariables?: object` - Define global variables for the YARA rules.
-- `ignoreInvalidRules?: boolean` - Skip rules that fail to compile instead of failing the whole compilation. Skipped rules are reported by `getIgnoredRules()`; source-level errors that can't be attributed to a single rule are reported by `getCompilationErrors()`.
-- `ignoreModules?: string[]` - List of module names to ignore during compilation.
-- `bannedModules?: BannedModule[]` - List of banned modules that cannot be used.
-- `features?: string[]` - List of features to enable for the YARA rules.
-- `relaxedReSyntax?: boolean` - Use relaxed regular expression syntax.
-- `conditionOptimization?: boolean` - Optimize conditions in the YARA rules.
-- `errorOnSlowPattern?: boolean` - Raise an error on slow patterns.
-- `errorOnSlowLoop?: boolean` - Raise an error on slow loops.
-- `maxWarnings?: number` - Maximum number of warnings the compiler will report.
-- `disableWarnings?: string[]` - List of warning codes to disable during compilation.
-- `enableAllWarnings?: boolean` - Whether to enable or disable all compiler warnings (default: `true`).
-- `includeDirectories?: string[]` - **(v1.5.0+)** Directories where the compiler should look for included files.
-- `enableIncludes?: boolean` - **(v1.5.0+)** Enable or disable include statements in YARA rules.
+| Option | Type | Description |
+| :--- | :--- | :--- |
+| `namespace` | `string` | Target namespace for the compiled rules. |
+| `defineVariables` | `Record<string, string \| number \| boolean>` | Global variables defined for the compiler. |
+| `ignoreInvalidRules` | `boolean` | Skips invalid rules instead of failing compilation (`getIgnoredRules()` / `getCompilationErrors()`). |
+| `ignoreModules` | `string[]` | List of module names to ignore during compilation. |
+| `bannedModules` | `BannedModule[]` | List of banned modules that trigger compilation errors when imported. |
+| `features` | `string[]` | Feature flags to enable during compilation. |
+| `relaxedReSyntax` | `boolean` | Enables relaxed regular expression syntax. |
+| `conditionOptimization` | `boolean` | Enables rule condition optimization. |
+| `errorOnSlowPattern` | `boolean` | Promotes slow pattern warnings to compilation errors. |
+| `errorOnSlowLoop` | `boolean` | Promotes slow loop warnings to compilation errors. |
+| `maxWarnings` | `number` | Maximum number of warnings reported by the compiler. |
+| `disableWarnings` | `string[]` | List of specific warning codes to disable. |
+| `enableAllWarnings` | `boolean` | Enables or disables all compiler warnings (default: `true`). |
+| `includeDirectories` | `string[]` | Directories to search when resolving `include` statements. |
+| `enableIncludes` | `boolean` | Enables or disables `include` statement processing. |
 
-## Licenses
+## License
 
-This project incorporates code under two distinct licenses:
+This project is licensed under two separate licenses:
 
-- **MIT License:**
-  - The node.js bindings and other code specific to this module are licensed under the MIT license.
-  - See `LICENSE-MIT` for the full text.
-- **BSD-3-Clause License:**
-  - The included yara-x library is licensed under the BSD-3-Clause license.
-  - See `LICENSE-BSD-3-Clause` for the full text.
+- **MIT License**: Node.js bindings and project code. See [`LICENSE-MIT`](./LICENSE-MIT) for details.
+- **BSD-3-Clause License**: Included YARA-X library code. See [`LICENSE-BSD-3-Clause`](./LICENSE-BSD-3-Clause) for details.
