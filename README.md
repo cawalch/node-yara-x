@@ -209,7 +209,7 @@ await compiledRules.emitWasmFileAsync("./output/async_rules.wasm");
 ## Rules Serialization
 
 Compiled rules can be serialized to a compact, self-contained binary blob and
-restored on any platform that uses the same YARA-X version (1.19.x). The blob
+restored on any platform that uses the same YARA-X version (1.20.x). The blob
 carries the patterns, regex data, global variables, and compiled WASM
 conditions; conditions are recompiled for the local platform on load (~1-2ms).
 
@@ -253,7 +253,7 @@ const scanner = create();
 
 // Add rules incrementally
 scanner.addRuleSource(`
-  wrule first_rule {
+  rule first_rule {
     strings:
       $a = "first pattern"
     condition:
@@ -261,8 +261,27 @@ scanner.addRuleSource(`
   }
 `);
 
-// Add rules from a file
-scanner.addRuleFile("./rules/more_rules.yar");
+// Add rules from a file (optional namespace supported)
+scanner.addRuleFile("./rules/more_rules.yar", "custom_namespace");
+
+// Add multiple rules in a single pass (O(n) batch compilation vs O(n²) incremental)
+scanner.addRuleSources([
+  {
+    source: `
+      rule batch_rule_1 {
+        condition: true
+      }
+    `,
+    namespace: "batch",
+  },
+  {
+    source: `
+      rule batch_rule_2 {
+        condition: true
+      }
+    `,
+  },
+]);
 
 // Add another rule
 scanner.addRuleSource(`
@@ -347,6 +366,18 @@ const rules = compile(
 
     // Enable or disable include statements (v1.5.0+)
     enableIncludes: true,
+
+    // Maximum number of warnings to report
+    maxWarnings: 10,
+
+    // Silence specific noisy warning codes
+    disableWarnings: ["slow_pattern", "duplicate_pattern_value"],
+
+    // Toggle all compiler warnings (default: true)
+    enableAllWarnings: true,
+
+    // Skip rules that fail to compile instead of failing the whole compilation
+    ignoreInvalidRules: true,
   },
 );
 ```
@@ -455,6 +486,18 @@ if (warnings.length > 0) {
     console.log(`- ${warning.code}: ${warning.message}`);
   });
 }
+
+// Controlling warnings on large corpora:
+const quietRules = compile(ruleSource, {
+  // Cap the total number of emitted warnings
+  maxWarnings: 5,
+
+  // Silence specific noisy warning codes (e.g. slow_pattern, duplicate_pattern_value)
+  disableWarnings: ["slow_pattern", "duplicate_pattern_value"],
+
+  // Or disable all compiler warnings entirely
+  // enableAllWarnings: false,
+});
 ```
 
 ## Include Directories
@@ -644,6 +687,7 @@ Methodology: Statistical analysis across multiple iterations with percentile rep
 - `compileFileToWasm(rulesPath: string, outputPath: string, options?: CompilerOptions)` - Compiles yara rules from a file to WASM file.
 - `validate(ruleSource: string, options?: CompilerOptions)` - Validates yara rules without executing them.
 - `create()` - Creates an empty rules scanner to add rules incrementally.
+- `deserialize(data: Buffer)` - Creates a new rules scanner from a serialized rules Buffer.
 - `fromFile(rulePath: string, options?: CompilerOptions)` - Compiles yara rules from a file.
 
 ### YaraX Methods
@@ -657,8 +701,10 @@ Methodology: Statistical analysis across multiple iterations with percentile rep
 - `scanFileAsync(filePath: string, variables?: Record<string, object | undefined | null>)` - Scan a file asynchronously.
 - `emitWasmFile(filePath: string)` - Emit compiled rules to WASM file synchronously.
 - `emitWasmFileAsync(filePath: string)` - Emit compiled rules to WASM file asynchronously.
-- `addRuleSource(rules: string)` - Add rules from a string to an existing scanner.
-- `addRuleFile(filePath: string)` - Add rules from a file to an existing scanner.
+- `serialize(): Buffer` - Serializes compiled rules to a portable binary Buffer.
+- `addRuleSource(ruleSource: string, namespace?: string)` - Add rules from a string to an existing scanner.
+- `addRuleSources(ruleSources: RuleSource[])` - Adds multiple rule sources in a single compilation pass for batch addition.
+- `addRuleFile(filePath: string, namespace?: string)` - Add rules from a file to an existing scanner.
 - `defineVariable(name: string, value: string)` - Define a variable for the YARA compiler.
 - `setMaxMatchesPerPattern(maxMatches: number)` - Set the maximum number of matches per pattern.
 - `setUseMmap(useMmap: boolean)` - Enable or disable memory-mapped files for scanning.
@@ -667,6 +713,7 @@ Methodology: Statistical analysis across multiple iterations with percentile rep
 
 ### CompilerOptions
 
+- `namespace?: string` - The namespace where the YARA rules should be compiled.
 - `defineVariables?: object` - Define global variables for the YARA rules.
 - `ignoreInvalidRules?: boolean` - Skip rules that fail to compile instead of failing the whole compilation. Skipped rules are reported by `getIgnoredRules()`; source-level errors that can't be attributed to a single rule are reported by `getCompilationErrors()`.
 - `ignoreModules?: string[]` - List of module names to ignore during compilation.
@@ -676,6 +723,9 @@ Methodology: Statistical analysis across multiple iterations with percentile rep
 - `conditionOptimization?: boolean` - Optimize conditions in the YARA rules.
 - `errorOnSlowPattern?: boolean` - Raise an error on slow patterns.
 - `errorOnSlowLoop?: boolean` - Raise an error on slow loops.
+- `maxWarnings?: number` - Maximum number of warnings the compiler will report.
+- `disableWarnings?: string[]` - List of warning codes to disable during compilation.
+- `enableAllWarnings?: boolean` - Whether to enable or disable all compiler warnings (default: `true`).
 - `includeDirectories?: string[]` - **(v1.5.0+)** Directories where the compiler should look for included files.
 - `enableIncludes?: boolean` - **(v1.5.0+)** Enable or disable include statements in YARA rules.
 
