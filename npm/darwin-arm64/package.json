@@ -1,6 +1,6 @@
 {
   "name": "@litko/yara-x-darwin-arm64",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "cpu": [
     "arm64"
   ],
