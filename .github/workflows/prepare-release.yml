@@ -70,7 +70,7 @@ jobs:
           echo "skip=false" >> "$GITHUB_OUTPUT"
       - name: Install dependencies
         if: steps.release.outputs.skip != 'true'
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
       - name: Install Rust toolchain
         # Build the native binding from source so verification tests the
         # current commit, not the previously-published optional-dependency
@@ -81,10 +81,12 @@ jobs:
         uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: stable
-      - name: Install native build dependencies
-        # yara-x's build requires protoc (protobuf-compiler).
+      - name: Cache cargo
         if: steps.release.outputs.skip != 'true'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: prepare-release-debug
+          cache-on-failure: false
       - name: Prepare version bump
         if: steps.release.outputs.skip != 'true'
         id: bump
@@ -99,7 +101,7 @@ jobs:
       - name: Verify release prep
         if: steps.release.outputs.skip != 'true'
         run: |
-          pnpm install --frozen-lockfile
+          pnpm install --frozen-lockfile --prefer-offline
           pnpm build:debug
           cargo metadata --locked --format-version 1 >/dev/null
           pnpm test
