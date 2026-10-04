@@ -1,6 +1,6 @@
 {
   "name": "@litko/yara-x-linux-arm64-gnu",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "cpu": [
     "arm64"
   ],
