@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { existsSync, readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import PerformanceRegressionAnalyzer from "./performance-regression.mjs";
 
@@ -65,7 +65,11 @@ async function main() {
 }
 
 async function compareWithBaseline(currentResults, baselineFile) {
-  const baselinePath = join(__dirname, baselineFile);
+  const baselinePath = isAbsolute(baselineFile)
+    ? baselineFile
+    : existsSync(join(process.cwd(), baselineFile))
+      ? join(process.cwd(), baselineFile)
+      : join(__dirname, baselineFile);
 
   if (!existsSync(baselinePath)) {
     console.error(`Baseline file not found: ${baselinePath}`);
