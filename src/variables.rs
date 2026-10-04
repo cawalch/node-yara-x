@@ -8,7 +8,6 @@ use crate::types::{CompilerError, CompilerWarning, VariableMap, VariableValue};
 use napi::bindgen_prelude::{JsObjectValue, Object, Unknown};
 use napi::{Error, Result, Status, ValueType};
 use std::collections::HashMap;
-use std::fmt::Display;
 use yara_x::{Compiler, Scanner};
 
 /// Trait for types that can have variables applied to them.
@@ -202,9 +201,8 @@ pub fn get_variable_value(vars: &Object, key: &str) -> Result<VariableValue> {
 ///
 /// An optional HashMap of variable names to values
 pub fn convert_variables_to_map(variables: Option<Object>) -> Result<Option<VariableMap>> {
-  let vars = match variables {
-    Some(vars) => vars,
-    None => return Ok(None),
+  let Some(vars) = variables else {
+    return Ok(None);
   };
 
   let property_names = Object::keys(&vars)?;
@@ -234,15 +232,8 @@ pub fn convert_variables_to_map(variables: Option<Object>) -> Result<Option<Vari
 /// # Returns
 ///
 /// A vector of converted messages
-pub fn convert_compiler_messages<T, U>(messages: &[T], to_output: impl Fn(&T) -> U) -> Vec<U>
-where
-  T: Display,
-{
-  let mut result = Vec::with_capacity(messages.len());
-  for msg in messages {
-    result.push(to_output(msg));
-  }
-  result
+pub fn convert_compiler_messages<T, U>(messages: &[T], to_output: impl Fn(&T) -> U) -> Vec<U> {
+  messages.iter().map(to_output).collect()
 }
 
 /// Extracts compiler errors from a Compiler instance.

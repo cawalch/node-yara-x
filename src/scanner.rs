@@ -80,6 +80,26 @@ pub struct YaraX {
 }
 
 impl YaraX {
+  /// Creates a new, unconfigured YaraX instance with the given rules and optional source code.
+  pub(crate) fn new_empty(rules: Arc<Rules>, source_code: Option<String>) -> Self {
+    Self {
+      rules,
+      source_code,
+      rule_sources: Vec::new(),
+      warnings: Vec::new(),
+      variables: None,
+      ignored_rules: Vec::new(),
+      ignore_invalid_rules: false,
+      compilation_errors: Vec::new(),
+      stored_options: StoredCompilerOptions::default(),
+      cached_scanner: RefCell::new(None),
+      max_matches_per_pattern: None,
+      use_mmap: None,
+      timeout_ms: None,
+      match_context_size: None,
+    }
+  }
+
   /// Creates a new YaraX instance from a source string.
   ///
   /// # Arguments
@@ -157,25 +177,21 @@ impl YaraX {
     let mut meta_obj = Object::new(&env)?;
 
     for (key, value) in rule.metadata() {
-      let key_string = key.to_string();
-
       match value {
         yara_x::MetaValue::Integer(i) => {
-          meta_obj.set_named_property(&key_string, i)?;
+          meta_obj.set_named_property(key, i)?;
         }
         yara_x::MetaValue::Float(f) => {
-          let float_val = f;
-          meta_obj.set_named_property(&key_string, float_val)?;
+          meta_obj.set_named_property(key, f)?;
         }
         yara_x::MetaValue::String(s) => {
-          let string_val = s.to_string();
-          meta_obj.set_named_property(&key_string, string_val)?;
+          meta_obj.set_named_property(key, s)?;
         }
         yara_x::MetaValue::Bool(b) => {
-          meta_obj.set_named_property(&key_string, b)?;
+          meta_obj.set_named_property(key, b)?;
         }
         _ => {
-          meta_obj.set_named_property(&key_string, "unknown")?;
+          meta_obj.set_named_property(key, "unknown")?;
         }
       }
     }
@@ -214,16 +230,13 @@ impl YaraX {
         let (context_data_slice, context_range) = match_item.data_with_context();
         let has_context = context_data_slice.len() > match_item.data().len();
 
-        let context_data = if has_context {
-          Some(String::from_utf8_lossy(context_data_slice).into_owned())
+        let (context_data, context_match_offset) = if has_context {
+          (
+            Some(String::from_utf8_lossy(context_data_slice).into_owned()),
+            Some(context_range.start as i64),
+          )
         } else {
-          None
-        };
-
-        let context_match_offset = if has_context {
-          Some(context_range.start as i64)
-        } else {
-          None
+          (None, None)
         };
 
         matches_vec.push(MatchData {
@@ -240,16 +253,20 @@ impl YaraX {
     matches_vec
   }
 
-  /// Applies this scanner's stored compiler options and stored global
+  /// Applies this scanner's stored compiler options and global
   /// variables to a compiler, then adds all rule sources in order.
   ///
   /// Variables are applied **before** the sources — yara-x requires globals
   /// to be defined before compiling the rules that reference them — mirroring
   /// [`create_scanner_from_source`](Self::create_scanner_from_source).
-  fn compile_all_sources(&self, compiler: &mut Compiler<'_>) -> Result<()> {
+  fn compile_all_sources_with_vars(
+    &self,
+    compiler: &mut Compiler<'_>,
+    variables: Option<&HashMap<String, VariableValue>>,
+  ) -> Result<()> {
     apply_stored_compiler_options(compiler, &self.stored_options)?;
 
-    if let Some(vars) = &self.variables {
+    if let Some(vars) = variables {
       for (key, value) in vars {
         compiler.apply_variable_value(key, value)?;
       }
@@ -274,6 +291,12 @@ impl YaraX {
     Ok(())
   }
 
+  /// Applies this scanner's stored compiler options and stored global
+  /// variables to a compiler, then adds all rule sources in order.
+  fn compile_all_sources(&self, compiler: &mut Compiler<'_>) -> Result<()> {
+    self.compile_all_sources_with_vars(compiler, self.variables.as_ref())
+  }
+
   /// Consumes the compiler produced by a recompilation, refreshing the
   /// warnings, ignored-rules report and compilation errors, and publishing
   /// the rebuilt rules.
@@ -289,14 +312,14 @@ impl YaraX {
   /// Rebuilds `source_code` from the current rule sources (used by WASM
   /// emission when replaying a concatenated source).
   fn rebuild_source_code(&mut self) {
-    self.source_code = Some(
-      self
-        .rule_sources
-        .iter()
-        .map(|s| s.source.as_str())
-        .collect::<Vec<_>>()
-        .join("\n"),
-    );
+    let mut combined = String::new();
+    for (i, s) in self.rule_sources.iter().enumerate() {
+      if i > 0 {
+        combined.push('\n');
+      }
+      combined.push_str(&s.source);
+    }
+    self.source_code = Some(combined);
   }
 
   /// Returns the rule sources to compile, or falls back to `source_code` for
@@ -330,7 +353,7 @@ impl YaraX {
       // scanner, and `invalidate_scanner_cache()` is called whenever `self.rules` is
       // replaced (in `add_rule_source`, `define_variable`, and option setters).
       let mut scanner = Scanner::new(unsafe {
-        std::mem::transmute::<&yara_x::Rules, &yara_x::Rules>(&*self.rules)
+        std::mem::transmute::<&yara_x::Rules, &'static yara_x::Rules>(&*self.rules)
       });
 
       // Apply scan options
@@ -430,16 +453,7 @@ impl YaraX {
 
       let meta: Vec<(String, MetaValueData)> = rule
         .metadata()
-        .map(|(key, value)| {
-          let v = match value {
-            yara_x::MetaValue::Integer(i) => MetaValueData::Integer(i),
-            yara_x::MetaValue::Float(f) => MetaValueData::Float(f),
-            yara_x::MetaValue::String(s) => MetaValueData::String(s.to_string()),
-            yara_x::MetaValue::Bool(b) => MetaValueData::Bool(b),
-            _ => MetaValueData::String("unknown".to_string()),
-          };
-          (key.to_string(), v)
-        })
+        .map(|(key, value)| (key.to_string(), MetaValueData::from(value)))
         .collect();
 
       rule_matches.push(RuleMatchData {
@@ -863,7 +877,7 @@ impl YaraX {
   /// Ok(()) on success, or an error if reading or compilation fails
   #[napi]
   pub fn add_rule_file(&mut self, file_path: String, namespace: Option<String>) -> Result<()> {
-    let file_content = std::fs::read_to_string(Path::new(&file_path))
+    let file_content = std::fs::read_to_string(&file_path)
       .map_err(|e| io_error_to_napi(e, &format!("reading file {file_path}")))?;
     self.add_rule_source(file_content, namespace)
   }
@@ -884,30 +898,10 @@ impl YaraX {
     // once the recompilation succeeds (the rules that reference the variable
     // must be compiled with it defined).
     let mut variables = self.variables.clone().unwrap_or_default();
-    variables.insert(name.clone(), VariableValue::String(value.clone()));
+    variables.insert(name, VariableValue::String(value));
 
     let mut compiler = Compiler::new();
-    apply_stored_compiler_options(&mut compiler, &self.stored_options)?;
-
-    for (key, value) in &variables {
-      compiler.apply_variable_value(key, value)?;
-    }
-
-    for source in &self.rule_sources {
-      add_source_to_compiler_tolerant(
-        &mut compiler,
-        &source.source,
-        source.namespace.as_deref(),
-        self.ignore_invalid_rules,
-      )?;
-    }
-
-    if self.rule_sources.is_empty() {
-      let source = self.source_code.as_deref().unwrap_or_default();
-      if !source.is_empty() {
-        add_source_to_compiler_tolerant(&mut compiler, source, None, self.ignore_invalid_rules)?;
-      }
-    }
+    self.compile_all_sources_with_vars(&mut compiler, Some(&variables))?;
 
     self.refresh_compilation_state(compiler)?;
     self.variables = Some(variables);

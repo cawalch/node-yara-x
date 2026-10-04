@@ -51,7 +51,7 @@ use napi::bindgen_prelude::Buffer;
 use napi::{Error, Result, Status};
 use napi_derive::napi;
 use scanner::YaraX as YaraXImpl;
-use std::path::Path;
+use std::sync::Arc;
 use types::CompilerOptions as CompilerOptionsType;
 use variables::{get_compiler_errors, get_compiler_warnings};
 use yara_x::Compiler;
@@ -79,7 +79,7 @@ pub fn validate(
   apply_compiler_options(&mut compiler, options.as_ref(), false)?;
   let namespace = options.as_ref().and_then(|opts| opts.namespace.as_deref());
 
-  let _ = add_source_to_compiler(&mut compiler, rule_source.as_str(), namespace);
+  let _ = add_source_to_compiler(&mut compiler, &rule_source, namespace);
 
   let warnings = get_compiler_warnings(&compiler)?;
   let errors = get_compiler_errors(&compiler)?;
@@ -87,7 +87,7 @@ pub fn validate(
   Ok(CompileResult { warnings, errors })
 }
 
-/// Compiles a YARA rule source string and returns a YaraX instance with the compiled rules.
+/// Compiles a YARA rule source string and returns a `YaraX` instance with the compiled rules.
 ///
 /// # Arguments
 ///
@@ -96,42 +96,24 @@ pub fn validate(
 ///
 /// # Returns
 ///
-/// A YaraX instance with compiled rules
+/// A `YaraX` instance with compiled rules
 #[napi]
 pub fn compile(rule_source: String, options: Option<CompilerOptionsType>) -> Result<YaraXImpl> {
   let yarax = YaraXImpl::create_scanner_from_source(rule_source, options)?;
   Ok(yarax)
 }
 
-/// Creates a new YaraX instance with empty rules and no source code.
+/// Creates a new `YaraX` instance with empty rules and no source code.
 ///
 /// # Returns
 ///
-/// A new YaraX instance with empty rules
+/// A new `YaraX` instance with empty rules
 #[napi]
 pub fn create() -> YaraXImpl {
-  use std::cell::RefCell;
-  use std::sync::Arc;
-
-  YaraXImpl {
-    rules: Arc::new(Compiler::new().build()),
-    source_code: Some(String::new()),
-    rule_sources: Vec::new(),
-    warnings: Vec::new(),
-    variables: None,
-    ignored_rules: Vec::new(),
-    ignore_invalid_rules: false,
-    compilation_errors: Vec::new(),
-    stored_options: crate::compiler::StoredCompilerOptions::default(),
-    cached_scanner: RefCell::new(None),
-    max_matches_per_pattern: None,
-    use_mmap: None,
-    timeout_ms: None,
-    match_context_size: None,
-  }
+  YaraXImpl::new_empty(Arc::new(Compiler::new().build()), Some(String::new()))
 }
 
-/// Creates a new YaraX instance from a file containing YARA rules.
+/// Creates a new `YaraX` instance from a file containing YARA rules.
 ///
 /// # Arguments
 ///
@@ -140,16 +122,16 @@ pub fn create() -> YaraXImpl {
 ///
 /// # Returns
 ///
-/// A YaraX instance with compiled rules from the file
+/// A `YaraX` instance with compiled rules from the file
 #[napi]
 pub fn from_file(rule_path: String, options: Option<CompilerOptionsType>) -> Result<YaraXImpl> {
-  let file_content = std::fs::read_to_string(Path::new(&rule_path))
+  let file_content = std::fs::read_to_string(&rule_path)
     .map_err(|e| io_error_to_napi(e, &format!("reading file {rule_path}")))?;
 
   YaraXImpl::create_scanner_from_source(file_content, options)
 }
 
-/// Creates a new YaraX instance from a serialized rules blob.
+/// Creates a new `YaraX` instance from a serialized rules blob.
 ///
 /// The blob must have been produced by [`YaraX::serialize`] (or
 /// `yara_x::Rules::serialize`) using the same YARA-X version. The rules are
@@ -163,11 +145,9 @@ pub fn from_file(rule_path: String, options: Option<CompilerOptionsType>) -> Res
 ///
 /// # Returns
 ///
-/// A YaraX instance with the restored rules
+/// A `YaraX` instance with the restored rules
 #[napi]
 pub fn deserialize(data: Buffer) -> Result<YaraXImpl> {
-  use std::cell::RefCell;
-  use std::sync::Arc;
   use yara_x::Rules;
 
   let rules = Rules::deserialize(data.as_ref()).map_err(|e| {
@@ -177,22 +157,7 @@ pub fn deserialize(data: Buffer) -> Result<YaraXImpl> {
     )
   })?;
 
-  Ok(YaraXImpl {
-    rules: Arc::new(rules),
-    source_code: None,
-    rule_sources: Vec::new(),
-    warnings: Vec::new(),
-    variables: None,
-    ignored_rules: Vec::new(),
-    ignore_invalid_rules: false,
-    compilation_errors: Vec::new(),
-    stored_options: crate::compiler::StoredCompilerOptions::default(),
-    cached_scanner: RefCell::new(None),
-    max_matches_per_pattern: None,
-    use_mmap: None,
-    timeout_ms: None,
-    match_context_size: None,
-  })
+  Ok(YaraXImpl::new_empty(Arc::new(rules), None))
 }
 
 /// Compiles a YARA rule source string to a WASM file.
@@ -232,7 +197,7 @@ pub fn compile_file_to_wasm(
   output_path: String,
   options: Option<CompilerOptionsType>,
 ) -> Result<()> {
-  let file_content = std::fs::read_to_string(Path::new(&rule_path))
+  let file_content = std::fs::read_to_string(&rule_path)
     .map_err(|e| io_error_to_napi(e, &format!("reading file {rule_path}")))?;
   compiler::compile_source_to_wasm(&file_content, &output_path, options.as_ref())
 }

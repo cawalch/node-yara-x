@@ -18,7 +18,7 @@ use yara_x::errors::CompileError;
 pub fn compile_error_to_napi(error: &CompileError) -> Error {
   Error::new(
     Status::GenericFailure,
-    format!("Compilation error ({}): {}", error.code(), error),
+    format!("Compilation error ({}): {error}", error.code()),
   )
 }
 
@@ -34,15 +34,15 @@ pub fn compile_error_to_napi(error: &CompileError) -> Error {
 ///
 /// A N-API error with appropriate status and message
 pub fn scan_error_to_napi(error: yara_x::ScanError) -> Error {
-  match &error {
+  match error {
     yara_x::ScanError::Timeout => Error::new(Status::Cancelled, "Scan timed out"),
     yara_x::ScanError::OpenError { path, err } => Error::new(
       Status::GenericFailure,
-      format!("I/O error (reading file {}): {}", path.display(), err),
+      format!("I/O error (reading file {}): {err}", path.display()),
     ),
     yara_x::ScanError::MapError { path, err } => Error::new(
       Status::GenericFailure,
-      format!("Failed to map file '{}': {}", path.display(), err),
+      format!("Failed to map file '{}': {err}", path.display()),
     ),
     yara_x::ScanError::ProtoError { module, err } => Error::new(
       Status::GenericFailure,
@@ -52,9 +52,9 @@ pub fn scan_error_to_napi(error: yara_x::ScanError) -> Error {
       Status::GenericFailure,
       format!("Unknown module: '{module}'"),
     ),
-    _ => Error::new(
+    other => Error::new(
       Status::GenericFailure,
-      format!("Unknown scan error: {error:?}"),
+      format!("Unknown scan error: {other:?}"),
     ),
   }
 }

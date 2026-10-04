@@ -205,26 +205,24 @@ impl Task for EmitWasmFileTask {
       )
     })?;
 
-    if self.rule_sources.is_empty() {
-      crate::compiler::replay_sources_to_wasm(
-        &[crate::types::RuleSource {
-          source: source.clone(),
-          namespace: None,
-        }],
-        &self.output_path,
-        &self.stored_options,
-        self.variables.as_ref(),
-        self.ignore_invalid_rules,
-      )?;
+    let fallback_source;
+    let sources = if self.rule_sources.is_empty() {
+      fallback_source = [RuleSource {
+        source: source.clone(),
+        namespace: None,
+      }];
+      &fallback_source[..]
     } else {
-      replay_sources_to_wasm(
-        &self.rule_sources,
-        &self.output_path,
-        &self.stored_options,
-        self.variables.as_ref(),
-        self.ignore_invalid_rules,
-      )?;
-    }
+      &self.rule_sources[..]
+    };
+
+    replay_sources_to_wasm(
+      sources,
+      &self.output_path,
+      &self.stored_options,
+      self.variables.as_ref(),
+      self.ignore_invalid_rules,
+    )?;
     Ok(())
   }
 

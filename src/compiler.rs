@@ -38,39 +38,31 @@ pub struct StoredCompilerOptions {
   pub enable_includes: Option<bool>,
 }
 
+impl From<&CompilerOptions<'_>> for StoredCompilerOptions {
+  fn from(opts: &CompilerOptions<'_>) -> Self {
+    Self {
+      ignore_modules: opts.ignore_modules.clone().unwrap_or_default(),
+      banned_modules: opts.banned_modules.clone().unwrap_or_default(),
+      features: opts.features.clone().unwrap_or_default(),
+      relaxed_re_syntax: opts.relaxed_re_syntax.unwrap_or(false),
+      condition_optimization: opts.condition_optimization.unwrap_or(false),
+      error_on_slow_pattern: opts.error_on_slow_pattern.unwrap_or(false),
+      error_on_slow_loop: opts.error_on_slow_loop.unwrap_or(false),
+      max_warnings: opts.max_warnings.map(|m| m as usize),
+      disable_warnings: opts.disable_warnings.clone().unwrap_or_default(),
+      enable_all_warnings: opts.enable_all_warnings,
+      include_directories: opts.include_directories.clone().unwrap_or_default(),
+      enable_includes: opts.enable_includes,
+    }
+  }
+}
+
 /// Extracts the persisted compiler options from a [`CompilerOptions`] object.
 ///
 /// `namespace`, `define_variables` and `ignore_invalid_rules` are excluded:
 /// they are tracked separately by the scanner.
 pub fn stored_options_from(options: Option<&CompilerOptions<'_>>) -> StoredCompilerOptions {
-  let mut stored = StoredCompilerOptions::default();
-
-  if let Some(opts) = options {
-    if let Some(modules) = &opts.ignore_modules {
-      stored.ignore_modules = modules.clone();
-    }
-    if let Some(modules) = &opts.banned_modules {
-      stored.banned_modules = modules.clone();
-    }
-    if let Some(features) = &opts.features {
-      stored.features = features.clone();
-    }
-    stored.relaxed_re_syntax = opts.relaxed_re_syntax.unwrap_or(false);
-    stored.condition_optimization = opts.condition_optimization.unwrap_or(false);
-    stored.error_on_slow_pattern = opts.error_on_slow_pattern.unwrap_or(false);
-    stored.error_on_slow_loop = opts.error_on_slow_loop.unwrap_or(false);
-    stored.max_warnings = opts.max_warnings.map(|m| m as usize);
-    if let Some(codes) = &opts.disable_warnings {
-      stored.disable_warnings = codes.clone();
-    }
-    stored.enable_all_warnings = opts.enable_all_warnings;
-    if let Some(dirs) = &opts.include_directories {
-      stored.include_directories = dirs.clone();
-    }
-    stored.enable_includes = opts.enable_includes;
-  }
-
-  stored
+  options.map_or_else(StoredCompilerOptions::default, StoredCompilerOptions::from)
 }
 
 /// Applies previously-stored compiler options to a compiler instance.
@@ -135,13 +127,7 @@ pub fn add_source_to_compiler(
   source: &str,
   namespace: Option<&str>,
 ) -> Result<()> {
-  compiler.new_namespace(namespace.unwrap_or("default"));
-
-  compiler
-    .add_source(source)
-    .map_err(|e| compile_error_to_napi(&e))?;
-
-  Ok(())
+  add_source_to_compiler_tolerant(compiler, source, namespace, false)
 }
 
 /// Adds a source string to the compiler, optionally tolerating per-rule
@@ -222,7 +208,7 @@ pub fn uncovered_compiler_errors(compiler: &Compiler) -> Vec<CompilerError> {
   let covered: Vec<*const CompileError> = compiler
     .ignored_rules()
     .filter_map(|(_, reason)| match reason {
-      IgnoredRuleReason::CompileError(err) => Some(err as *const CompileError),
+      IgnoredRuleReason::CompileError(err) => Some(std::ptr::from_ref(err)),
       _ => None,
     })
     .collect();
@@ -230,11 +216,7 @@ pub fn uncovered_compiler_errors(compiler: &Compiler) -> Vec<CompilerError> {
   compiler
     .errors()
     .iter()
-    .filter(|err| {
-      !covered
-        .iter()
-        .any(|covered| std::ptr::eq(*covered, *err as *const CompileError))
-    })
+    .filter(|err| !covered.contains(&std::ptr::from_ref(*err)))
     .map(|err| CompilerError {
       code: err.code().to_string(),
       message: err.to_string(),
