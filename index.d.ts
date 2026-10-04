@@ -536,6 +536,6 @@ export interface RuleSource {
  *
  * # Returns
  *
- * A CompileResult containing any warnings and errors
+ * A `CompileResult` containing any warnings and errors
  */
 export declare function validate(ruleSource: string, options?: CompilerOptionsType | undefined | null): CompileResult

@@ -131,14 +131,14 @@ impl YaraX {
       ignore_invalid_rules,
     )?;
 
-    let warnings = get_compiler_warnings(&compiler)?;
+    let warnings = get_compiler_warnings(&compiler);
     // Rules can be skipped even without `ignore_invalid_rules` (e.g. when
     // they depend on ignored modules), so the report is collected
     // unconditionally. Compilation errors are only survivable in tolerant
     // mode (otherwise `add_source` aborts above), so collect them from the
     // compiler regardless and keep the ones that remain.
     let ignored_rules = collect_ignored_rules(&compiler);
-    let compilation_errors = get_compiler_errors(&compiler)?;
+    let compilation_errors = get_compiler_errors(&compiler);
     let rules = compiler.build();
     let rule_sources = vec![RuleSource {
       source: source.clone(),
@@ -218,7 +218,7 @@ impl YaraX {
         continue;
       }
 
-      let pattern_id = pattern.identifier().to_string();
+      let pattern_id = pattern.identifier();
 
       for match_item in pattern_matches {
         let range = match_item.range();
@@ -243,7 +243,7 @@ impl YaraX {
           offset: offset as i64,
           length: length as i64,
           data: matched_data,
-          identifier: pattern_id.clone(),
+          identifier: pattern_id.to_string(),
           context_data,
           context_match_offset,
         });
@@ -300,13 +300,12 @@ impl YaraX {
   /// Consumes the compiler produced by a recompilation, refreshing the
   /// warnings, ignored-rules report and compilation errors, and publishing
   /// the rebuilt rules.
-  fn refresh_compilation_state(&mut self, compiler: Compiler<'_>) -> Result<()> {
-    self.warnings = get_compiler_warnings(&compiler)?;
+  fn refresh_compilation_state(&mut self, compiler: Compiler<'_>) {
+    self.warnings = get_compiler_warnings(&compiler);
     self.ignored_rules = collect_ignored_rules(&compiler);
-    self.compilation_errors = get_compiler_errors(&compiler)?;
+    self.compilation_errors = get_compiler_errors(&compiler);
     self.rules = Arc::new(compiler.build());
     self.invalidate_scanner_cache();
-    Ok(())
   }
 
   /// Rebuilds `source_code` from the current rule sources (used by WASM
@@ -320,19 +319,6 @@ impl YaraX {
       combined.push_str(&s.source);
     }
     self.source_code = Some(combined);
-  }
-
-  /// Returns the rule sources to compile, or falls back to `source_code` for
-  /// scanners built incrementally without any recorded sources.
-  fn sources_for_emit(&self) -> Vec<RuleSource> {
-    if self.rule_sources.is_empty() {
-      vec![RuleSource {
-        source: self.source_code.clone().unwrap_or_default(),
-        namespace: None,
-      }]
-    } else {
-      self.rule_sources.clone()
-    }
   }
 
   /// Gets or creates a cached scanner for reuse.
@@ -486,7 +472,7 @@ impl YaraX {
         match value {
           MetaValueData::Integer(i) => meta_obj.set_named_property(key, *i)?,
           MetaValueData::Float(f) => meta_obj.set_named_property(key, *f)?,
-          MetaValueData::String(s) => meta_obj.set_named_property(key, s.clone())?,
+          MetaValueData::String(s) => meta_obj.set_named_property(key, s.as_str())?,
           MetaValueData::Bool(b) => meta_obj.set_named_property(key, *b)?,
         }
       }
@@ -665,19 +651,28 @@ impl YaraX {
   /// Ok(()) on success, or an error if emission fails
   #[napi]
   pub fn emit_wasm_file(&self, output_path: String) -> Result<()> {
-    if self.source_code.is_none() {
-      return Err(Error::new(
+    let source = self.source_code.as_ref().ok_or_else(|| {
+      Error::new(
         Status::InvalidArg,
         "Cannot emit WASM file: source code not available",
-      ));
-    }
+      )
+    })?;
 
-    let sources = self.sources_for_emit();
+    let fallback_source;
+    let sources = if self.rule_sources.is_empty() {
+      fallback_source = [RuleSource {
+        source: source.clone(),
+        namespace: None,
+      }];
+      &fallback_source[..]
+    } else {
+      &self.rule_sources[..]
+    };
 
     // Replay the stored options and variables so the emitted module matches
     // the scanner's compilation semantics (including `ignore_invalid_rules`).
     replay_sources_to_wasm(
-      &sources,
+      sources,
       &output_path,
       &self.stored_options,
       self.variables.as_ref(),
@@ -818,7 +813,7 @@ impl YaraX {
     // original compilation) and recompile all sources in a single pass.
     self.compile_all_sources(&mut compiler)?;
 
-    self.refresh_compilation_state(compiler)?;
+    self.refresh_compilation_state(compiler);
 
     // Keep source_code in sync for WASM emission
     self.rebuild_source_code();
@@ -858,7 +853,7 @@ impl YaraX {
     // single pass.
     self.compile_all_sources(&mut compiler)?;
 
-    self.refresh_compilation_state(compiler)?;
+    self.refresh_compilation_state(compiler);
 
     // Keep source_code in sync for WASM emission
     self.rebuild_source_code();
@@ -903,7 +898,7 @@ impl YaraX {
     let mut compiler = Compiler::new();
     self.compile_all_sources_with_vars(&mut compiler, Some(&variables))?;
 
-    self.refresh_compilation_state(compiler)?;
+    self.refresh_compilation_state(compiler);
     self.variables = Some(variables);
 
     Ok(())
