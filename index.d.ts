@@ -244,7 +244,7 @@ export interface BannedModule {
 }
 
 /**
- * Compiles a YARA rule source string and returns a YaraX instance with the compiled rules.
+ * Compiles a YARA rule source string and returns a `YaraX` instance with the compiled rules.
  *
  * # Arguments
  *
@@ -253,7 +253,7 @@ export interface BannedModule {
  *
  * # Returns
  *
- * A YaraX instance with compiled rules
+ * A `YaraX` instance with compiled rules
  */
 export declare function compile(ruleSource: string, options?: CompilerOptionsType | undefined | null): YaraXImpl
 
@@ -411,16 +411,16 @@ export interface CompilerWarning {
 export declare function compileToWasm(ruleSource: string, outputPath: string, options?: CompilerOptionsType | undefined | null): void
 
 /**
- * Creates a new YaraX instance with empty rules and no source code.
+ * Creates a new `YaraX` instance with empty rules and no source code.
  *
  * # Returns
  *
- * A new YaraX instance with empty rules
+ * A new `YaraX` instance with empty rules
  */
 export declare function create(): YaraXImpl
 
 /**
- * Creates a new YaraX instance from a serialized rules blob.
+ * Creates a new `YaraX` instance from a serialized rules blob.
  *
  * The blob must have been produced by [`YaraX::serialize`] (or
  * `yara_x::Rules::serialize`) using the same YARA-X version. The rules are
@@ -434,12 +434,12 @@ export declare function create(): YaraXImpl
  *
  * # Returns
  *
- * A YaraX instance with the restored rules
+ * A `YaraX` instance with the restored rules
  */
 export declare function deserialize(data: Buffer): YaraXImpl
 
 /**
- * Creates a new YaraX instance from a file containing YARA rules.
+ * Creates a new `YaraX` instance from a file containing YARA rules.
  *
  * # Arguments
  *
@@ -448,7 +448,7 @@ export declare function deserialize(data: Buffer): YaraXImpl
  *
  * # Returns
  *
- * A YaraX instance with compiled rules from the file
+ * A `YaraX` instance with compiled rules from the file
  */
 export declare function fromFile(rulePath: string, options?: CompilerOptionsType | undefined | null): YaraXImpl
 

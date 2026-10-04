@@ -7,12 +7,13 @@
 use napi::bindgen_prelude::Object;
 use napi_derive::napi;
 use std::collections::HashMap;
+use yara_x::MetaValue;
 
 /// A map of variable names to their values.
 pub type VariableMap = HashMap<String, VariableValue>;
 
 /// A YARA global variable value.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum VariableValue {
   /// A boolean value.
   Bool(bool),
@@ -26,7 +27,7 @@ pub enum VariableValue {
 
 /// A YARA rule source and the namespace it belongs to.
 #[napi(object)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RuleSource {
   /// The YARA rule source code.
   pub source: String,
@@ -38,7 +39,7 @@ pub struct RuleSource {
 ///
 /// Contains information about where the match occurred and what data was matched.
 #[napi(object)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MatchData {
   /// The offset of the match in the scanned data.
   pub offset: i64,
@@ -57,7 +58,7 @@ pub struct MatchData {
 /// A thread-safe metadata value that can be transferred across thread boundaries.
 ///
 /// Used by async tasks to hold scan results before converting to N-API objects.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum MetaValueData {
   /// An integer metadata value.
   Integer(i64),
@@ -69,11 +70,23 @@ pub enum MetaValueData {
   Bool(bool),
 }
 
+impl From<MetaValue<'_>> for MetaValueData {
+  fn from(value: MetaValue<'_>) -> Self {
+    match value {
+      MetaValue::Integer(i) => Self::Integer(i),
+      MetaValue::Float(f) => Self::Float(f),
+      MetaValue::String(s) => Self::String(s.to_string()),
+      MetaValue::Bool(b) => Self::Bool(b),
+      _ => Self::String("unknown".to_string()),
+    }
+  }
+}
+
 /// A thread-safe representation of a rule match that can cross thread boundaries.
 ///
 /// Unlike `RuleMatch`, this struct contains no N-API references, making it `Send + Sync`.
 /// It is used as an intermediate type in async scanning tasks.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RuleMatchData {
   /// The identifier of the rule that matched.
   pub rule_identifier: String,
@@ -176,7 +189,7 @@ pub struct CompilerOptions<'a> {
 /// on a rule that was itself skipped. See
 /// [`CompilerOptions::ignore_invalid_rules`](CompilerOptions::ignore_invalid_rules).
 #[napi(object)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct IgnoredRule {
   /// The identifier of the ignored rule.
   pub name: String,
@@ -193,7 +206,7 @@ pub struct IgnoredRule {
 /// When a banned module is encountered, compilation will fail with the
 /// specified error message.
 #[napi(object)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BannedModule {
   /// The name of the banned module.
   pub name: String,
@@ -208,7 +221,7 @@ pub struct BannedModule {
 /// Warnings indicate potential issues that don't prevent compilation
 /// but may indicate problems with the rules.
 #[napi(object)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CompilerWarning {
   /// The code of the warning.
   pub code: String,
@@ -227,7 +240,7 @@ pub struct CompilerWarning {
 /// Errors prevent successful compilation and must be resolved before
 /// the rules can be used.
 #[napi(object)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CompilerError {
   /// The code of the error.
   pub code: String,
@@ -246,7 +259,7 @@ pub struct CompilerError {
 /// Contains any warnings or errors generated during the compilation process.
 /// If errors are present, the compilation failed.
 #[napi(object)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CompileResult {
   /// Any warnings generated during the compilation process.
   pub warnings: Vec<CompilerWarning>,
