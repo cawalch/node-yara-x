@@ -76,6 +76,24 @@ pub trait VariableHandler {
   }
 }
 
+enum ParsedVar<'a> {
+  Bool(bool),
+  Integer(i64),
+  Str(&'a str),
+}
+
+fn parse_var_str(value: &str) -> ParsedVar<'_> {
+  if value.eq_ignore_ascii_case("true") {
+    ParsedVar::Bool(true)
+  } else if value.eq_ignore_ascii_case("false") {
+    ParsedVar::Bool(false)
+  } else if let Ok(num) = value.parse::<i64>() {
+    ParsedVar::Integer(num)
+  } else {
+    ParsedVar::Str(value)
+  }
+}
+
 impl<'a> VariableHandler for Scanner<'a> {
   /// Applies a variable to the scanner.
   ///
@@ -84,17 +102,13 @@ impl<'a> VariableHandler for Scanner<'a> {
   /// 2. Integer (valid i64)
   /// 3. String (fallback)
   fn apply_variable(&mut self, name: &str, value: &str) -> Result<()> {
-    let result = if value.eq_ignore_ascii_case("true") {
-      self.set_global(name, true)
-    } else if value.eq_ignore_ascii_case("false") {
-      self.set_global(name, false)
-    } else if let Ok(num) = value.parse::<i64>() {
-      self.set_global(name, num)
-    } else {
-      self.set_global(name, value)
-    };
-
-    result.map(|_| ()).map_err(to_napi_err)
+    match parse_var_str(value) {
+      ParsedVar::Bool(b) => self.set_global(name, b),
+      ParsedVar::Integer(i) => self.set_global(name, i),
+      ParsedVar::Str(s) => self.set_global(name, s),
+    }
+    .map(|_| ())
+    .map_err(to_napi_err)
   }
 
   fn apply_bool_variable(&mut self, name: &str, value: bool) -> Result<()> {
@@ -127,17 +141,13 @@ impl<'a> VariableHandler for Compiler<'a> {
   /// 2. Integer (valid i64)
   /// 3. String (fallback)
   fn apply_variable(&mut self, name: &str, value: &str) -> Result<()> {
-    let result = if value.eq_ignore_ascii_case("true") {
-      self.define_global(name, true)
-    } else if value.eq_ignore_ascii_case("false") {
-      self.define_global(name, false)
-    } else if let Ok(num) = value.parse::<i64>() {
-      self.define_global(name, num)
-    } else {
-      self.define_global(name, value)
-    };
-
-    result.map(|_| ()).map_err(to_napi_err)
+    match parse_var_str(value) {
+      ParsedVar::Bool(b) => self.define_global(name, b),
+      ParsedVar::Integer(i) => self.define_global(name, i),
+      ParsedVar::Str(s) => self.define_global(name, s),
+    }
+    .map(|_| ())
+    .map_err(to_napi_err)
   }
 
   fn apply_bool_variable(&mut self, name: &str, value: bool) -> Result<()> {
@@ -245,18 +255,14 @@ pub fn convert_compiler_messages<T, U>(messages: &[T], to_output: impl Fn(&T) ->
 /// # Returns
 ///
 /// A vector of CompilerError structs
-pub fn get_compiler_errors(compiler: &Compiler) -> Result<Vec<CompilerError>> {
-  let errors = compiler.errors();
-
-  let result = convert_compiler_messages(errors, |e| CompilerError {
+pub fn get_compiler_errors(compiler: &Compiler) -> Vec<CompilerError> {
+  convert_compiler_messages(compiler.errors(), |e| CompilerError {
     code: e.code().to_string(),
     message: e.to_string(),
     source: None,
     line: None,
     column: None,
-  });
-
-  Ok(result)
+  })
 }
 
 /// Extracts compiler warnings from a Compiler instance.
@@ -268,16 +274,12 @@ pub fn get_compiler_errors(compiler: &Compiler) -> Result<Vec<CompilerError>> {
 /// # Returns
 ///
 /// A vector of CompilerWarning structs
-pub fn get_compiler_warnings(compiler: &Compiler) -> Result<Vec<CompilerWarning>> {
-  let warnings = compiler.warnings();
-
-  let result = convert_compiler_messages(warnings, |w| CompilerWarning {
+pub fn get_compiler_warnings(compiler: &Compiler) -> Vec<CompilerWarning> {
+  convert_compiler_messages(compiler.warnings(), |w| CompilerWarning {
     code: w.code().to_string(),
     message: w.to_string(),
     source: None,
     line: None,
     column: None,
-  });
-
-  Ok(result)
+  })
 }

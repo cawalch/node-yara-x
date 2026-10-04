@@ -68,7 +68,7 @@ use yara_x::Compiler;
 ///
 /// # Returns
 ///
-/// A CompileResult containing any warnings and errors
+/// A `CompileResult` containing any warnings and errors
 #[napi]
 pub fn validate(
   rule_source: String,
@@ -81,8 +81,8 @@ pub fn validate(
 
   let _ = add_source_to_compiler(&mut compiler, &rule_source, namespace);
 
-  let warnings = get_compiler_warnings(&compiler)?;
-  let errors = get_compiler_errors(&compiler)?;
+  let warnings = get_compiler_warnings(&compiler);
+  let errors = get_compiler_errors(&compiler);
 
   Ok(CompileResult { warnings, errors })
 }

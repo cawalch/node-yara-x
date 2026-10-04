@@ -122,8 +122,7 @@ impl Task for ScanTask {
   type JsValue = Vec<RuleMatch<'static>>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    let data = std::mem::take(&mut self.data);
-    self.base.scan_to_data(&data)
+    self.base.scan_to_data(&self.data)
   }
 
   fn resolve(&mut self, env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
