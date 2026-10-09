@@ -78,7 +78,7 @@ jobs:
         # from npm (a prior release built against an older yara-x) and any
         # test exercising newer compiler behavior fails spuriously.
         if: steps.release.outputs.skip != 'true'
-        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: stable
       - name: Cache cargo
@@ -107,7 +107,7 @@ jobs:
           pnpm test
       - name: Setup Keyless Signing (Gitsign)
         if: steps.release.outputs.skip != 'true'
-        uses: chainguard-dev/actions/setup-gitsign@805da2efdffdc42b8afd8880e575a48b471ef544 # v1.6.37
+        uses: chainguard-dev/actions/setup-gitsign@84b1be4c638f12d4256ddddef17af98853b6d0d9 # v1.6.40
       - name: Open release pull request
         if: steps.release.outputs.skip != 'true'
         env:
