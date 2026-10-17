@@ -33,6 +33,26 @@ The Linux musl targets (`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl
 
 Root `optionalDependencies` are discovered from the `npm/` directories during the publish job rather than committed, because a platform package that does not exist on the registry yet would make `pnpm install --frozen-lockfile` unresolvable. Adding a target therefore means adding it to `napi.targets`, running `napi create-npm-dirs`, and letting the publish job pick it up.
 
+## Bootstrapping a new platform package
+
+A platform package that has never been published cannot be created by the release job. npm accepts OIDC publishes only for packages that already have a trusted publisher configured, and a trusted publisher can only be configured from the settings page of a package that already exists. Creating a brand-new package therefore requires a local session or a granular access token:
+
+```sh
+# from the platform package directory, after its native binary has been placed there
+cd npm/linux-x64-musl
+npm stage publish          # staging does not need 2FA; creates the package behind a 0.0.0-stage placeholder
+npm stage list             # find the stage id
+npm stage approve <id>     # approve with 2FA to publish the real version
+```
+
+`npm stage publish` needs npm CLI 11.15.0 or later and Node 22.14.0 or higher. Approving publishes the version, so bootstrap at the version you are about to release; the publish job skips packages whose version is already on the registry, which makes the re-run a no-op for them.
+
+Afterwards add a trusted publisher for the new package name (package settings → Trusted publishing) and **select "allow npm publish"**. Configurations created after September 3 2026 default to staged-only and this workflow uses direct `npm publish`. New configurations must complete a first successful publish within 48 hours or they expire.
+
+The publish job now checks for this case before it publishes anything and fails with the package names and the commands above, rather than publishing some platform packages and then stopping partway through.
+
+The same applies when renaming a package: a package name that has never existed cannot be published by OIDC.
+
 ## Version Policy
 
 - Use a patch release for dependency-only updates, release hardening, documentation corrections, and compatible fixes.

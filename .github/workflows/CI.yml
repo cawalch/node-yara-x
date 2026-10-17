@@ -331,6 +331,40 @@ jobs:
             }
           '
           ls -R ./npm
+      - name: Check for platform packages that do not exist yet
+        # npm can only create a brand-new package from a local session or a
+        # granular access token: a trusted publisher is configured per package,
+        # and that configuration can only be created once the package exists. So
+        # an OIDC release cannot create a new platform package. Without this
+        # check the job publishes the other platform packages, then dies partway
+        # through the publish loop, leaving the release half-done and the root
+        # package unpublished.
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for dir in ./npm/*/; do
+            name=$(node -p "require('./${dir}package.json').name")
+            latest=$(npm view "$name" version 2>/dev/null || true)
+            if [[ -z "$latest" ]]; then
+              echo "NEW   $name does not exist on the registry"
+              missing+=("$dir")
+            else
+              echo "ok    $name (published latest: $latest)"
+            fi
+          done
+
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::${#missing[@]} platform package(s) do not exist on npm yet and cannot be created by this job."
+            echo "Bootstrap each one once by hand, then re-run this job:"
+            for dir in "${missing[@]}"; do
+              echo "    cd ${dir%/} && npm stage publish    # then: npm stage approve <stage-id>"
+            done
+            echo "See docs/release-process.md (Bootstrapping a new platform package)."
+            exit 1
+          fi
+
+          echo "All platform packages exist on the registry."
       - name: Publish platform sub-packages
         # Publish each platform-specific sub-package from ./npm/*
         # Uses OIDC trusted publishing (no NPM_TOKEN needed).
