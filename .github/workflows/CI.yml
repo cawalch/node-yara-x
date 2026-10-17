@@ -41,6 +41,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Verify platform package licenses
+        # Each platform package ships a LICENSE file that npm includes regardless
+        # of the "files" array. Fail the pull request if those files are missing
+        # or no longer match the root license files.
+        run: node scripts/platform-licenses.mjs --check
       - name: Detect source changes
         id: diff
         shell: bash
@@ -259,9 +264,37 @@ jobs:
         run: pnpm napi create-npm-dirs
       - name: Move artifacts
         run: pnpm artifacts
-      - name: List packages
-        run: ls -R ./npm
+      - name: Verify every package will ship a license
+        # `pnpm napi create-npm-dirs` above rewrote npm/*/package.json and
+        # hard-codes "files" to the native binary, so a platform package can only
+        # ship a license through the LICENSE file we commit. Check with npm's own
+        # packlist, before anything is published, that each package really
+        # includes one.
         shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/platform-licenses.mjs --check
+          node -e '
+            const { execFileSync } = require("node:child_process");
+            const { existsSync, readdirSync } = require("node:fs");
+            let failed = false;
+            for (const entry of readdirSync("npm", { withFileTypes: true })) {
+              if (!entry.isDirectory()) continue;
+              const dir = `npm/${entry.name}`;
+              if (!existsSync(`${dir}/package.json`)) continue;
+              const [packed] = JSON.parse(
+                execFileSync("npm", ["pack", `./${dir}`, "--dry-run", "--json", "--ignore-scripts"], { encoding: "utf8" }),
+              );
+              const licensed = packed.files.some((f) => /^(LICENSE|LICENCE|COPYING)/i.test(f.path));
+              console.log(`${licensed ? "ok  " : "FAIL"} ${packed.name} ships ${packed.files.length} file(s)`);
+              if (!licensed) failed = true;
+            }
+            if (failed) {
+              console.error("A package would be published without a license file.");
+              process.exit(1);
+            }
+          '
+          ls -R ./npm
       - name: Publish platform sub-packages
         # Publish each platform-specific sub-package from ./npm/*
         # Uses OIDC trusted publishing (no NPM_TOKEN needed).

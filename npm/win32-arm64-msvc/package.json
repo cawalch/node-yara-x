@@ -6,9 +6,7 @@
   ],
   "main": "yara-x.win32-arm64-msvc.node",
   "files": [
-    "yara-x.win32-arm64-msvc.node",
-    "LICENSE-MIT",
-    "LICENSE-BSD-3-Clause"
+    "yara-x.win32-arm64-msvc.node"
   ],
   "keywords": [
     "yara",
