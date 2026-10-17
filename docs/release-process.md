@@ -60,6 +60,22 @@ The publish job checks for this case before it publishes anything and refuses to
 
 The same applies when renaming a package: a package name that has never existed cannot be published by OIDC.
 
+## Release notes
+
+Release notes are read by people deciding whether to upgrade, not by maintainers. `Create Release` accepts free-text notes; when they are omitted it falls back to GitHub's generated list of pull request titles, which is a poor substitute for an actual summary.
+
+Cover, in roughly this order:
+
+1. **What a consumer of the package will notice** — behaviour, what is inside the published tarballs, supported platforms. Lead with the most user-visible change.
+2. **Whether the upgrade is drop-in**, plus any API, platform or Node.js version change.
+3. **Dependency moves**, and specifically whether YARA-X itself moved (it affects rule behaviour, module support and serialized-rule compatibility) and whether the napi-rs family moved (it affects the generated loader).
+4. **Known limitations** worth stating up front, for example that Linux builds target glibc and Alpine is unsupported.
+5. A link to the compare view for the full diff.
+
+Do not describe work that was not released. A change that was added and reverted inside the same unreleased cycle did not happen from a user's point of view, and mentioning it only raises the question of which release it was in. Describe only what the published artifacts contain; `npm view <package>@<version>`, the tarball contents and the release assets are the source of truth.
+
+[The v0.8.0 notes](https://github.com/cawalch/node-yara-x/releases/tag/v0.8.0) are a reasonable model.
+
 ## Version Policy
 
 - Use a patch release for dependency-only updates, release hardening, documentation corrections, and compatible fixes.
