@@ -1,6 +1,7 @@
 {
   "name": "@litko/yara-x",
   "version": "0.7.5",
+  "description": "Node.js bindings for YARA-X. Compile YARA rules and scan buffers or files with prebuilt native binaries.",
   "main": "index.js",
   "types": "index.d.ts",
   "packageManager": "pnpm@10.18.0",
