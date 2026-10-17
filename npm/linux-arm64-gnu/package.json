@@ -6,9 +6,7 @@
   ],
   "main": "yara-x.linux-arm64-gnu.node",
   "files": [
-    "yara-x.linux-arm64-gnu.node",
-    "LICENSE-MIT",
-    "LICENSE-BSD-3-Clause"
+    "yara-x.linux-arm64-gnu.node"
   ],
   "keywords": [
     "yara",

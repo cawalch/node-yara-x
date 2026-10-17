@@ -21,6 +21,12 @@ After the release PR is reviewed and merged, run the `Create Release` workflow f
 
 The existing CI release workflow publishes to npm only after GitHub emits the release `published` event. Publishing uses npm Trusted Publishing and provenance; no long-lived npm publish token is required.
 
+## Platform package licenses
+
+Each platform sub-package ships a single `LICENSE` file committed under `npm/<target>/`. This is deliberate rather than a style choice: `napi create-npm-dirs` regenerates the platform manifests during the publish job and rewrites their `files` array to the native binary alone, so a license cannot travel with those packages by listing it in `files`. npm always includes a file named `LICENSE`, `LICENCE`, `COPYING` or `README` regardless of `files`, which is the mechanism that actually works.
+
+`node scripts/platform-licenses.mjs` rewrites those files from the root `LICENSE-MIT` and `LICENSE-BSD-3-Clause` (it runs as part of `Prepare Release`), and `node scripts/platform-licenses.mjs --check` fails if they drift. CI runs the check on every pull request and, before publishing, asserts with `npm pack` that each package really would include a license.
+
 ## Version Policy
 
 - Use a patch release for dependency-only updates, release hardening, documentation corrections, and compatible fixes.

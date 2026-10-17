@@ -2,6 +2,8 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { stampPlatformLicenses } from "./platform-licenses.mjs";
+
 const releaseType = process.argv[2] ?? "patch";
 const allowedReleaseTypes = new Set(["patch", "minor"]);
 
@@ -61,5 +63,10 @@ for (const packageDir of npmPackageDirs) {
   npmPackageJson.version = nextVersion;
   await writeJson(npmPackageJsonPath, npmPackageJson);
 }
+
+// The platform packages ship a single LICENSE file, because `napi create-npm-dirs`
+// discards any extra entry in their "files" array during the publish job. Keep it
+// derived from the root license files so it cannot drift.
+await stampPlatformLicenses(root);
 
 console.log(nextVersion);

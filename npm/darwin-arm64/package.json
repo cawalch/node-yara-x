@@ -6,9 +6,7 @@
   ],
   "main": "yara-x.darwin-arm64.node",
   "files": [
-    "yara-x.darwin-arm64.node",
-    "LICENSE-MIT",
-    "LICENSE-BSD-3-Clause"
+    "yara-x.darwin-arm64.node"
   ],
   "keywords": [
     "yara",
