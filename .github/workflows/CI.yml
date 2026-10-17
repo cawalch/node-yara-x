@@ -21,15 +21,10 @@ permissions:
   pull_request:
     branches:
       - main
-    paths:
-      - "src/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "package.json"
-      - "index.js"
-      - "index.d.ts"
-      - "build.rs"
-      - ".github/workflows/CI.yml"
+    # No `paths` filter here on purpose. The `setup` job's diff check already
+    # decides whether the expensive build/test matrix runs, so every pull
+    # request gets a fast `CI Gate` status instead of no status at all (a
+    # missing required check blocks a merge indefinitely).
   release:
     types: [published]
 concurrency:
@@ -67,7 +62,7 @@ jobs:
             echo "src=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if git diff --name-only "${BASE}..HEAD" | grep -qxE 'src/.*|__test__/.*|Cargo.toml|Cargo.lock|build.rs|package.json|index.js|index.d.ts|\.github/workflows/CI\.yml'; then
+          if git diff --name-only "${BASE}..HEAD" | grep -qxE 'src/.*|__test__/.*|Cargo.toml|Cargo.lock|build.rs|package.json|pnpm-lock.yaml|index.js|index.d.ts|\.cargo/.*|\.github/workflows/CI\.yml'; then
             echo "src=true" >> "$GITHUB_OUTPUT"
           else
             echo "src=false" >> "$GITHUB_OUTPUT"
@@ -363,3 +358,36 @@ jobs:
           echo "Attached $(ls release-assets/*.sigstore | wc -l | tr -d ' ') signed assets to $TAG"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # Single, always-present status for branch protection. The matrix jobs are
+  # intentionally skipped when a pull request does not touch source, and a
+  # skipped job never reports a status — which would leave a required check
+  # "expected" forever and block the merge. This job always reports, and fails
+  # only when a required job actually failed or was cancelled.
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - setup
+      - build
+      - test-bindings
+    permissions:
+      contents: read
+    steps:
+      - name: Verify required jobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for result in \
+            "${{ needs.setup.result }}" \
+            "${{ needs.build.result }}" \
+            "${{ needs.test-bindings.result }}"; do
+            case "$result" in
+              success|skipped) ;;
+              *)
+                echo "::error::A required CI job reported '$result'."
+                exit 1
+                ;;
+            esac
+          done
+          echo "All required CI jobs passed or were correctly skipped."

@@ -1,6 +1,19 @@
+# Default owner for everything in the repository.
+# CODEOWNERS is last-match-wins, so the explicit entries below stay the source
+# of truth for those paths. This default exists so that newly added
+# directories (src/, npm/, scripts/, __test__/, docs/, …) are reviewed by the
+# maintainer without needing a CODEOWNERS edit first.
+* @cawalch
+
+# Explicitly listed critical paths.
 .github/workflows/ @cawalch
 .github/dependabot.yml @cawalch
 Cargo.lock @cawalch
 Cargo.toml @cawalch
 package.json @cawalch
 pnpm-lock.yaml @cawalch
+src/ @cawalch
+npm/ @cawalch
+scripts/ @cawalch
+__test__/ @cawalch
+docs/ @cawalch

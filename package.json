@@ -15,7 +15,7 @@
       "aarch64-unknown-linux-gnu"
     ]
   },
-  "license": "MIT",
+  "license": "(MIT AND BSD-3-Clause)",
   "devDependencies": {
     "@emnapi/core": "^1.11.3",
     "@emnapi/runtime": "^1.11.3",
@@ -54,7 +54,9 @@
   },
   "files": [
     "index.js",
-    "index.d.ts"
+    "index.d.ts",
+    "LICENSE-MIT",
+    "LICENSE-BSD-3-Clause"
   ],
   "keywords": [
     "yara",
