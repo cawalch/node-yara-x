@@ -49,7 +49,7 @@ npm stage approve <id>     # approve with 2FA to publish the real version
 
 Afterwards add a trusted publisher for the new package name (package settings → Trusted publishing) and **select "allow npm publish"**. Configurations created after September 3 2026 default to staged-only and this workflow uses direct `npm publish`. New configurations must complete a first successful publish within 48 hours or they expire.
 
-The publish job now checks for this case before it publishes anything and fails with the package names and the commands above, rather than publishing some platform packages and then stopping partway through.
+The publish job checks for this case before it publishes anything and refuses to publish, naming the packages and the commands above, rather than publishing some platform packages and then stopping partway through. To attempt it anyway (for example to test whether a trusted publisher configuration was accepted for a name that is not on the registry yet), dispatch the `CI` workflow on `main` with `allow_new_platform_packages` set to true.
 
 The same applies when renaming a package: a package name that has never existed cannot be published by OIDC.
 
