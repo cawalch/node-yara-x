@@ -97,12 +97,6 @@ jobs:
               "host": "windows-latest",
               "target": "x86_64-pc-windows-msvc",
               "build": "pnpm build --target x86_64-pc-windows-msvc"
-            },
-            {
-              "host": "ubuntu-latest",
-              "target": "x86_64-unknown-linux-musl",
-              "build": "pnpm build --target x86_64-unknown-linux-musl --cross-compile",
-              "musl": true
             }
           ]'
 
@@ -122,12 +116,6 @@ jobs:
               "host": "ubuntu-latest",
               "target": "aarch64-unknown-linux-gnu",
               "build": "pnpm build --target aarch64-unknown-linux-gnu --use-napi-cross"
-            },
-            {
-              "host": "ubuntu-latest",
-              "target": "aarch64-unknown-linux-musl",
-              "build": "pnpm build --target aarch64-unknown-linux-musl --cross-compile",
-              "musl": true
             }
           ]'
 
@@ -135,8 +123,7 @@ jobs:
           TEST_X64='[
             { "host": "macos-latest", "target": "x86_64-apple-darwin", "architecture": "x64" },
             { "host": "ubuntu-latest", "target": "x86_64-unknown-linux-gnu", "architecture": "x64" },
-            { "host": "windows-latest", "target": "x86_64-pc-windows-msvc", "architecture": "x64" },
-            { "host": "ubuntu-latest", "target": "x86_64-unknown-linux-musl", "architecture": "x64", "musl": true }
+            { "host": "windows-latest", "target": "x86_64-pc-windows-msvc", "architecture": "x64" }
           ]'
 
           # Test matrix for ARM
@@ -191,18 +178,6 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.settings.target }}
-      - name: Setup Zig
-        # musl targets are cross-compiled with cargo-zigbuild, which needs zig for
-        # the C toolchain. Pinned so a zig release cannot break the build.
-        if: matrix.settings.musl
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: 0.17.0
-      - name: Install cargo-zigbuild
-        # napi-rs installs this on first use; pinning it keeps releases
-        # reproducible and avoids pulling a version incompatible with zig 0.17.
-        if: matrix.settings.musl
-        run: cargo install cargo-zigbuild --locked --version 0.23.4
       - name: Cache cargo
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -253,18 +228,7 @@ jobs:
           name: bindings-${{ matrix.settings.target }}
           path: .
       - name: Test bindings
-        if: ${{ !matrix.settings.musl }}
         run: node --test --test-concurrency 1 __test__/index.spec.mjs
-      - name: Test bindings (musl)
-        # A glibc Node.js cannot dlopen a musl addon, so the same suite runs inside
-        # Alpine against the musl binary. arm64 musl is built but not executed
-        # here, matching the existing practice for aarch64-unknown-linux-gnu.
-        if: matrix.settings.musl
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker run --rm -v "$PWD":/work -w /work "node:${{ matrix.node }}-alpine" \
-            node --test --test-concurrency 1 __test__/index.spec.mjs
   publish:
     name: Publish
     runs-on: ubuntu-latest

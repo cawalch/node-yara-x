@@ -29,13 +29,20 @@ Each platform sub-package ships a single `LICENSE` file committed under `npm/<ta
 
 ## Platform targets
 
-The Linux musl targets (`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`) are cross-compiled on `ubuntu-latest` with `cargo-zigbuild` and a pinned zig, because `--use-napi-cross` only provides glibc toolchains. Both zig and cargo-zigbuild are pinned in `CI.yml` so a toolchain release cannot change a release artifact. The x64 musl build is executed in an Alpine container as part of the test matrix; the arm64 musl build is built but not executed, matching the existing treatment of `aarch64-unknown-linux-gnu`.
-
 Root `optionalDependencies` are discovered from the `npm/` directories during the publish job rather than committed, because a platform package that does not exist on the registry yet would make `pnpm install --frozen-lockfile` unresolvable. Adding a target therefore means adding it to `napi.targets`, running `napi create-npm-dirs`, and letting the publish job pick it up.
+
+When adding a Linux target, note that `--use-napi-cross` only provides glibc toolchains; a musl target needs `cargo-zigbuild` with zig installed on the runner, and a glibc Node.js cannot load a musl addon, so the musl artifact can only be exercised inside an Alpine container.
 
 ## Bootstrapping a new platform package
 
-A platform package that has never been published cannot be created by the release job. npm accepts OIDC publishes only for packages that already have a trusted publisher configured, and a trusted publisher can only be configured from the settings page of a package that already exists. Creating a brand-new package therefore requires a local session or a granular access token:
+Adding a platform target adds a package name, and a name that has never been published cannot be created by this pipeline. This is verified against the registry, not assumed: an OIDC publish of a new name authenticates successfully — the run signs a provenance statement and publishes it to the transparency log — and then fails with
+
+```
+npm error code E404
+npm error 404 Not Found - PUT https://registry.npmjs.org/@litko%2fyara-x-linux-arm64-musl - Not found
+```
+
+The 404 rather than a 403 is npm reporting that the name is not among the packages the workflow is trusted for. Trusted publishers are configured per package, and only from the settings page of a package that already exists, so there is no OIDC path to the first version of a new name. Publishing one requires a local session or a granular access token:
 
 ```sh
 # from the platform package directory, after its native binary has been placed there
