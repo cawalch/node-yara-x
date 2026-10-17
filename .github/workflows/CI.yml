@@ -9,6 +9,12 @@ permissions:
   contents: read
 "on":
   workflow_dispatch:
+    inputs:
+      allow_new_platform_packages:
+        description: Publish even if a platform package does not exist on npm yet
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - main
@@ -332,13 +338,14 @@ jobs:
           '
           ls -R ./npm
       - name: Check for platform packages that do not exist yet
-        # npm can only create a brand-new package from a local session or a
-        # granular access token: a trusted publisher is configured per package,
-        # and that configuration can only be created once the package exists. So
-        # an OIDC release cannot create a new platform package. Without this
-        # check the job publishes the other platform packages, then dies partway
-        # through the publish loop, leaving the release half-done and the root
-        # package unpublished.
+        # Every platform package normally already exists on npm, because a
+        # brand-new package name needs a trusted publisher configured before OIDC
+        # can publish it, and that configuration is created from the settings page
+        # of a package that exists. If one is missing, a release would publish the
+        # other platform packages and then stop partway through the loop, leaving
+        # the release half-done and the root package unpublished.
+        #
+        # Dispatch with allow_new_platform_packages=true to attempt it anyway.
         shell: bash
         run: |
           set -euo pipefail
@@ -355,16 +362,21 @@ jobs:
           done
 
           if [ ${#missing[@]} -gt 0 ]; then
-            echo "::error::${#missing[@]} platform package(s) do not exist on npm yet and cannot be created by this job."
-            echo "Bootstrap each one once by hand, then re-run this job:"
-            for dir in "${missing[@]}"; do
-              echo "    cd ${dir%/} && npm stage publish    # then: npm stage approve <stage-id>"
-            done
-            echo "See docs/release-process.md (Bootstrapping a new platform package)."
-            exit 1
+            echo "::warning::${#missing[@]} platform package(s) are not on the registry yet."
+            if [ "${{ github.event.inputs.allow_new_platform_packages }}" != "true" ]; then
+              echo "::error::Refusing to publish: this would leave the release half-done."
+              echo "Either configure a trusted publisher for each new package name, or bootstrap"
+              echo "it once by hand, then re-run this job:"
+              for dir in "${missing[@]}"; do
+                echo "    cd ${dir%/} && npm stage publish    # then: npm stage approve <stage-id>"
+              done
+              echo "See docs/release-process.md (Bootstrapping a new platform package)."
+              exit 1
+            fi
+            echo "Proceeding anyway: allow_new_platform_packages=true."
           fi
 
-          echo "All platform packages exist on the registry."
+          echo "Platform package preflight complete."
       - name: Publish platform sub-packages
         # Publish each platform-specific sub-package from ./npm/*
         # Uses OIDC trusted publishing (no NPM_TOKEN needed).
