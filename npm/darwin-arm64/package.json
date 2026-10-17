@@ -8,6 +8,7 @@
   "files": [
     "yara-x.darwin-arm64.node"
   ],
+  "description": "Node.js bindings for YARA-X. Compile YARA rules and scan buffers or files with prebuilt native binaries.",
   "keywords": [
     "yara",
     "yara-x",

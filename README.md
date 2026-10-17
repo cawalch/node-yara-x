@@ -11,7 +11,7 @@ Node.js bindings for [YARA-X](https://github.com/VirusTotal/yara-x), the Rust re
 - `scanAsync()` and `scanFileAsync()` run on a libuv worker thread, so a large scan does not block the event loop.
 - `serialize()` and `deserialize()` move compiled rules between processes and worker threads.
 - `emitWasmFile()` writes the compiled rule conditions as a WebAssembly module for inspection and sandboxing.
-- Six prebuilt targets (macOS, Linux, Windows — see [Platform support](#platform-support)). Nothing is compiled at install time and there is no `postinstall` script.
+- Eight prebuilt targets (macOS, Linux glibc and musl, Windows — see [Platform support](#platform-support)). Nothing is compiled at install time and there is no `postinstall` script.
 
 ## Install
 
@@ -521,15 +521,16 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 | :--- | :--- | :--- |
 | macOS | x64, arm64 | `@litko/yara-x-darwin-x64`, `@litko/yara-x-darwin-arm64` |
 | Linux (glibc) | x64, arm64 | `@litko/yara-x-linux-x64-gnu`, `@litko/yara-x-linux-arm64-gnu` |
+| Linux (musl) | x64, arm64 | `@litko/yara-x-linux-x64-musl`, `@litko/yara-x-linux-arm64-musl` |
 | Windows | x64, arm64 | `@litko/yara-x-win32-x64-msvc`, `@litko/yara-x-win32-arm64-msvc` |
 
-These packages are installed automatically as optional dependencies — do not depend on them directly.
+These packages are installed automatically as optional dependencies — do not depend on them directly. The glibc or musl build is selected at load time by inspecting the host system, and each platform package declares the `os`, `cpu` and `libc` it targets so package managers install only the matching one.
 
 ## Troubleshooting
 
-**`Cannot find module '@litko/yara-x-<platform>'`** — there is no prebuilt binary for your platform and npm skipped the optional dependency. The most common cause is a musl-based Linux image such as Alpine: the Linux builds target glibc. Use a glibc-based image (`node:22-bookworm-slim`, `node:22-alpine` will not work) or install `libc6-compat`. On other platforms, [open an issue](https://github.com/cawalch/node-yara-x/issues/new) with your `process.platform`, `process.arch`, and Node.js version.
+**`Cannot find module '@litko/yara-x-<platform>'`** — there is no prebuilt binary for your platform and the optional dependency was skipped. Check `process.platform`, `process.arch` and your libc against the table above. Alpine and other musl images are supported through the `-musl` packages; if automatic selection picks the wrong libc, or your platform is not listed, [open an issue](https://github.com/cawalch/node-yara-x/issues/new) with those three details and your Node.js version.
 
-**`Unsupported platform` on an unusual architecture** — the six targets above are the full supported set. `armv7`, 32-bit `x86`, and `s390x` are not built.
+**`Unsupported platform` on an unusual architecture** — the eight targets above are the full supported set. `armv7`, 32-bit `x86`, `s390x`, `riscv64` and `loongarch64` are not built.
 
 **`Node.js 20 or newer required`** — the package declares `"engines": { "node": ">= 20" }` and uses `napi-rs` v3, which requires Node 20+.
 

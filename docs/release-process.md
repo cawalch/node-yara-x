@@ -27,6 +27,12 @@ Each platform sub-package ships a single `LICENSE` file committed under `npm/<ta
 
 `node scripts/platform-licenses.mjs` rewrites those files from the root `LICENSE-MIT` and `LICENSE-BSD-3-Clause` (it runs as part of `Prepare Release`), and `node scripts/platform-licenses.mjs --check` fails if they drift. CI runs the check on every pull request and, before publishing, asserts with `npm pack` that each package really would include a license.
 
+## Platform targets
+
+The Linux musl targets (`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`) are cross-compiled on `ubuntu-latest` with `cargo-zigbuild` and a pinned zig, because `--use-napi-cross` only provides glibc toolchains. Both zig and cargo-zigbuild are pinned in `CI.yml` so a toolchain release cannot change a release artifact. The x64 musl build is executed in an Alpine container as part of the test matrix; the arm64 musl build is built but not executed, matching the existing treatment of `aarch64-unknown-linux-gnu`.
+
+Root `optionalDependencies` are discovered from the `npm/` directories during the publish job rather than committed, because a platform package that does not exist on the registry yet would make `pnpm install --frozen-lockfile` unresolvable. Adding a target therefore means adding it to `napi.targets`, running `napi create-npm-dirs`, and letting the publish job pick it up.
+
 ## Version Policy
 
 - Use a patch release for dependency-only updates, release hardening, documentation corrections, and compatible fixes.

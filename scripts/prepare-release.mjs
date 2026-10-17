@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { stampPlatformLicenses } from "./platform-licenses.mjs";
@@ -48,14 +48,13 @@ packageJson.version = nextVersion;
 
 await writeJson(packageJsonPath, packageJson);
 
-const npmPackageDirs = [
-  "darwin-arm64",
-  "darwin-x64",
-  "linux-arm64-gnu",
-  "linux-x64-gnu",
-  "win32-arm64-msvc",
-  "win32-x64-msvc",
-];
+// Discovered rather than hard-coded: a target added to napi.targets and
+// generated with `napi create-npm-dirs` must be version-bumped here too, and a
+// fixed list silently rots when a platform is added.
+const npmPackageDirs = (await readdir(join(root, "npm"), { withFileTypes: true }))
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name)
+  .sort();
 
 for (const packageDir of npmPackageDirs) {
   const npmPackageJsonPath = join(root, "npm", packageDir, "package.json");
