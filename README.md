@@ -224,6 +224,39 @@ console.log(`Found ${matches.length} matching rule(s).`);
 
 Each `addRuleSource()` recompiles the accumulated rule set. When adding more than a couple of sources, prefer `addRuleSources()`, which compiles them in one pass.
 
+## Batch and directory scanning
+
+Scan hundreds or thousands of files in parallel across a native Rayon work-stealing thread pool without libuv thread pool starvation:
+
+```javascript
+import { compile } from "@litko/yara-x";
+
+const scanner = compile(`
+  rule SuspiciousPayload {
+    strings:
+      $payload = "MALICIOUS_PAYLOAD"
+    condition:
+      $payload
+  }
+`);
+
+// 1. Scan an array of file paths in parallel:
+const batch = await scanner.scanFiles(["/data/file1.bin", "/data/file2.bin"]);
+console.log(`Scanned ${batch.scannedFiles} files in ${batch.durationMs.toFixed(1)}ms (${batch.matchedFiles} matched).`);
+
+// 2. Scan an entire directory recursively with glob filters and depth limits:
+const dirResult = await scanner.scanDirectory("/var/log", {
+  maxDepth: 3,
+  includePatterns: ["*.log", "*.txt"],
+  excludePatterns: ["**/node_modules/**", "**/.git/**"],
+  onlyMatches: true, // boolean fast-path (omits full match objects)
+});
+
+for (const file of dirResult.results) {
+  console.log(`Matched: ${file.filePath}`);
+}
+```
+
 ## Serialize compiled rules
 
 `serialize()` returns a self-contained `Buffer` that another process or worker thread can restore with `deserialize()`, skipping rule parsing and pattern compilation:
@@ -538,6 +571,10 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 | `isFileMatch(filePath, variables?)` | Checks if a file on disk matches any rule; returns a boolean. |
 | `isMatchAsync(data, variables?)` | Checks if a `Buffer` matches on a worker thread; resolves to a boolean. |
 | `isFileMatchAsync(filePath, variables?)` | Checks if a file on disk matches on a worker thread; resolves to a boolean. |
+| `scanFiles(filePaths, options?, variables?)` | Scans multiple files in parallel across a Rayon worker pool; resolves to `BatchScanResult`. |
+| `scanFilesSync(filePaths, options?, variables?)` | Scans multiple files synchronously across a Rayon worker pool. |
+| `scanDirectory(dirPath, options?, variables?)` | Recursively scans a directory in parallel with native traversal and Rayon. |
+| `scanDirectorySync(dirPath, options?, variables?)` | Recursively scans a directory synchronously with native traversal and Rayon. |
 | `serialize()` | Serializes compiled rules into a portable `Buffer`. |
 | `addRuleSource(ruleSource, namespace?)` | Adds one rule source to an incremental scanner. |
 | `addRuleSources(ruleSources)` | Adds several rule sources in a single compilation pass. |

@@ -30,6 +30,7 @@ console.log('Matches:', matches);
 #![deny(clippy::all)]
 
 // Module declarations
+mod batch;
 mod compiler;
 mod error;
 mod scanner;
@@ -38,6 +39,7 @@ mod types;
 mod variables;
 
 // Re-export public types
+pub use batch::{BatchFileError, BatchFileMatch, BatchScanOptions, BatchScanResult};
 pub use scanner::YaraX;
 pub use types::{
   BannedModule, CompileResult, CompilerError, CompilerOptions, CompilerWarning, IgnoredRule,
