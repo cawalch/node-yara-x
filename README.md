@@ -8,7 +8,9 @@
 Node.js bindings for [YARA-X](https://github.com/VirusTotal/yara-x), the Rust rewrite of YARA, built with [napi-rs](https://napi-rs.com). Scan buffers and files with YARA rules from JavaScript, with no YARA installation and no JavaScript runtime dependency.
 
 - `compile()` and `fromFile()` return a scanner that reuses its compiled state, so a rule set is parsed once and scanned many times.
-- `scanAsync()` and `scanFileAsync()` run on a libuv worker thread, so a large scan does not block the event loop.
+- `scan()` and `scanFile()` return full match details (`RuleMatch`, tags, offsets, and context).
+- `isMatch()` and `isFileMatch()` provide a zero-allocation fast path that returns a boolean, bypassing match object construction.
+- `scanAsync()` and `isMatchAsync()` run on libuv worker threads with thread-local scanner caching for high concurrency.
 - `serialize()` and `deserialize()` move compiled rules between processes and worker threads.
 - `emitWasmFile()` writes the compiled rule conditions as a WebAssembly module for inspection and sandboxing.
 - Six prebuilt targets (macOS, Linux, Windows — see [Platform support](#platform-support)). Nothing is compiled at install time and there is no `postinstall` script.
@@ -94,6 +96,31 @@ const rules = compile(`
 
 const matches = await rules.scanFileAsync("./samples/large_file.bin");
 console.log(`Found ${matches.length} matching rule(s).`);
+```
+
+## Fast boolean matching
+
+When you only need to know whether any rule matched (e.g. filtering clean files in a high-throughput pipeline), `isMatch()` and `isFileMatch()` avoid allocating `RuleMatch`, `MatchData`, string buffers, and metadata objects:
+
+```javascript
+import { compile } from "@litko/yara-x";
+
+const rules = compile(`
+  rule SuspiciousPayload {
+    strings:
+      $pattern = "sensitive payload"
+    condition:
+      $pattern
+  }
+`);
+
+// Synchronous fast path (returns boolean primitive, zero GC allocations)
+if (rules.isMatch(buffer)) {
+  console.log("Found match!");
+}
+
+// Asynchronous fast path on a worker thread
+const hasMatch = await rules.isFileMatchAsync("./samples/suspicious_file.exe");
 ```
 
 ## Variables
@@ -438,6 +465,28 @@ Two-string rule, `any of them`, 100 iterations (10 for the 5 MB payload):
 
 Matches are what cost time: the 50 KB payload holds roughly 512 occurrences of the pattern, and scanning it takes longer than the 5 MB payload with three occurrences.
 
+### Fast boolean matching vs. full scanning
+
+When pattern details, offsets, and metadata are not needed, `isMatch()` avoids allocating `RuleMatch` objects, string buffers, and metadata records, eliminating V8 garbage collection overhead:
+
+| Payload | `scan()` (full objects) | `isMatch()` (boolean) | Speedup |
+| :--- | ---: | ---: | ---: |
+| 58 B (clean) | 3.5 µs | 3.5 µs | 1.0× |
+| 100 KB (matching) | 14.0 µs | 9.0 µs | 1.5× |
+| 50 KB (~512 matches) | 221 µs | 118 µs | 1.9× |
+| 100 KB (~1,000 matches) | 1.28 ms | 0.67 ms | 1.9× |
+
+### Asynchronous scanning throughput
+
+`scanAsync()` and `isMatchAsync()` reuse thread-local scanner instances across libuv worker threads, keeping per-task dispatch overhead minimal.
+
+Benchmark with 2,000 requests against a compiled pattern:
+
+| Workload | Latency (mean) | Throughput |
+| :--- | ---: | ---: |
+| Sequential `scanAsync` (2,000 requests) | 27 µs/op | ~37,000 ops/s |
+| Concurrent `scanAsync` (2,000 parallel requests) | 5.6 µs/op | ~178,000 ops/s |
+
 ### Scanning by rule shape
 
 100 KB payload, 50 iterations per rule shape:
@@ -476,6 +525,10 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 | `scanFile(filePath, variables?)` | Scans a file on disk synchronously. |
 | `scanAsync(data, variables?)` | Scans a `Buffer` on a worker thread. |
 | `scanFileAsync(filePath, variables?)` | Scans a file on disk on a worker thread. |
+| `isMatch(data, variables?)` | Checks if a `Buffer` matches any rule; returns a boolean with zero object allocations. |
+| `isFileMatch(filePath, variables?)` | Checks if a file on disk matches any rule; returns a boolean. |
+| `isMatchAsync(data, variables?)` | Checks if a `Buffer` matches on a worker thread; resolves to a boolean. |
+| `isFileMatchAsync(filePath, variables?)` | Checks if a file on disk matches on a worker thread; resolves to a boolean. |
 | `serialize()` | Serializes compiled rules into a portable `Buffer`. |
 | `addRuleSource(ruleSource, namespace?)` | Adds one rule source to an incremental scanner. |
 | `addRuleSources(ruleSources)` | Adds several rule sources in a single compilation pass. |
