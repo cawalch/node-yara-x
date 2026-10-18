@@ -47,7 +47,7 @@
     "prepare-release": "node scripts/prepare-release.mjs",
     "universal": "napi universal",
     "version": "napi version",
-    "test": "node --test __test__/index.spec.mjs",
+    "test": "node --test __test__/index.spec.mjs __test__/batch.spec.mjs",
     "benchmark": "node __test__/benchmark.mjs",
     "profile": "node --expose-gc __test__/run-profiling.mjs",
     "profile:baseline": "node --expose-gc __test__/run-profiling.mjs --baseline",

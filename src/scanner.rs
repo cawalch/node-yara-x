@@ -3,6 +3,10 @@
 //! This module contains the main YaraX struct and related functionality for
 //! scanning data with compiled YARA rules, including scanner caching for performance.
 
+use crate::batch::{
+  collect_directory_files, convert_batch_result, execute_batch_scan, BatchScanDirTask,
+  BatchScanFilesTask, BatchScanOptions, BatchScanResult, PathFilter,
+};
 use crate::compiler::{
   add_source_to_compiler_tolerant, apply_compiler_options, apply_stored_compiler_options,
   collect_ignored_rules, replay_sources_to_wasm, stored_options_from, StoredCompilerOptions,
@@ -1072,5 +1076,117 @@ impl YaraX {
     self.variables = Some(variables);
 
     Ok(())
+  }
+
+  /// Scans multiple files concurrently across a Rayon worker thread pool.
+  ///
+  /// # Arguments
+  /// * `file_paths` - Array of file paths to scan
+  /// * `options` - Batch scanning options (concurrency, only_matches, etc.)
+  /// * `variables` - Optional scan-time variables
+  #[napi(ts_return_type = "Promise<BatchScanResult>")]
+  pub fn scan_files(
+    &self,
+    file_paths: Vec<String>,
+    options: Option<BatchScanOptions>,
+    variables: Option<Object>,
+  ) -> Result<AsyncTask<BatchScanFilesTask>> {
+    let combined_vars = self.combine_variables(variables)?;
+    let scan_opts = self.task_scan_options(true);
+    let batch_opts = options.unwrap_or_default();
+
+    Ok(AsyncTask::new(BatchScanFilesTask::new(
+      self.rules.clone(),
+      file_paths,
+      scan_opts,
+      combined_vars,
+      batch_opts,
+    )))
+  }
+
+  /// Scans multiple files synchronously across a Rayon worker thread pool.
+  #[napi]
+  pub fn scan_files_sync(
+    &self,
+    env: Env,
+    file_paths: Vec<String>,
+    options: Option<BatchScanOptions>,
+    variables: Option<Object>,
+  ) -> Result<BatchScanResult<'static>> {
+    let combined_vars = self.combine_variables(variables)?;
+    let scan_opts = self.task_scan_options(true);
+    let batch_opts = options.unwrap_or_default();
+
+    let output = execute_batch_scan(
+      self.rules.clone(),
+      file_paths,
+      scan_opts,
+      combined_vars,
+      batch_opts,
+    )?;
+
+    convert_batch_result(env, output)
+  }
+
+  /// Recursively scans a directory across a Rayon worker thread pool.
+  ///
+  /// # Arguments
+  /// * `dir_path` - Root directory path to scan
+  /// * `options` - Batch scanning options (concurrency, max_depth, include/exclude globs, etc.)
+  /// * `variables` - Optional scan-time variables
+  #[napi(ts_return_type = "Promise<BatchScanResult>")]
+  pub fn scan_directory(
+    &self,
+    dir_path: String,
+    options: Option<BatchScanOptions>,
+    variables: Option<Object>,
+  ) -> Result<AsyncTask<BatchScanDirTask>> {
+    let combined_vars = self.combine_variables(variables)?;
+    let scan_opts = self.task_scan_options(true);
+    let batch_opts = options.unwrap_or_default();
+
+    Ok(AsyncTask::new(BatchScanDirTask::new(
+      self.rules.clone(),
+      dir_path,
+      scan_opts,
+      combined_vars,
+      batch_opts,
+    )))
+  }
+
+  /// Recursively scans a directory synchronously across a Rayon worker thread pool.
+  #[napi]
+  pub fn scan_directory_sync(
+    &self,
+    env: Env,
+    dir_path: String,
+    options: Option<BatchScanOptions>,
+    variables: Option<Object>,
+  ) -> Result<BatchScanResult<'static>> {
+    let combined_vars = self.combine_variables(variables)?;
+    let scan_opts = self.task_scan_options(true);
+    let batch_opts = options.unwrap_or_default();
+
+    let filter = PathFilter::new(
+      batch_opts.include_patterns.as_deref(),
+      batch_opts.exclude_patterns.as_deref(),
+    )?;
+
+    let files = collect_directory_files(
+      &dir_path,
+      batch_opts.max_depth,
+      batch_opts.follow_symlinks,
+      &filter,
+    )?;
+
+    let output = execute_batch_scan(
+      self.rules.clone(),
+      files,
+      scan_opts,
+      combined_vars,
+      batch_opts,
+    )?;
+
+    convert_batch_result(env, output)
   }
 }

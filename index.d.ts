@@ -298,6 +298,28 @@ export declare class YaraX {
    * Ok(()) on success, or an error if compilation fails
    */
   defineVariable(name: string, value: string): void
+  /**
+   * Scans multiple files concurrently across a Rayon worker thread pool.
+   *
+   * # Arguments
+   * * `file_paths` - Array of file paths to scan
+   * * `options` - Batch scanning options (concurrency, only_matches, etc.)
+   * * `variables` - Optional scan-time variables
+   */
+  scanFiles(filePaths: Array<string>, options?: BatchScanOptions | undefined | null, variables?: object | undefined | null): Promise<BatchScanResult>
+  /** Scans multiple files synchronously across a Rayon worker thread pool. */
+  scanFilesSync(filePaths: Array<string>, options?: BatchScanOptions | undefined | null, variables?: object | undefined | null): BatchScanResult
+  /**
+   * Recursively scans a directory across a Rayon worker thread pool.
+   *
+   * # Arguments
+   * * `dir_path` - Root directory path to scan
+   * * `options` - Batch scanning options (concurrency, max_depth, include/exclude globs, etc.)
+   * * `variables` - Optional scan-time variables
+   */
+  scanDirectory(dirPath: string, options?: BatchScanOptions | undefined | null, variables?: object | undefined | null): Promise<BatchScanResult>
+  /** Recursively scans a directory synchronously across a Rayon worker thread pool. */
+  scanDirectorySync(dirPath: string, options?: BatchScanOptions | undefined | null, variables?: object | undefined | null): BatchScanResult
 }
 
 /**
@@ -313,6 +335,58 @@ export interface BannedModule {
   errorTitle: string
   /** The error message if the module is used. */
   errorMessage: string
+}
+
+/** Error encountered while scanning an individual file in a batch. */
+export interface BatchFileError {
+  /** Path of the file that failed. */
+  filePath: string
+  /** Error description. */
+  error: string
+}
+
+/** Result of scanning a single file within a batch. */
+export interface BatchFileMatch {
+  /** Path of the scanned file. */
+  filePath: string
+  /** Whether any rule matched this file. */
+  isMatch: boolean
+  /** List of matching rules (empty if only_matches is true or no rules matched). */
+  matches: Array<RuleMatch>
+}
+
+/** Options for batch file and directory scanning. */
+export interface BatchScanOptions {
+  /** Number of concurrent threads to use. Defaults to the number of logical CPU cores. */
+  concurrency?: number
+  /** Maximum traversal depth for directory scanning. */
+  maxDepth?: number
+  /** Whether to follow symbolic links during directory traversal. Default: false. */
+  followSymlinks?: boolean
+  /** Glob patterns to include (e.g. `["*.exe", "*.dll"]`). */
+  includePatterns?: Array<string>
+  /** Glob patterns to exclude (e.g. `["*.log", ".git/**"]`). */
+  excludePatterns?: Array<string>
+  /** If true, includes files with 0 matches in results. Default: false (only matching files). */
+  includeCleanFiles?: boolean
+  /** If true, performs fast boolean match check instead of building full match details. */
+  onlyMatches?: boolean
+}
+
+/** Aggregated result of a batch scan. */
+export interface BatchScanResult {
+  /** Total files discovered or submitted for scanning. */
+  totalFiles: number
+  /** Total files successfully scanned. */
+  scannedFiles: number
+  /** Total files that matched at least one rule. */
+  matchedFiles: number
+  /** Results per file (matching files only, or all files if include_clean_files is true). */
+  results: Array<BatchFileMatch>
+  /** Errors encountered during the batch scan. */
+  errors: Array<BatchFileError>
+  /** Total scan duration in milliseconds. */
+  durationMs: number
 }
 
 /**

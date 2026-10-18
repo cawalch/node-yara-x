@@ -1,5 +1,7 @@
 import yarax from "../index.js";
 import { readFileSync } from "fs";
+import { mkdtemp, rm, writeFile, mkdir } from "fs/promises";
+import { tmpdir } from "os";
 import { join } from "path";
 import { performance } from "perf_hooks";
 
@@ -274,8 +276,33 @@ await runBenchmark("isMatchAsync: 20MB buffer zero-copy async scan", 20, async (
   await simpleScanner.isMatchAsync(large20Mb);
 });
 
-await runBenchmark("scanAsync: 20MB buffer zero-copy async scan (with matches)", 20, async () => {
-  await simpleScanner.scanAsync(large20Mb);
+console.log("\n=== Native Batch and Directory Scanning Benchmarks ===");
+
+const benchTempDir = await mkdtemp(join(tmpdir(), "yara-x-bench-batch-"));
+const benchFiles = [];
+for (let i = 0; i < 200; i++) {
+  const filePath = join(benchTempDir, `file_${i}.txt`);
+  const content = i % 5 === 0 ? "contains virus pattern inside" : "benign non-matching file content";
+  await writeFile(filePath, content);
+  benchFiles.push(filePath);
+}
+
+await runBenchmark("Batch: 200 files via libuv Promise.all(scanFileAsync)", 10, async () => {
+  await Promise.all(benchFiles.map((f) => simpleScanner.scanFileAsync(f)));
 });
+
+await runBenchmark("Batch: 200 files via native Rayon scanFiles", 10, async () => {
+  await simpleScanner.scanFiles(benchFiles);
+});
+
+await runBenchmark("Batch: 200 files via native Rayon scanFiles (onlyMatches boolean)", 10, async () => {
+  await simpleScanner.scanFiles(benchFiles, { onlyMatches: true });
+});
+
+await runBenchmark("Batch: 200 files via native recursive scanDirectory", 10, async () => {
+  await simpleScanner.scanDirectory(benchTempDir);
+});
+
+await rm(benchTempDir, { recursive: true, force: true });
 
 console.log("\n=== Benchmarks Complete ===");
