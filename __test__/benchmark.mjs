@@ -3,18 +3,18 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { performance } from "perf_hooks";
 
-function runBenchmark(name, iterations, fn) {
+async function runBenchmark(name, iterations, fn) {
   console.log(`\nRunning benchmark: ${name}`);
 
   for (let i = 0; i < 3; i++) {
-    fn();
+    await fn();
   }
 
   const times = [];
 
   for (let i = 0; i < iterations; i++) {
     const start = performance.now();
-    fn();
+    await fn();
     const end = performance.now();
     times.push(end - start);
   }
@@ -183,12 +183,8 @@ runBenchmark("Scanning medium data (multiple rules)", 100, () => {
   multipleScanner.scan(mediumData);
 });
 
-runBenchmark("Async scanning medium data (simple rule)", 100, async () => {
-  await new Promise((resolve) => {
-    simpleScanner.scanAsync(mediumData, (err, matches) => {
-      resolve(matches);
-    });
-  });
+await runBenchmark("Async scanning medium data (simple rule)", 100, async () => {
+  await simpleScanner.scanAsync(mediumData);
 });
 
 const variableRule = `
@@ -255,6 +251,31 @@ runBenchmark("scan: repetitive data with 1000 matches (full V8 object constructi
 
 runBenchmark("isMatch: repetitive data with 1000 matches (fast-path boolean check)", 500, () => {
   multiScanner.isMatch(repetitiveData);
+});
+
+console.log("\n=== fastScan Mode Benchmarks ===");
+
+runBenchmark("scan: 1000 matches (standard full scan)", 500, () => {
+  multiScanner.scan(repetitiveData);
+});
+
+multiScanner.setFastScan(true);
+runBenchmark("scan: 1000 matches (fastScan enabled - single match)", 500, () => {
+  multiScanner.scan(repetitiveData);
+});
+multiScanner.setFastScan(false);
+
+console.log("\n=== Zero-Copy Large Buffer Async Benchmarks ===");
+
+const large20Mb = Buffer.alloc(20 * 1024 * 1024);
+large20Mb.write("malware", 19 * 1024 * 1024);
+
+await runBenchmark("isMatchAsync: 20MB buffer zero-copy async scan", 20, async () => {
+  await simpleScanner.isMatchAsync(large20Mb);
+});
+
+await runBenchmark("scanAsync: 20MB buffer zero-copy async scan (with matches)", 20, async () => {
+  await simpleScanner.scanAsync(large20Mb);
 });
 
 console.log("\n=== Benchmarks Complete ===");

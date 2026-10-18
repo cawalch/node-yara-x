@@ -11,28 +11,32 @@ use crate::error::scan_error_to_napi;
 use crate::scanner::YaraX;
 use crate::types::{RuleMatch, RuleMatchData, RuleSource, VariableMap};
 use crate::variables::VariableHandler;
+use napi::bindgen_prelude::Buffer;
 use napi::{Error, Result, Status, Task};
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Duration;
 use yara_x::{Rules, Scanner};
 
+/// Options passed to background scanning tasks.
+#[derive(Default, Clone, PartialEq)]
+pub struct TaskScanOptions {
+  pub max_matches_per_pattern: Option<usize>,
+  pub fast_scan: Option<bool>,
+  pub use_mmap: Option<bool>,
+  pub timeout_ms: Option<u32>,
+  pub match_context_size: Option<usize>,
+}
+
 #[derive(Clone, PartialEq)]
 struct WorkerScannerOptions {
-  max_matches_per_pattern: Option<usize>,
-  use_mmap: Option<bool>,
-  timeout_ms: Option<u32>,
-  match_context_size: Option<usize>,
+  options: TaskScanOptions,
   variables: Option<VariableMap>,
 }
 
 impl WorkerScannerOptions {
   fn matches(&self, task: &BaseYaraTask) -> bool {
-    self.max_matches_per_pattern == task.max_matches_per_pattern
-      && self.use_mmap == task.use_mmap
-      && self.timeout_ms == task.timeout_ms
-      && self.match_context_size == task.match_context_size
-      && self.variables == task.variables
+    self.options == task.options && self.variables == task.variables
   }
 }
 
@@ -57,29 +61,16 @@ thread_local! {
 pub struct BaseYaraTask {
   rules: Arc<Rules>,
   variables: Option<VariableMap>,
-  max_matches_per_pattern: Option<usize>,
-  use_mmap: Option<bool>,
-  timeout_ms: Option<u32>,
-  match_context_size: Option<usize>,
+  options: TaskScanOptions,
 }
 
 impl BaseYaraTask {
   /// Creates a new base YARA task.
-  pub fn new(
-    rules: Arc<Rules>,
-    variables: Option<VariableMap>,
-    max_matches_per_pattern: Option<usize>,
-    use_mmap: Option<bool>,
-    timeout_ms: Option<u32>,
-    match_context_size: Option<usize>,
-  ) -> Self {
+  pub fn new(rules: Arc<Rules>, variables: Option<VariableMap>, options: TaskScanOptions) -> Self {
     Self {
       rules,
       variables,
-      max_matches_per_pattern,
-      use_mmap,
-      timeout_ms,
-      match_context_size,
+      options,
     }
   }
 
@@ -112,16 +103,19 @@ impl BaseYaraTask {
           unsafe { std::mem::transmute::<&Rules, &'static Rules>(&*rules_clone) };
 
         let mut scanner = Scanner::new(rules_ref);
-        if let Some(max_matches) = self.max_matches_per_pattern {
+        if let Some(max_matches) = self.options.max_matches_per_pattern {
           scanner.max_matches_per_pattern(max_matches);
         }
-        if let Some(use_mmap) = self.use_mmap {
+        if let Some(fast_scan) = self.options.fast_scan {
+          scanner.fast_scan(fast_scan);
+        }
+        if let Some(use_mmap) = self.options.use_mmap {
           scanner.use_mmap(use_mmap);
         }
-        if let Some(timeout_ms) = self.timeout_ms {
+        if let Some(timeout_ms) = self.options.timeout_ms {
           scanner.set_timeout(Duration::from_millis(timeout_ms as u64));
         }
-        if let Some(match_context_size) = self.match_context_size {
+        if let Some(match_context_size) = self.options.match_context_size {
           scanner.match_context_size(match_context_size);
         }
         scanner.apply_variables_from_map(&self.variables)?;
@@ -130,10 +124,7 @@ impl BaseYaraTask {
           scanner,
           rules: rules_clone,
           options: WorkerScannerOptions {
-            max_matches_per_pattern: self.max_matches_per_pattern,
-            use_mmap: self.use_mmap,
-            timeout_ms: self.timeout_ms,
-            match_context_size: self.match_context_size,
+            options: self.options.clone(),
             variables: self.variables.clone(),
           },
         });
@@ -191,28 +182,19 @@ impl BaseYaraTask {
 /// Scanning runs on the worker thread in `compute()`.
 pub struct ScanTask {
   base: BaseYaraTask,
-  data: Vec<u8>,
+  data: Buffer,
 }
 
 impl ScanTask {
   /// Creates a new scan task.
   pub fn new(
     rules: Arc<Rules>,
-    data: Vec<u8>,
+    data: Buffer,
     variables: Option<VariableMap>,
-    max_matches_per_pattern: Option<usize>,
-    timeout_ms: Option<u32>,
-    match_context_size: Option<usize>,
+    options: TaskScanOptions,
   ) -> Self {
     Self {
-      base: BaseYaraTask::new(
-        rules,
-        variables,
-        max_matches_per_pattern,
-        None,
-        timeout_ms,
-        match_context_size,
-      ),
+      base: BaseYaraTask::new(rules, variables, options),
       data,
     }
   }
@@ -223,7 +205,7 @@ impl Task for ScanTask {
   type JsValue = Vec<RuleMatch<'static>>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    self.base.scan_to_data(&self.data)
+    self.base.scan_to_data(self.data.as_ref())
   }
 
   fn resolve(&mut self, env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -245,20 +227,10 @@ impl ScanFileTask {
     rules: Arc<Rules>,
     file_path: String,
     variables: Option<VariableMap>,
-    max_matches_per_pattern: Option<usize>,
-    use_mmap: Option<bool>,
-    timeout_ms: Option<u32>,
-    match_context_size: Option<usize>,
+    options: TaskScanOptions,
   ) -> Self {
     Self {
-      base: BaseYaraTask::new(
-        rules,
-        variables,
-        max_matches_per_pattern,
-        use_mmap,
-        timeout_ms,
-        match_context_size,
-      ),
+      base: BaseYaraTask::new(rules, variables, options),
       file_path,
     }
   }
@@ -282,28 +254,19 @@ impl Task for ScanFileTask {
 /// Scanning runs on the worker thread in `compute()`.
 pub struct IsMatchTask {
   base: BaseYaraTask,
-  data: Vec<u8>,
+  data: Buffer,
 }
 
 impl IsMatchTask {
   /// Creates a new boolean match task for data.
   pub fn new(
     rules: Arc<Rules>,
-    data: Vec<u8>,
+    data: Buffer,
     variables: Option<VariableMap>,
-    max_matches_per_pattern: Option<usize>,
-    timeout_ms: Option<u32>,
-    match_context_size: Option<usize>,
+    options: TaskScanOptions,
   ) -> Self {
     Self {
-      base: BaseYaraTask::new(
-        rules,
-        variables,
-        max_matches_per_pattern,
-        None,
-        timeout_ms,
-        match_context_size,
-      ),
+      base: BaseYaraTask::new(rules, variables, options),
       data,
     }
   }
@@ -314,7 +277,7 @@ impl Task for IsMatchTask {
   type JsValue = bool;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    self.base.is_match(&self.data)
+    self.base.is_match(self.data.as_ref())
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -336,20 +299,10 @@ impl IsFileMatchTask {
     rules: Arc<Rules>,
     file_path: String,
     variables: Option<VariableMap>,
-    max_matches_per_pattern: Option<usize>,
-    use_mmap: Option<bool>,
-    timeout_ms: Option<u32>,
-    match_context_size: Option<usize>,
+    options: TaskScanOptions,
   ) -> Self {
     Self {
-      base: BaseYaraTask::new(
-        rules,
-        variables,
-        max_matches_per_pattern,
-        use_mmap,
-        timeout_ms,
-        match_context_size,
-      ),
+      base: BaseYaraTask::new(rules, variables, options),
       file_path,
     }
   }
