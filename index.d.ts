@@ -66,6 +66,14 @@ export declare class YaraX {
    * * `use_mmap` - Whether to use memory-mapped files
    */
   setUseMmap(useMmap: boolean): void
+  /**
+   * Sets whether to use fast scan mode (stops searching for a pattern as soon as the first match is found).
+   *
+   * # Arguments
+   *
+   * * `fast_scan` - Whether to enable fast scan mode
+   */
+  setFastScan(fastScan: boolean): void
   /** Sets the scan timeout in milliseconds. */
   setTimeout(timeoutMs: number): void
   /** Sets the match context size. */

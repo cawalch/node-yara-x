@@ -361,6 +361,15 @@ const matches = rules.scan(Buffer.from("pattern ".repeat(10000)));
 console.log(matches[0].matches.length); // 1000
 ```
 
+### Fast scan mode
+
+Fast scan mode stops searching for pattern occurrences once a pattern has matched:
+
+```javascript
+rules.setFastScan(true);
+const matches = rules.scan(largeBuffer);
+```
+
 ### Memory-mapped file scanning
 
 File scans use memory-mapped I/O by default. Turning it off falls back to streaming reads, which is safer when the file could be modified while it is being scanned:
@@ -538,6 +547,7 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 | `getIgnoredRules()` | Returns rules skipped by tolerant compilation or ignored modules. |
 | `getCompilationErrors()` | Returns source-level errors collected when `ignoreInvalidRules` is set. |
 | `setMaxMatchesPerPattern(maxMatches)` | Caps the matches collected per pattern. |
+| `setFastScan(fastScan)` | Enables or disables fast scan mode (stops pattern search at first match). |
 | `setUseMmap(useMmap)` | Enables or disables memory-mapped file scanning. |
 | `setTimeout(timeoutMs)` | Sets the scan timeout in milliseconds. |
 | `setMatchContextSize(size)` | Sets how many context bytes are returned with each match. |

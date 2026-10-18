@@ -2647,6 +2647,93 @@ rule test_1 {
       });
     });
   });
+
+  describe("fastScan and zero-copy async buffer handling", () => {
+    it("should allow enabling fastScan mode to limit pattern matches", () => {
+      const rule = `
+        rule test_fast_scan {
+          strings:
+            $a = "target"
+          condition:
+            $a
+        }
+      `;
+      const scanner = yarax.compile(rule);
+      const data = Buffer.from("target ... target ... target");
+
+      // Default scan finds all 3 occurrences
+      const matchesAll = scanner.scan(data);
+      strictEqual(matchesAll.length, 1);
+      strictEqual(matchesAll[0].matches.length, 3);
+
+      // Fast scan limits pattern search to first match
+      scanner.setFastScan(true);
+      const matchesFast = scanner.scan(data);
+      strictEqual(matchesFast.length, 1);
+      strictEqual(matchesFast[0].matches.length, 1);
+      strictEqual(matchesFast[0].matches[0].offset, 0);
+
+      // Re-disabling fast scan restores full reporting
+      scanner.setFastScan(false);
+      const matchesRestored = scanner.scan(data);
+      strictEqual(matchesRestored[0].matches.length, 3);
+    });
+
+    it("should apply fastScan mode across async buffer and file scanning", async () => {
+      const rule = `
+        rule test_fast_async {
+          strings:
+            $a = "target"
+          condition:
+            $a
+        }
+      `;
+      const scanner = yarax.compile(rule);
+      scanner.setFastScan(true);
+      const data = Buffer.from("target target target");
+
+      const asyncMatches = await scanner.scanAsync(data);
+      strictEqual(asyncMatches[0].matches.length, 1);
+
+      const isMatch = await scanner.isMatchAsync(data);
+      strictEqual(isMatch, true);
+    });
+
+    it("should scan large 20MB buffers zero-copy asynchronously without memory corruption", async () => {
+      const rule = `
+        rule large_buffer_test {
+          strings:
+            $a = "malware_payload_marker"
+          condition:
+            $a
+        }
+      `;
+      const scanner = yarax.compile(rule);
+
+      // 20 MB buffer filled with zeroes and needle at offset 18 MB
+      const size = 20 * 1024 * 1024;
+      const largeBuffer = Buffer.alloc(size);
+      const needle = Buffer.from("malware_payload_marker");
+      const targetOffset = 18 * 1024 * 1024;
+      needle.copy(largeBuffer, targetOffset);
+
+      // Zero-copy async scan
+      const matches = await scanner.scanAsync(largeBuffer);
+      strictEqual(matches.length, 1);
+      strictEqual(matches[0].ruleIdentifier, "large_buffer_test");
+      strictEqual(matches[0].matches.length, 1);
+      strictEqual(matches[0].matches[0].offset, targetOffset);
+
+      // Zero-copy async boolean check
+      const hasMatch = await scanner.isMatchAsync(largeBuffer);
+      strictEqual(hasMatch, true);
+
+      // Buffer without match
+      const cleanBuffer = Buffer.alloc(1024 * 1024 * 5);
+      const noMatch = await scanner.isMatchAsync(cleanBuffer);
+      strictEqual(noMatch, false);
+    });
+  });
   });
 });
 

@@ -73,6 +73,8 @@ pub struct YaraX {
   pub(crate) max_matches_per_pattern: Option<usize>,
   /// Whether to use memory-mapped files for scanning
   pub(crate) use_mmap: Option<bool>,
+  /// Whether fast scan mode is enabled (stops pattern search at first match)
+  pub(crate) fast_scan: Option<bool>,
   /// Scan timeout in milliseconds
   pub(crate) timeout_ms: Option<u32>,
   /// Match context size
@@ -95,6 +97,7 @@ impl YaraX {
       cached_scanner: RefCell::new(None),
       max_matches_per_pattern: None,
       use_mmap: None,
+      fast_scan: None,
       timeout_ms: None,
       match_context_size: None,
     }
@@ -158,6 +161,7 @@ impl YaraX {
       cached_scanner: RefCell::new(None),
       max_matches_per_pattern: None,
       use_mmap: None,
+      fast_scan: None,
       timeout_ms: None,
       match_context_size: None,
     })
@@ -349,6 +353,10 @@ impl YaraX {
 
       if let Some(use_mmap) = self.use_mmap {
         scanner.use_mmap(use_mmap);
+      }
+
+      if let Some(fast_scan) = self.fast_scan {
+        scanner.fast_scan(fast_scan);
       }
 
       if let Some(timeout_ms) = self.timeout_ms {
@@ -571,6 +579,17 @@ impl YaraX {
   #[napi]
   pub fn set_use_mmap(&mut self, use_mmap: bool) {
     self.use_mmap = Some(use_mmap);
+    self.invalidate_scanner_cache();
+  }
+
+  /// Sets whether to use fast scan mode (stops searching for a pattern as soon as the first match is found).
+  ///
+  /// # Arguments
+  ///
+  /// * `fast_scan` - Whether to enable fast scan mode
+  #[napi]
+  pub fn set_fast_scan(&mut self, fast_scan: bool) {
+    self.fast_scan = Some(fast_scan);
     self.invalidate_scanner_cache();
   }
 
@@ -800,16 +819,13 @@ impl YaraX {
     data: Buffer,
     variables: Option<Object>,
   ) -> Result<AsyncTask<crate::tasks::ScanTask>> {
-    let data_vec = data.to_vec();
     let vars_map = self.combine_variables(variables)?;
 
     Ok(AsyncTask::new(crate::tasks::ScanTask::new(
       self.rules.clone(),
-      data_vec,
+      data,
       vars_map,
-      self.max_matches_per_pattern,
-      self.timeout_ms,
-      self.match_context_size,
+      self.task_scan_options(false),
     )))
   }
 
@@ -835,10 +851,7 @@ impl YaraX {
       self.rules.clone(),
       file_path,
       vars_map,
-      self.max_matches_per_pattern,
-      self.use_mmap,
-      self.timeout_ms,
-      self.match_context_size,
+      self.task_scan_options(true),
     )))
   }
 
@@ -864,16 +877,13 @@ impl YaraX {
     data: Buffer,
     variables: Option<Object>,
   ) -> Result<AsyncTask<crate::tasks::IsMatchTask>> {
-    let data_vec = data.to_vec();
     let vars_map = self.combine_variables(variables)?;
 
     Ok(AsyncTask::new(crate::tasks::IsMatchTask::new(
       self.rules.clone(),
-      data_vec,
+      data,
       vars_map,
-      self.max_matches_per_pattern,
-      self.timeout_ms,
-      self.match_context_size,
+      self.task_scan_options(false),
     )))
   }
 
@@ -905,11 +915,19 @@ impl YaraX {
       self.rules.clone(),
       file_path,
       vars_map,
-      self.max_matches_per_pattern,
-      self.use_mmap,
-      self.timeout_ms,
-      self.match_context_size,
+      self.task_scan_options(true),
     )))
+  }
+
+  /// Helper to build TaskScanOptions for background tasks.
+  fn task_scan_options(&self, include_mmap: bool) -> crate::tasks::TaskScanOptions {
+    crate::tasks::TaskScanOptions {
+      max_matches_per_pattern: self.max_matches_per_pattern,
+      fast_scan: self.fast_scan,
+      use_mmap: if include_mmap { self.use_mmap } else { None },
+      timeout_ms: self.timeout_ms,
+      match_context_size: self.match_context_size,
+    }
   }
 
   /// Emits a WASM file asynchronously from the compiled YARA rules.
