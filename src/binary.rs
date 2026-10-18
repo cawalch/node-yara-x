@@ -102,14 +102,15 @@ impl BinaryMatchView {
   }
 
   fn read_record(&self, index: u32) -> Option<BinaryMatchRecord> {
-    let offset = (index as usize).checked_mul(std::mem::size_of::<BinaryMatchRecord>())?;
-    if offset.checked_add(std::mem::size_of::<BinaryMatchRecord>())? <= self.buffer.len() {
-      let record_ptr = unsafe { self.buffer.as_ptr().add(offset) as *const BinaryMatchRecord };
-      // Sound against any arbitrary alignment of buffer slice
-      Some(unsafe { std::ptr::read_unaligned(record_ptr) })
-    } else {
-      None
-    }
+    let offset = (index as usize).checked_mul(24)?;
+    let slice = self.buffer.as_ref().get(offset..offset + 24)?;
+    Some(BinaryMatchRecord {
+      rule_id: u32::from_le_bytes(slice[0..4].try_into().ok()?),
+      pattern_id: u32::from_le_bytes(slice[4..8].try_into().ok()?),
+      offset: u64::from_le_bytes(slice[8..16].try_into().ok()?),
+      length: u32::from_le_bytes(slice[16..20].try_into().ok()?),
+      flags: u32::from_le_bytes(slice[20..24].try_into().ok()?),
+    })
   }
 
   /// Gets the rule index for the match record at `index`.
@@ -231,11 +232,14 @@ pub fn extract_binary_scan_results(
     }
   }
 
-  let byte_len = records.len() * std::mem::size_of::<BinaryMatchRecord>();
-  let bytes = unsafe {
-    let ptr = records.as_ptr() as *const u8;
-    std::slice::from_raw_parts(ptr, byte_len).to_vec()
-  };
+  let mut bytes = Vec::with_capacity(records.len() * 24);
+  for r in &records {
+    bytes.extend_from_slice(&r.rule_id.to_le_bytes());
+    bytes.extend_from_slice(&r.pattern_id.to_le_bytes());
+    bytes.extend_from_slice(&r.offset.to_le_bytes());
+    bytes.extend_from_slice(&r.length.to_le_bytes());
+    bytes.extend_from_slice(&r.flags.to_le_bytes());
+  }
 
   (
     bytes,
