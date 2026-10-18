@@ -478,14 +478,14 @@ When pattern details, offsets, and metadata are not needed, `isMatch()` avoids a
 
 ### Asynchronous scanning throughput
 
-`scanAsync()` and `isMatchAsync()` reuse thread-local scanner instances across libuv worker threads, eliminating `Scanner` initialization overhead on each task.
+`scanAsync()` and `isMatchAsync()` reuse thread-local scanner instances across libuv worker threads, keeping per-task dispatch overhead minimal.
 
 Benchmark with 2,000 requests against a compiled pattern:
 
-| Mode | Before worker caching | With worker caching | Speedup |
-| :--- | ---: | ---: | ---: |
-| Sequential `scanAsync` (2,000 ops) | 0.871 ms/op | 0.027 ms/op | **~32× faster** |
-| Concurrent `scanAsync` (2,000 ops parallel) | 0.453 ms/op | 0.0056 ms/op | **~81× faster** |
+| Workload | Latency (mean) | Throughput |
+| :--- | ---: | ---: |
+| Sequential `scanAsync` (2,000 requests) | 27 µs/op | ~37,000 ops/s |
+| Concurrent `scanAsync` (2,000 parallel requests) | 5.6 µs/op | ~178,000 ops/s |
 
 ### Scanning by rule shape
 
