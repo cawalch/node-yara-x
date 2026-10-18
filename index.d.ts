@@ -99,6 +99,38 @@ export declare class YaraX {
    */
   scanFile(filePath: string, variables?: Record<string, string | number | boolean>): Array<RuleMatch>
   /**
+   * Checks whether the provided data matches any compiled YARA rule.
+   *
+   * This method is a fast-path boolean check that returns true as soon as any rule matches,
+   * without allocating or constructing match objects, tags, or metadata.
+   *
+   * # Arguments
+   *
+   * * `data` - The data to scan
+   * * `variables` - Optional variables to set for this scan
+   *
+   * # Returns
+   *
+   * `true` if any rule matches, `false` otherwise
+   */
+  isMatch(data: Buffer, variables?: Record<string, string | number | boolean>): boolean
+  /**
+   * Checks whether a file matches any compiled YARA rule.
+   *
+   * This method is a fast-path boolean check that returns true as soon as any rule matches,
+   * without allocating or constructing match objects, tags, or metadata.
+   *
+   * # Arguments
+   *
+   * * `file_path` - Path to the file to scan
+   * * `variables` - Optional variables to set for this scan
+   *
+   * # Returns
+   *
+   * `true` if any rule matches, `false` otherwise
+   */
+  isFileMatch(filePath: string, variables?: Record<string, string | number | boolean>): boolean
+  /**
    * Emits a WASM file from the compiled YARA rules.
    *
    * # Arguments
@@ -149,6 +181,38 @@ export declare class YaraX {
    * An async task that resolves to a vector of matching rules
    */
   scanFileAsync(filePath: string, variables?: object | undefined | null): Promise<Array<RuleMatch>>
+  /**
+   * Checks whether the provided data matches any compiled YARA rule asynchronously.
+   *
+   * This method is a fast-path boolean check that returns true as soon as any rule matches,
+   * without allocating or constructing match objects, tags, or metadata.
+   *
+   * # Arguments
+   *
+   * * `data` - The data to scan
+   * * `variables` - Optional variables to set for this scan
+   *
+   * # Returns
+   *
+   * An async task that resolves to a boolean indicating whether any rule matched
+   */
+  isMatchAsync(data: Buffer, variables?: Record<string, string | number | boolean>): Promise<boolean>
+  /**
+   * Checks whether a file matches any compiled YARA rule asynchronously.
+   *
+   * This method is a fast-path boolean check that returns true as soon as any rule matches,
+   * without allocating or constructing match objects, tags, or metadata.
+   *
+   * # Arguments
+   *
+   * * `file_path` - Path to the file to scan
+   * * `variables` - Optional variables to set for this scan
+   *
+   * # Returns
+   *
+   * An async task that resolves to a boolean indicating whether any rule matched
+   */
+  isFileMatchAsync(filePath: string, variables?: Record<string, string | number | boolean>): Promise<boolean>
   /**
    * Emits a WASM file asynchronously from the compiled YARA rules.
    *

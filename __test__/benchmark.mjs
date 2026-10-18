@@ -210,4 +210,51 @@ runBenchmark("Scanning with variables (override at scan time)", 1000, () => {
   variableScanner.scan(smallData, { test_var: "75" });
 });
 
+console.log("\n=== Boolean Match Check Benchmarks (scan vs isMatch) ===");
+
+const cleanSmallData = Buffer.from("Clean test data without any signatures or suspicious patterns");
+
+runBenchmark("scan: small data (matching)", 1000, () => {
+  simpleScanner.scan(smallData);
+});
+
+runBenchmark("isMatch: small data (matching - fast path)", 1000, () => {
+  simpleScanner.isMatch(smallData);
+});
+
+runBenchmark("scan: small data (non-matching)", 1000, () => {
+  simpleScanner.scan(cleanSmallData);
+});
+
+runBenchmark("isMatch: small data (non-matching - fast path)", 1000, () => {
+  simpleScanner.isMatch(cleanSmallData);
+});
+
+runBenchmark("scan: medium data (matching)", 100, () => {
+  simpleScanner.scan(mediumData);
+});
+
+runBenchmark("isMatch: medium data (matching - fast path)", 100, () => {
+  simpleScanner.isMatch(mediumData);
+});
+
+const multiMatchRule = `
+  rule many_matches {
+    strings:
+      $a = "test"
+    condition:
+      $a
+  }
+`;
+const multiScanner = yarax.compile(multiMatchRule);
+const repetitiveData = Buffer.from("test ".repeat(1000));
+
+runBenchmark("scan: repetitive data with 1000 matches (full V8 object construction)", 500, () => {
+  multiScanner.scan(repetitiveData);
+});
+
+runBenchmark("isMatch: repetitive data with 1000 matches (fast-path boolean check)", 500, () => {
+  multiScanner.isMatch(repetitiveData);
+});
+
 console.log("\n=== Benchmarks Complete ===");

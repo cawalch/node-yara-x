@@ -488,6 +488,24 @@ impl YaraX {
 
     Ok(rule_matches)
   }
+
+  /// Helper to combine stored scanner variables and scan-time variables for async tasks.
+  pub(crate) fn combine_variables(
+    &self,
+    variables: Option<Object>,
+  ) -> Result<Option<HashMap<String, VariableValue>>> {
+    let scan_vars = convert_variables_to_map(variables)?;
+    Ok(match (&self.variables, scan_vars) {
+      (None, None) => None,
+      (Some(stored), None) => Some(stored.clone()),
+      (None, Some(vars)) => Some(vars),
+      (Some(stored), Some(vars)) => {
+        let mut map = stored.clone();
+        map.extend(vars);
+        Some(map)
+      }
+    })
+  }
 }
 
 #[napi]
@@ -640,6 +658,70 @@ impl YaraX {
     Self::process_scan_results(results, env)
   }
 
+  /// Checks whether the provided data matches any compiled YARA rule.
+  ///
+  /// This method is a fast-path boolean check that returns true as soon as any rule matches,
+  /// without allocating or constructing match objects, tags, or metadata.
+  ///
+  /// # Arguments
+  ///
+  /// * `data` - The data to scan
+  /// * `variables` - Optional variables to set for this scan
+  ///
+  /// # Returns
+  ///
+  /// `true` if any rule matches, `false` otherwise
+  #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean>")]
+  pub fn is_match(&self, data: Buffer, variables: Option<Object>) -> Result<bool> {
+    let mut scanner = self.get_or_create_scanner()?;
+
+    scanner.apply_variables_from_map(&self.variables)?;
+    scanner.apply_variables_from_object(&variables)?;
+
+    let results = match scanner.scan(data.as_ref()) {
+      Ok(r) => r,
+      Err(e) => {
+        drop(scanner);
+        self.invalidate_scanner_cache();
+        return Err(scan_error_to_napi(e));
+      }
+    };
+
+    Ok(results.matching_rules().next().is_some())
+  }
+
+  /// Checks whether a file matches any compiled YARA rule.
+  ///
+  /// This method is a fast-path boolean check that returns true as soon as any rule matches,
+  /// without allocating or constructing match objects, tags, or metadata.
+  ///
+  /// # Arguments
+  ///
+  /// * `file_path` - Path to the file to scan
+  /// * `variables` - Optional variables to set for this scan
+  ///
+  /// # Returns
+  ///
+  /// `true` if any rule matches, `false` otherwise
+  #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean>")]
+  pub fn is_file_match(&self, file_path: String, variables: Option<Object>) -> Result<bool> {
+    let mut scanner = self.get_or_create_scanner()?;
+
+    scanner.apply_variables_from_map(&self.variables)?;
+    scanner.apply_variables_from_object(&variables)?;
+
+    let results = match scanner.scan_file(Path::new(&file_path)) {
+      Ok(r) => r,
+      Err(e) => {
+        drop(scanner);
+        self.invalidate_scanner_cache();
+        return Err(scan_error_to_napi(e));
+      }
+    };
+
+    Ok(results.matching_rules().next().is_some())
+  }
+
   /// Emits a WASM file from the compiled YARA rules.
   ///
   /// # Arguments
@@ -719,7 +801,7 @@ impl YaraX {
     variables: Option<Object>,
   ) -> Result<AsyncTask<crate::tasks::ScanTask>> {
     let data_vec = data.to_vec();
-    let vars_map = convert_variables_to_map(variables)?;
+    let vars_map = self.combine_variables(variables)?;
 
     Ok(AsyncTask::new(crate::tasks::ScanTask::new(
       self.rules.clone(),
@@ -747,9 +829,79 @@ impl YaraX {
     file_path: String,
     variables: Option<Object>,
   ) -> Result<AsyncTask<crate::tasks::ScanFileTask>> {
-    let vars_map = convert_variables_to_map(variables)?;
+    let vars_map = self.combine_variables(variables)?;
 
     Ok(AsyncTask::new(crate::tasks::ScanFileTask::new(
+      self.rules.clone(),
+      file_path,
+      vars_map,
+      self.max_matches_per_pattern,
+      self.use_mmap,
+      self.timeout_ms,
+      self.match_context_size,
+    )))
+  }
+
+  /// Checks whether the provided data matches any compiled YARA rule asynchronously.
+  ///
+  /// This method is a fast-path boolean check that returns true as soon as any rule matches,
+  /// without allocating or constructing match objects, tags, or metadata.
+  ///
+  /// # Arguments
+  ///
+  /// * `data` - The data to scan
+  /// * `variables` - Optional variables to set for this scan
+  ///
+  /// # Returns
+  ///
+  /// An async task that resolves to a boolean indicating whether any rule matched
+  #[napi(
+    ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean>",
+    ts_return_type = "Promise<boolean>"
+  )]
+  pub fn is_match_async(
+    &self,
+    data: Buffer,
+    variables: Option<Object>,
+  ) -> Result<AsyncTask<crate::tasks::IsMatchTask>> {
+    let data_vec = data.to_vec();
+    let vars_map = self.combine_variables(variables)?;
+
+    Ok(AsyncTask::new(crate::tasks::IsMatchTask::new(
+      self.rules.clone(),
+      data_vec,
+      vars_map,
+      self.max_matches_per_pattern,
+      self.timeout_ms,
+      self.match_context_size,
+    )))
+  }
+
+  /// Checks whether a file matches any compiled YARA rule asynchronously.
+  ///
+  /// This method is a fast-path boolean check that returns true as soon as any rule matches,
+  /// without allocating or constructing match objects, tags, or metadata.
+  ///
+  /// # Arguments
+  ///
+  /// * `file_path` - Path to the file to scan
+  /// * `variables` - Optional variables to set for this scan
+  ///
+  /// # Returns
+  ///
+  /// An async task that resolves to a boolean indicating whether any rule matched
+  #[napi(
+    ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean>",
+    ts_return_type = "Promise<boolean>"
+  )]
+  pub fn is_file_match_async(
+    &self,
+    file_path: String,
+    variables: Option<Object>,
+  ) -> Result<AsyncTask<crate::tasks::IsFileMatchTask>> {
+    let vars_map = self.combine_variables(variables)?;
+
+    Ok(AsyncTask::new(crate::tasks::IsFileMatchTask::new(
       self.rules.clone(),
       file_path,
       vars_map,

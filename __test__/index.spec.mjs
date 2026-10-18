@@ -2208,5 +2208,446 @@ rule test_1 {
       );
     });
   });
+
+  describe("Concurrent async scanning", () => {
+    it("should handle concurrent async scans with the same scanner", async () => {
+      const scanner = yarax.compile(`
+        rule test_concurrent {
+          strings:
+            $a = "needle"
+          condition:
+            $a
+        }
+      `);
+
+      const matchBuf = Buffer.from("hay needle stack");
+      const noMatchBuf = Buffer.from("hay haystack");
+
+      const tasks = [];
+      for (let i = 0; i < 50; i++) {
+        const isMatch = i % 2 === 0;
+        tasks.push(
+          scanner.scanAsync(isMatch ? matchBuf : noMatchBuf).then((matches) => {
+            if (isMatch) {
+              strictEqual(matches.length, 1);
+              strictEqual(matches[0].ruleIdentifier, "test_concurrent");
+            } else {
+              strictEqual(matches.length, 0);
+            }
+          }),
+        );
+      }
+
+      await Promise.all(tasks);
+    });
+
+    it("should handle concurrent async scans across different rule sets without collision", async () => {
+      const scannerA = yarax.compile(`rule rule_a { strings: $a = "alpha" condition: $a }`);
+      const scannerB = yarax.compile(`rule rule_b { strings: $b = "beta" condition: $b }`);
+      const scannerC = yarax.compile(`rule rule_c { strings: $c = "gamma" condition: $c }`);
+
+      const dataA = Buffer.from("contains alpha here");
+      const dataB = Buffer.from("contains beta here");
+      const dataC = Buffer.from("contains gamma here");
+
+      const tasks = [];
+      for (let i = 0; i < 60; i++) {
+        const type = i % 3;
+        if (type === 0) {
+          tasks.push(
+            scannerA.scanAsync(dataA).then((matches) => {
+              strictEqual(matches.length, 1);
+              strictEqual(matches[0].ruleIdentifier, "rule_a");
+            }),
+          );
+        } else if (type === 1) {
+          tasks.push(
+            scannerB.scanAsync(dataB).then((matches) => {
+              strictEqual(matches.length, 1);
+              strictEqual(matches[0].ruleIdentifier, "rule_b");
+            }),
+          );
+        } else {
+          tasks.push(
+            scannerC.scanAsync(dataC).then((matches) => {
+              strictEqual(matches.length, 1);
+              strictEqual(matches[0].ruleIdentifier, "rule_c");
+            }),
+          );
+        }
+      }
+
+      await Promise.all(tasks);
+    });
+
+    it("should handle concurrent async scans across different scan options", async () => {
+      const rule = `
+        rule test_options {
+          strings:
+            $p = "tok"
+          condition:
+            $p
+        }
+      `;
+      const scanner1 = yarax.compile(rule);
+      scanner1.setMaxMatchesPerPattern(1);
+
+      const scanner2 = yarax.compile(rule);
+      scanner2.setMaxMatchesPerPattern(3);
+
+      const scannerDefault = yarax.compile(rule);
+
+      // Buffer has 6 occurrences of "tok"
+      const data = Buffer.from("tok tok tok tok tok tok");
+
+      const tasks = [];
+      for (let i = 0; i < 45; i++) {
+        const type = i % 3;
+        if (type === 0) {
+          tasks.push(
+            scanner1.scanAsync(data).then((matches) => {
+              strictEqual(matches.length, 1);
+              strictEqual(matches[0].matches.length, 1);
+            }),
+          );
+        } else if (type === 1) {
+          tasks.push(
+            scanner2.scanAsync(data).then((matches) => {
+              strictEqual(matches.length, 1);
+              strictEqual(matches[0].matches.length, 3);
+            }),
+          );
+        } else {
+          tasks.push(
+            scannerDefault.scanAsync(data).then((matches) => {
+              strictEqual(matches.length, 1);
+              strictEqual(matches[0].matches.length, 6);
+            }),
+          );
+        }
+      }
+
+      await Promise.all(tasks);
+    });
+
+    it("should handle concurrent async scans with different scan-time variables", async () => {
+      const rule = `
+        rule test_scan_var {
+          condition:
+            val > 50
+        }
+      `;
+      const scanner = yarax.compile(rule, {
+        defineVariables: { val: "0" },
+      });
+
+      const buf = Buffer.from("dummy");
+      const tasks = [];
+      for (let i = 0; i < 60; i++) {
+        const shouldMatch = i % 2 === 0;
+        const vars = { val: shouldMatch ? "100" : "10" };
+        tasks.push(
+          scanner.scanAsync(buf, vars).then((matches) => {
+            if (shouldMatch) {
+              strictEqual(matches.length, 1, `Iteration ${i} with val=100 should match`);
+              strictEqual(matches[0].ruleIdentifier, "test_scan_var");
+            } else {
+              strictEqual(matches.length, 0, `Iteration ${i} with val=10 should not match`);
+            }
+          }),
+        );
+      }
+
+      await Promise.all(tasks);
+    });
+
+    it("should handle concurrent async file scans and buffer scans simultaneously", async () => {
+      const fileRule = `rule file_r { strings: $f = "file_pattern" condition: $f }`;
+      const dataRule = `rule data_r { strings: $d = "data_pattern" condition: $d }`;
+
+      const fileScanner = yarax.compile(fileRule);
+      const dataScanner = yarax.compile(dataRule);
+
+      const tempFile = createTempFile("content with file_pattern embedded");
+      const dataBuf = Buffer.from("content with data_pattern embedded");
+
+      const tasks = [];
+      for (let i = 0; i < 50; i++) {
+        if (i % 2 === 0) {
+          tasks.push(
+            fileScanner.scanFileAsync(tempFile).then((matches) => {
+              strictEqual(matches.length, 1);
+              strictEqual(matches[0].ruleIdentifier, "file_r");
+            }),
+          );
+        } else {
+          tasks.push(
+            dataScanner.scanAsync(dataBuf).then((matches) => {
+              strictEqual(matches.length, 1);
+              strictEqual(matches[0].ruleIdentifier, "data_r");
+            }),
+          );
+        }
+      }
+
+      await Promise.all(tasks);
+    });
+
+    it("should invalidate and reuse worker cache when rules are incrementally recompiled", async () => {
+      const scanner = yarax.compile(`rule r1 { strings: $a = "first" condition: $a }`);
+
+      const buf1 = Buffer.from("first test");
+      const res1 = await scanner.scanAsync(buf1);
+      strictEqual(res1.length, 1);
+      strictEqual(res1[0].ruleIdentifier, "r1");
+
+      // Incremental recompile modifies scanner.rules (new Arc<Rules>)
+      scanner.addRuleSource(`rule r2 { strings: $b = "second" condition: $b }`);
+
+      const buf2 = Buffer.from("second test");
+      const res2 = await scanner.scanAsync(buf2);
+      strictEqual(res2.length, 1);
+      strictEqual(res2[0].ruleIdentifier, "r2");
+
+      // Concurrent scans on both patterns
+      const tasks = [];
+      for (let i = 0; i < 20; i++) {
+        tasks.push(
+          scanner.scanAsync(buf1).then((matches) => {
+            strictEqual(matches.length, 1);
+            strictEqual(matches[0].ruleIdentifier, "r1");
+          }),
+        );
+        tasks.push(
+          scanner.scanAsync(buf2).then((matches) => {
+            strictEqual(matches.length, 1);
+            strictEqual(matches[0].ruleIdentifier, "r2");
+          }),
+        );
+      }
+      await Promise.all(tasks);
+    });
+  });
+
+  describe("Fast-path boolean match check API", () => {
+    const matchRule = `
+      rule match_rule {
+        strings:
+          $a = "malicious payload"
+        condition:
+          $a
+      }
+    `;
+
+    const varRule = `
+      rule var_rule {
+        condition:
+          score > 50 and flag and tag == "threat"
+      }
+    `;
+
+    describe("isMatch (synchronous)", () => {
+      it("should return true when a rule matches", () => {
+        const scanner = yarax.compile(matchRule);
+        const buf = Buffer.from("Here is some malicious payload to detect");
+        const result = scanner.isMatch(buf);
+        strictEqual(typeof result, "boolean");
+        strictEqual(result, true);
+      });
+
+      it("should return false when no rule matches", () => {
+        const scanner = yarax.compile(matchRule);
+        const buf = Buffer.from("Clean payload without detection");
+        const result = scanner.isMatch(buf);
+        strictEqual(typeof result, "boolean");
+        strictEqual(result, false);
+      });
+
+      it("should respect compile-time and scan-time variables", () => {
+        const scanner = yarax.compile(varRule, {
+          defineVariables: { score: 10, flag: false, tag: "benign" },
+        });
+
+        // Default compile-time vars don't meet condition (> 50, true, "threat")
+        strictEqual(scanner.isMatch(Buffer.from("")), false);
+
+        // Override scan-time vars to satisfy condition
+        strictEqual(
+          scanner.isMatch(Buffer.from(""), {
+            score: 75,
+            flag: true,
+            tag: "threat",
+          }),
+          true,
+        );
+
+        // Override only partially (should be false)
+        strictEqual(
+          scanner.isMatch(Buffer.from(""), {
+            score: 75,
+            flag: false,
+            tag: "threat",
+          }),
+          false,
+        );
+      });
+
+      it("should throw on invalid variable types", () => {
+        const scanner = yarax.compile(matchRule);
+        throws(
+          () => scanner.isMatch(Buffer.from("test"), { badVar: {} }),
+          /Unsupported variable type/i,
+        );
+      });
+    });
+
+    describe("isFileMatch (synchronous)", () => {
+      it("should return true when a file matches", () => {
+        const scanner = yarax.compile(matchRule);
+        const tempFile = createTempFile("contains malicious payload here");
+        const result = scanner.isFileMatch(tempFile);
+        strictEqual(typeof result, "boolean");
+        strictEqual(result, true);
+      });
+
+      it("should return false when a file does not match", () => {
+        const scanner = yarax.compile(matchRule);
+        const tempFile = createTempFile("completely benign content");
+        const result = scanner.isFileMatch(tempFile);
+        strictEqual(typeof result, "boolean");
+        strictEqual(result, false);
+      });
+
+      it("should respect variables and options like useMmap", () => {
+        const scanner = yarax.compile(varRule, {
+          defineVariables: { score: 100, flag: true, tag: "threat" },
+        });
+        scanner.setUseMmap(false);
+        const tempFile = createTempFile("dummy content");
+        strictEqual(scanner.isFileMatch(tempFile), true);
+
+        // Override to fail condition
+        strictEqual(scanner.isFileMatch(tempFile, { score: 20 }), false);
+      });
+
+      it("should throw when scanning a non-existent file", () => {
+        const scanner = yarax.compile(matchRule);
+        throws(
+          () => scanner.isFileMatch(join(__tempDir, "does-not-exist.bin")),
+          /I\/O error/i,
+        );
+      });
+    });
+
+    describe("isMatchAsync", () => {
+      it("should resolve to true when a rule matches", async () => {
+        const scanner = yarax.compile(matchRule);
+        const buf = Buffer.from("Here is some malicious payload to detect");
+        const result = await scanner.isMatchAsync(buf);
+        strictEqual(typeof result, "boolean");
+        strictEqual(result, true);
+      });
+
+      it("should resolve to false when no rule matches", async () => {
+        const scanner = yarax.compile(matchRule);
+        const buf = Buffer.from("Clean payload without detection");
+        const result = await scanner.isMatchAsync(buf);
+        strictEqual(typeof result, "boolean");
+        strictEqual(result, false);
+      });
+
+      it("should respect compile-time and scan-time variables", async () => {
+        const scanner = yarax.compile(varRule, {
+          defineVariables: { score: 10, flag: false, tag: "benign" },
+        });
+
+        strictEqual(await scanner.isMatchAsync(Buffer.from("")), false);
+        strictEqual(
+          await scanner.isMatchAsync(Buffer.from(""), {
+            score: 80,
+            flag: true,
+            tag: "threat",
+          }),
+          true,
+        );
+      });
+
+      it("should reject on invalid inputs", async () => {
+        const scanner = yarax.compile(matchRule);
+        let rejected = false;
+        try {
+          await scanner.isMatchAsync(Buffer.from("test"), { badVar: [] });
+        } catch (err) {
+          rejected = true;
+          ok(/Unsupported variable type/i.test(err.message));
+        }
+        strictEqual(rejected, true, "Promise should reject on invalid variable input");
+      });
+
+      it("should support concurrent isMatchAsync queries", async () => {
+        const scanner = yarax.compile(matchRule);
+        const matchBuf = Buffer.from("malicious payload");
+        const nonMatchBuf = Buffer.from("clean payload");
+
+        const promises = [];
+        for (let i = 0; i < 50; i++) {
+          promises.push(scanner.isMatchAsync(matchBuf).then((res) => strictEqual(res, true)));
+          promises.push(scanner.isMatchAsync(nonMatchBuf).then((res) => strictEqual(res, false)));
+        }
+        await Promise.all(promises);
+      });
+    });
+
+    describe("isFileMatchAsync", () => {
+      it("should resolve to true when a file matches", async () => {
+        const scanner = yarax.compile(matchRule);
+        const tempFile = createTempFile("contains malicious payload here");
+        const result = await scanner.isFileMatchAsync(tempFile);
+        strictEqual(typeof result, "boolean");
+        strictEqual(result, true);
+      });
+
+      it("should resolve to false when a file does not match", async () => {
+        const scanner = yarax.compile(matchRule);
+        const tempFile = createTempFile("completely benign content");
+        const result = await scanner.isFileMatchAsync(tempFile);
+        strictEqual(typeof result, "boolean");
+        strictEqual(result, false);
+      });
+
+      it("should respect variables in file scan", async () => {
+        const scanner = yarax.compile(varRule, {
+          defineVariables: { score: 99, flag: true, tag: "threat" },
+        });
+        const tempFile = createTempFile("test file");
+        strictEqual(await scanner.isFileMatchAsync(tempFile), true);
+        strictEqual(await scanner.isFileMatchAsync(tempFile, { flag: false }), false);
+      });
+
+      it("should reject on non-existent file or invalid input", async () => {
+        const scanner = yarax.compile(matchRule);
+        let fileRejected = false;
+        try {
+          await scanner.isFileMatchAsync(join(__tempDir, "non-existent-async-file.bin"));
+        } catch (err) {
+          fileRejected = true;
+          ok(/I\/O error/i.test(err.message));
+        }
+        strictEqual(fileRejected, true, "Should reject for missing file");
+
+        let varRejected = false;
+        const tempFile = createTempFile("valid file");
+        try {
+          await scanner.isFileMatchAsync(tempFile, { invalid: Symbol("test") });
+        } catch (err) {
+          varRejected = true;
+          ok(/Unsupported variable type/i.test(err.message));
+        }
+        strictEqual(varRejected, true, "Should reject for invalid variable type");
+      });
+    });
+  });
   });
 });
+
+
