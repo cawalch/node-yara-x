@@ -778,6 +778,7 @@ function __napiStampBindingTarget(exportsObject, target) {
 // linked import resolves to `undefined`.
 module.exports.__napiBindingTarget = __napiStampBindingTarget(nativeBinding, __napiLoadedBindingTarget)
 module.exports = nativeBinding
+module.exports.BinaryMatchView = nativeBinding.BinaryMatchView
 module.exports.YaraX = nativeBinding.YaraX
 module.exports.compile = nativeBinding.compile
 module.exports.compileFileToWasm = nativeBinding.compileFileToWasm

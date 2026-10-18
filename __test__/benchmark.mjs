@@ -251,6 +251,10 @@ runBenchmark("scan: repetitive data with 1000 matches (full V8 object constructi
   multiScanner.scan(repetitiveData);
 });
 
+runBenchmark("scanBinary: repetitive data with 1000 matches (flat binary match ABI)", 500, () => {
+  multiScanner.scanBinary(repetitiveData);
+});
+
 runBenchmark("isMatch: repetitive data with 1000 matches (fast-path boolean check)", 500, () => {
   multiScanner.isMatch(repetitiveData);
 });

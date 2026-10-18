@@ -101,59 +101,33 @@ pub struct PathFilter {
 }
 
 impl PathFilter {
+  fn build_glob_set(patterns: Option<&[String]>, kind: &str) -> Result<Option<GlobSet>> {
+    match patterns {
+      Some(p) if !p.is_empty() => {
+        let mut builder = GlobSetBuilder::new();
+        for pat in p {
+          let glob = Glob::new(pat).map_err(|e| {
+            Error::new(
+              Status::InvalidArg,
+              format!("Invalid {kind} glob '{pat}': {e}"),
+            )
+          })?;
+          builder.add(glob);
+        }
+        builder
+          .build()
+          .map_err(|e| Error::new(Status::InvalidArg, format!("Glob build error: {e}")))
+          .map(Some)
+      }
+      _ => Ok(None),
+    }
+  }
+
   /// Creates a new path filter from optional include and exclude glob lists.
   pub fn new(includes: Option<&[String]>, excludes: Option<&[String]>) -> Result<Self> {
-    let include_set = if let Some(patterns) = includes {
-      if patterns.is_empty() {
-        None
-      } else {
-        let mut builder = GlobSetBuilder::new();
-        for p in patterns {
-          let glob = Glob::new(p).map_err(|e| {
-            Error::new(
-              Status::InvalidArg,
-              format!("Invalid include glob '{p}': {e}"),
-            )
-          })?;
-          builder.add(glob);
-        }
-        Some(
-          builder
-            .build()
-            .map_err(|e| Error::new(Status::InvalidArg, format!("Glob build error: {e}")))?,
-        )
-      }
-    } else {
-      None
-    };
-
-    let exclude_set = if let Some(patterns) = excludes {
-      if patterns.is_empty() {
-        None
-      } else {
-        let mut builder = GlobSetBuilder::new();
-        for p in patterns {
-          let glob = Glob::new(p).map_err(|e| {
-            Error::new(
-              Status::InvalidArg,
-              format!("Invalid exclude glob '{p}': {e}"),
-            )
-          })?;
-          builder.add(glob);
-        }
-        Some(
-          builder
-            .build()
-            .map_err(|e| Error::new(Status::InvalidArg, format!("Glob build error: {e}")))?,
-        )
-      }
-    } else {
-      None
-    };
-
     Ok(Self {
-      include_set,
-      exclude_set,
+      include_set: Self::build_glob_set(includes, "include")?,
+      exclude_set: Self::build_glob_set(excludes, "exclude")?,
     })
   }
 
@@ -361,26 +335,32 @@ pub fn convert_batch_result<'a>(
   })
 }
 
-/// N-API background task for batch file scanning.
-pub struct BatchScanFilesTask {
+/// Target to scan in a batch operation.
+pub enum BatchScanTarget {
+  Files(Vec<String>),
+  Directory(String),
+}
+
+/// N-API background task for parallel batch scanning.
+pub struct BatchScanTask {
   rules: Arc<Rules>,
-  file_paths: Vec<String>,
+  target: BatchScanTarget,
   scan_options: TaskScanOptions,
   variables: Option<VariableMap>,
   batch_options: BatchScanOptions,
 }
 
-impl BatchScanFilesTask {
+impl BatchScanTask {
   pub fn new(
     rules: Arc<Rules>,
-    file_paths: Vec<String>,
+    target: BatchScanTarget,
     scan_options: TaskScanOptions,
     variables: Option<VariableMap>,
     batch_options: BatchScanOptions,
   ) -> Self {
     Self {
       rules,
-      file_paths,
+      target,
       scan_options,
       variables,
       batch_options,
@@ -388,68 +368,26 @@ impl BatchScanFilesTask {
   }
 }
 
-impl Task for BatchScanFilesTask {
+impl Task for BatchScanTask {
   type Output = BatchScanResultData;
   type JsValue = BatchScanResult<'static>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    execute_batch_scan(
-      self.rules.clone(),
-      std::mem::take(&mut self.file_paths),
-      self.scan_options.clone(),
-      self.variables.clone(),
-      self.batch_options.clone(),
-    )
-  }
-
-  fn resolve(&mut self, env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
-    convert_batch_result(env, output)
-  }
-}
-
-/// N-API background task for directory scanning.
-pub struct BatchScanDirTask {
-  rules: Arc<Rules>,
-  dir_path: String,
-  scan_options: TaskScanOptions,
-  variables: Option<VariableMap>,
-  batch_options: BatchScanOptions,
-}
-
-impl BatchScanDirTask {
-  pub fn new(
-    rules: Arc<Rules>,
-    dir_path: String,
-    scan_options: TaskScanOptions,
-    variables: Option<VariableMap>,
-    batch_options: BatchScanOptions,
-  ) -> Self {
-    Self {
-      rules,
-      dir_path,
-      scan_options,
-      variables,
-      batch_options,
-    }
-  }
-}
-
-impl Task for BatchScanDirTask {
-  type Output = BatchScanResultData;
-  type JsValue = BatchScanResult<'static>;
-
-  fn compute(&mut self) -> Result<Self::Output> {
-    let filter = PathFilter::new(
-      self.batch_options.include_patterns.as_deref(),
-      self.batch_options.exclude_patterns.as_deref(),
-    )?;
-
-    let files = collect_directory_files(
-      &self.dir_path,
-      self.batch_options.max_depth,
-      self.batch_options.follow_symlinks,
-      &filter,
-    )?;
+    let files = match &mut self.target {
+      BatchScanTarget::Files(paths) => std::mem::take(paths),
+      BatchScanTarget::Directory(dir_path) => {
+        let filter = PathFilter::new(
+          self.batch_options.include_patterns.as_deref(),
+          self.batch_options.exclude_patterns.as_deref(),
+        )?;
+        collect_directory_files(
+          dir_path,
+          self.batch_options.max_depth,
+          self.batch_options.follow_symlinks,
+          &filter,
+        )?
+      }
+    };
 
     execute_batch_scan(
       self.rules.clone(),

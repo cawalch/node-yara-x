@@ -9,6 +9,34 @@
  */
 export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-wasip1'
 
+/** A zero-copy accessor view wrapping binary scan results. */
+export declare class BinaryMatchView {
+  /** Creates a new `BinaryMatchView` from a `BinaryScanResult`. */
+  constructor(result: BinaryScanResult)
+  /** Total number of matches in the view. */
+  get matchCount(): number
+  /** Metadata catalog of rules and patterns. */
+  get catalog(): BinaryScanCatalog
+  /** Returns the underlying flat binary match records buffer. */
+  get buffer(): Buffer
+  /** Gets the rule index for the match record at `index`. */
+  getRuleId(index: number): number | null
+  /** Gets the pattern index for the match record at `index`. */
+  getPatternId(index: number): number | null
+  /** Gets the byte offset in the scanned target for the match record at `index`. */
+  getOffset(index: number): number | null
+  /** Gets the byte length for the match record at `index`. */
+  getLength(index: number): number | null
+  /** Gets the reserved flags for the match record at `index`. */
+  getFlags(index: number): number | null
+  /** Gets the rule metadata for the match record at `index`. */
+  getRule(index: number): RuleInfo | null
+  /** Gets the pattern identifier for the match record at `index`. */
+  getPattern(index: number): string | null
+  /** Slices the matched byte slice directly out of the source buffer. */
+  getSlice(index: number, source: Buffer): Buffer | null
+}
+
 /**
  * The main YARA-X scanner struct.
  *
@@ -139,6 +167,40 @@ export declare class YaraX {
    */
   isFileMatch(filePath: string, variables?: Record<string, string | number | boolean>): boolean
   /**
+   * Scans the provided data returning a flat binary match record buffer and metadata catalog.
+   *
+   * This method is an ultra-fast path for high-density match reporting.
+   * It packs matches into a contiguous 24-byte record buffer, avoiding per-match
+   * V8 object and string allocations.
+   *
+   * # Arguments
+   *
+   * * `data` - The data to scan
+   * * `variables` - Optional variables to set for this scan
+   *
+   * # Returns
+   *
+   * A `BinaryScanResult` containing the packed buffer, match count, and catalog
+   */
+  scanBinary(data: Buffer, variables?: Record<string, string | number | boolean>): BinaryScanResult
+  /**
+   * Scans a file returning a flat binary match record buffer and metadata catalog.
+   *
+   * This method is an ultra-fast path for high-density match reporting.
+   * It packs matches into a contiguous 24-byte record buffer, avoiding per-match
+   * V8 object and string allocations.
+   *
+   * # Arguments
+   *
+   * * `file_path` - Path to the file to scan
+   * * `variables` - Optional variables to set for this scan
+   *
+   * # Returns
+   *
+   * A `BinaryScanResult` containing the packed buffer, match count, and catalog
+   */
+  scanFileBinary(filePath: string, variables?: Record<string, string | number | boolean>): BinaryScanResult
+  /**
    * Emits a WASM file from the compiled YARA rules.
    *
    * # Arguments
@@ -221,6 +283,32 @@ export declare class YaraX {
    * An async task that resolves to a boolean indicating whether any rule matched
    */
   isFileMatchAsync(filePath: string, variables?: Record<string, string | number | boolean>): Promise<boolean>
+  /**
+   * Scans the provided data asynchronously returning a flat binary match buffer and catalog.
+   *
+   * # Arguments
+   *
+   * * `data` - The data to scan
+   * * `variables` - Optional variables to set for this scan
+   *
+   * # Returns
+   *
+   * An async task that resolves to a `BinaryScanResult`
+   */
+  scanBinaryAsync(data: Buffer, variables?: Record<string, string | number | boolean>): Promise<BinaryScanResult>
+  /**
+   * Scans a file asynchronously returning a flat binary match buffer and catalog.
+   *
+   * # Arguments
+   *
+   * * `file_path` - Path to the file to scan
+   * * `variables` - Optional variables to set for this scan
+   *
+   * # Returns
+   *
+   * An async task that resolves to a `BinaryScanResult`
+   */
+  scanFileBinaryAsync(filePath: string, variables?: Record<string, string | number | boolean>): Promise<BinaryScanResult>
   /**
    * Emits a WASM file asynchronously from the compiled YARA rules.
    *
@@ -387,6 +475,22 @@ export interface BatchScanResult {
   errors: Array<BatchFileError>
   /** Total scan duration in milliseconds. */
   durationMs: number
+}
+
+/** Catalog indexing the rules and patterns present in a binary scan result. */
+export interface BinaryScanCatalog {
+  /** Indexed list of rules that matched. */
+  rules: Array<RuleInfo>
+}
+
+/** Result of a binary scan containing packed match records and metadata catalog. */
+export interface BinaryScanResult {
+  /** Flat binary buffer containing 24-byte match records. */
+  buffer: Buffer
+  /** Total number of matches recorded. */
+  matchCount: number
+  /** Indexed catalog of matching rules and patterns. */
+  catalog: BinaryScanCatalog
 }
 
 /**
@@ -641,6 +745,18 @@ export interface MatchData {
   contextData?: string
   /** The start offset of the actual match within the context data. */
   contextMatchOffset?: number
+}
+
+/** Metadata for a rule that matched in a binary scan. */
+export interface RuleInfo {
+  /** Rule identifier name. */
+  identifier: string
+  /** Namespace of the rule. */
+  namespace: string
+  /** Rule tags. */
+  tags: Array<string>
+  /** Rule pattern identifiers that matched. */
+  patterns: Array<string>
 }
 
 /**

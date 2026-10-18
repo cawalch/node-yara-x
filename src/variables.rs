@@ -94,83 +94,36 @@ fn parse_var_str(value: &str) -> ParsedVar<'_> {
   }
 }
 
-impl<'a> VariableHandler for Scanner<'a> {
-  /// Applies a variable to the scanner.
-  ///
-  /// Values are parsed in the following order:
-  /// 1. Boolean ("true" or "false", case-insensitive)
-  /// 2. Integer (valid i64)
-  /// 3. String (fallback)
-  fn apply_variable(&mut self, name: &str, value: &str) -> Result<()> {
-    match parse_var_str(value) {
-      ParsedVar::Bool(b) => self.set_global(name, b),
-      ParsedVar::Integer(i) => self.set_global(name, i),
-      ParsedVar::Str(s) => self.set_global(name, s),
+macro_rules! impl_variable_handler {
+  ($target:ident, $setter:ident) => {
+    impl<'a> VariableHandler for $target<'a> {
+      fn apply_variable(&mut self, name: &str, value: &str) -> Result<()> {
+        match parse_var_str(value) {
+          ParsedVar::Bool(b) => self.$setter(name, b),
+          ParsedVar::Integer(i) => self.$setter(name, i),
+          ParsedVar::Str(s) => self.$setter(name, s),
+        }
+        .map(|_| ())
+        .map_err(to_napi_err)
+      }
+
+      fn apply_bool_variable(&mut self, name: &str, value: bool) -> Result<()> {
+        self.$setter(name, value).map(|_| ()).map_err(to_napi_err)
+      }
+
+      fn apply_integer_variable(&mut self, name: &str, value: i64) -> Result<()> {
+        self.$setter(name, value).map(|_| ()).map_err(to_napi_err)
+      }
+
+      fn apply_float_variable(&mut self, name: &str, value: f64) -> Result<()> {
+        self.$setter(name, value).map(|_| ()).map_err(to_napi_err)
+      }
     }
-    .map(|_| ())
-    .map_err(to_napi_err)
-  }
-
-  fn apply_bool_variable(&mut self, name: &str, value: bool) -> Result<()> {
-    self
-      .set_global(name, value)
-      .map(|_| ())
-      .map_err(to_napi_err)
-  }
-
-  fn apply_integer_variable(&mut self, name: &str, value: i64) -> Result<()> {
-    self
-      .set_global(name, value)
-      .map(|_| ())
-      .map_err(to_napi_err)
-  }
-
-  fn apply_float_variable(&mut self, name: &str, value: f64) -> Result<()> {
-    self
-      .set_global(name, value)
-      .map(|_| ())
-      .map_err(to_napi_err)
-  }
+  };
 }
 
-impl<'a> VariableHandler for Compiler<'a> {
-  /// Applies a variable to the compiler.
-  ///
-  /// Values are parsed in the following order:
-  /// 1. Boolean ("true" or "false", case-insensitive)
-  /// 2. Integer (valid i64)
-  /// 3. String (fallback)
-  fn apply_variable(&mut self, name: &str, value: &str) -> Result<()> {
-    match parse_var_str(value) {
-      ParsedVar::Bool(b) => self.define_global(name, b),
-      ParsedVar::Integer(i) => self.define_global(name, i),
-      ParsedVar::Str(s) => self.define_global(name, s),
-    }
-    .map(|_| ())
-    .map_err(to_napi_err)
-  }
-
-  fn apply_bool_variable(&mut self, name: &str, value: bool) -> Result<()> {
-    self
-      .define_global(name, value)
-      .map(|_| ())
-      .map_err(to_napi_err)
-  }
-
-  fn apply_integer_variable(&mut self, name: &str, value: i64) -> Result<()> {
-    self
-      .define_global(name, value)
-      .map(|_| ())
-      .map_err(to_napi_err)
-  }
-
-  fn apply_float_variable(&mut self, name: &str, value: f64) -> Result<()> {
-    self
-      .define_global(name, value)
-      .map(|_| ())
-      .map_err(to_napi_err)
-  }
-}
+impl_variable_handler!(Scanner, set_global);
+impl_variable_handler!(Compiler, define_global);
 
 /// Reads a JavaScript value and converts it into a YARA global variable.
 pub fn get_variable_value(vars: &Object, key: &str) -> Result<VariableValue> {
