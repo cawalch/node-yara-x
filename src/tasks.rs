@@ -79,7 +79,7 @@ impl BaseYaraTask {
   /// Reuses the existing scanner on this worker thread if the rules pointer
   /// (`Arc::ptr_eq`) and scan options match. If rules or options differ, a new
   /// scanner is instantiated and cached.
-  fn with_scanner<F, R>(&self, f: F) -> Result<R>
+  pub(crate) fn with_scanner<F, R>(&self, f: F) -> Result<R>
   where
     F: FnOnce(&mut Scanner<'_>) -> Result<R>,
   {
@@ -177,25 +177,47 @@ impl BaseYaraTask {
   }
 }
 
-/// Task for scanning data with YARA rules.
+/// Target of an asynchronous scan operation (in-memory buffer or file on disk).
+pub enum ScanTarget {
+  Buffer(Buffer),
+  File(String),
+}
+
+impl ScanTarget {
+  fn scan_to_data(&self, base: &BaseYaraTask) -> Result<Vec<RuleMatchData>> {
+    match self {
+      Self::Buffer(buf) => base.scan_to_data(buf.as_ref()),
+      Self::File(path) => base.scan_file_to_data(path),
+    }
+  }
+
+  fn is_match(&self, base: &BaseYaraTask) -> Result<bool> {
+    match self {
+      Self::Buffer(buf) => base.is_match(buf.as_ref()),
+      Self::File(path) => base.is_file_match(path),
+    }
+  }
+}
+
+/// Task for scanning data or a file with YARA rules asynchronously.
 ///
 /// Scanning runs on the worker thread in `compute()`.
 pub struct ScanTask {
   base: BaseYaraTask,
-  data: Buffer,
+  target: ScanTarget,
 }
 
 impl ScanTask {
   /// Creates a new scan task.
   pub fn new(
     rules: Arc<Rules>,
-    data: Buffer,
+    target: ScanTarget,
     variables: Option<VariableMap>,
     options: TaskScanOptions,
   ) -> Self {
     Self {
       base: BaseYaraTask::new(rules, variables, options),
-      data,
+      target,
     }
   }
 }
@@ -205,7 +227,7 @@ impl Task for ScanTask {
   type JsValue = Vec<RuleMatch<'static>>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    self.base.scan_to_data(self.data.as_ref())
+    self.target.scan_to_data(&self.base)
   }
 
   fn resolve(&mut self, env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -213,61 +235,25 @@ impl Task for ScanTask {
   }
 }
 
-/// Task for scanning a file with YARA rules.
-///
-/// File I/O and scanning both run on the worker thread in `compute()`.
-pub struct ScanFileTask {
-  base: BaseYaraTask,
-  file_path: String,
-}
-
-impl ScanFileTask {
-  /// Creates a new file scan task.
-  pub fn new(
-    rules: Arc<Rules>,
-    file_path: String,
-    variables: Option<VariableMap>,
-    options: TaskScanOptions,
-  ) -> Self {
-    Self {
-      base: BaseYaraTask::new(rules, variables, options),
-      file_path,
-    }
-  }
-}
-
-impl Task for ScanFileTask {
-  type Output = Vec<RuleMatchData>;
-  type JsValue = Vec<RuleMatch<'static>>;
-
-  fn compute(&mut self) -> Result<Self::Output> {
-    self.base.scan_file_to_data(&self.file_path)
-  }
-
-  fn resolve(&mut self, env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
-    YaraX::convert_to_rule_matches(env, output)
-  }
-}
-
-/// Task for checking whether data matches any compiled YARA rule asynchronously.
+/// Task for checking whether data or a file matches any rule asynchronously.
 ///
 /// Scanning runs on the worker thread in `compute()`.
 pub struct IsMatchTask {
   base: BaseYaraTask,
-  data: Buffer,
+  target: ScanTarget,
 }
 
 impl IsMatchTask {
-  /// Creates a new boolean match task for data.
+  /// Creates a new boolean match task.
   pub fn new(
     rules: Arc<Rules>,
-    data: Buffer,
+    target: ScanTarget,
     variables: Option<VariableMap>,
     options: TaskScanOptions,
   ) -> Self {
     Self {
       base: BaseYaraTask::new(rules, variables, options),
-      data,
+      target,
     }
   }
 }
@@ -277,43 +263,7 @@ impl Task for IsMatchTask {
   type JsValue = bool;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    self.base.is_match(self.data.as_ref())
-  }
-
-  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
-    Ok(output)
-  }
-}
-
-/// Task for checking whether a file matches any compiled YARA rule asynchronously.
-///
-/// File I/O and scanning run on the worker thread in `compute()`.
-pub struct IsFileMatchTask {
-  base: BaseYaraTask,
-  file_path: String,
-}
-
-impl IsFileMatchTask {
-  /// Creates a new boolean match task for a file.
-  pub fn new(
-    rules: Arc<Rules>,
-    file_path: String,
-    variables: Option<VariableMap>,
-    options: TaskScanOptions,
-  ) -> Self {
-    Self {
-      base: BaseYaraTask::new(rules, variables, options),
-      file_path,
-    }
-  }
-}
-
-impl Task for IsFileMatchTask {
-  type Output = bool;
-  type JsValue = bool;
-
-  fn compute(&mut self) -> Result<Self::Output> {
-    self.base.is_file_match(&self.file_path)
+    self.target.is_match(&self.base)
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {

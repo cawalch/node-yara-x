@@ -4,9 +4,10 @@
 //! scanning data with compiled YARA rules, including scanner caching for performance.
 
 use crate::batch::{
-  collect_directory_files, convert_batch_result, execute_batch_scan, BatchScanDirTask,
-  BatchScanFilesTask, BatchScanOptions, BatchScanResult, PathFilter,
+  collect_directory_files, convert_batch_result, execute_batch_scan, BatchScanOptions,
+  BatchScanResult, BatchScanTarget, BatchScanTask, PathFilter,
 };
+use crate::binary::{extract_binary_scan_results, BinaryScanResult, BinaryScanTask};
 use crate::compiler::{
   add_source_to_compiler_tolerant, apply_compiler_options, apply_stored_compiler_options,
   collect_ignored_rules, replay_sources_to_wasm, stored_options_from, StoredCompilerOptions,
@@ -169,42 +170,6 @@ impl YaraX {
       timeout_ms: None,
       match_context_size: None,
     })
-  }
-
-  /// Creates a meta object from a YARA rule.
-  ///
-  /// # Arguments
-  ///
-  /// * `env` - The N-API environment
-  /// * `rule` - The YARA rule
-  ///
-  /// # Returns
-  ///
-  /// A JavaScript object containing the rule's metadata
-  fn create_meta_object<'a>(env: napi::Env, rule: &yara_x::Rule) -> Result<Object<'a>> {
-    let mut meta_obj = Object::new(&env)?;
-
-    for (key, value) in rule.metadata() {
-      match value {
-        yara_x::MetaValue::Integer(i) => {
-          meta_obj.set_named_property(key, i)?;
-        }
-        yara_x::MetaValue::Float(f) => {
-          meta_obj.set_named_property(key, f)?;
-        }
-        yara_x::MetaValue::String(s) => {
-          meta_obj.set_named_property(key, s)?;
-        }
-        yara_x::MetaValue::Bool(b) => {
-          meta_obj.set_named_property(key, b)?;
-        }
-        _ => {
-          meta_obj.set_named_property(key, "unknown")?;
-        }
-      }
-    }
-
-    Ok(meta_obj)
   }
 
   /// Extracts matches from a YARA rule.
@@ -397,35 +362,7 @@ impl YaraX {
     results: yara_x::ScanResults,
     env: napi::Env,
   ) -> Result<Vec<RuleMatch<'a>>> {
-    let matching_rules = results.matching_rules();
-    let rule_count = matching_rules.len();
-
-    if rule_count == 0 {
-      return Ok(Vec::new());
-    }
-
-    let mut rule_matches = Vec::with_capacity(rule_count);
-
-    for rule in matching_rules {
-      let matches_vec = Self::extract_matches(&rule);
-
-      let tags: Vec<String> = rule
-        .tags()
-        .map(|tag| tag.identifier().to_string())
-        .collect();
-
-      let meta_obj = Self::create_meta_object(env, &rule)?;
-
-      rule_matches.push(RuleMatch {
-        rule_identifier: rule.identifier().to_string(),
-        namespace: rule.namespace().to_string(),
-        meta: meta_obj,
-        tags,
-        matches: matches_vec,
-      });
-    }
-
-    Ok(rule_matches)
+    Self::convert_to_rule_matches(env, Self::extract_scan_data(results))
   }
 
   /// Extracts scan results into thread-safe `RuleMatchData` structs.
@@ -611,6 +548,22 @@ impl YaraX {
     self.invalidate_scanner_cache();
   }
 
+  /// Helper to execute a synchronous scan closure with scanner caching and variable application.
+  fn with_sync_scanner<F, R>(&self, variables: &Option<Object>, op: F) -> Result<R>
+  where
+    F: FnOnce(&mut Scanner<'_>) -> Result<R>,
+  {
+    let mut scanner = self.get_or_create_scanner()?;
+    scanner.apply_variables_from_map(&self.variables)?;
+    scanner.apply_variables_from_object(variables)?;
+    let res = op(&mut scanner);
+    if res.is_err() {
+      drop(scanner);
+      self.invalidate_scanner_cache();
+    }
+    res
+  }
+
   /// Scans the provided data using the compiled YARA rules.
   ///
   /// # Arguments
@@ -629,21 +582,10 @@ impl YaraX {
     data: Buffer,
     variables: Option<Object>,
   ) -> Result<Vec<RuleMatch<'a>>> {
-    let mut scanner = self.get_or_create_scanner()?;
-
-    scanner.apply_variables_from_map(&self.variables)?;
-    scanner.apply_variables_from_object(&variables)?;
-
-    let results = match scanner.scan(data.as_ref()) {
-      Ok(r) => r,
-      Err(e) => {
-        drop(scanner);
-        self.invalidate_scanner_cache();
-        return Err(scan_error_to_napi(e));
-      }
-    };
-
-    Self::process_scan_results(results, env)
+    self.with_sync_scanner(&variables, |scanner| {
+      let results = scanner.scan(data.as_ref()).map_err(scan_error_to_napi)?;
+      Self::process_scan_results(results, env)
+    })
   }
 
   /// Scans a file using the compiled YARA rules.
@@ -664,21 +606,12 @@ impl YaraX {
     file_path: String,
     variables: Option<Object>,
   ) -> Result<Vec<RuleMatch<'a>>> {
-    let mut scanner = self.get_or_create_scanner()?;
-
-    scanner.apply_variables_from_map(&self.variables)?;
-    scanner.apply_variables_from_object(&variables)?;
-
-    let results = match scanner.scan_file(Path::new(&file_path)) {
-      Ok(r) => r,
-      Err(e) => {
-        drop(scanner);
-        self.invalidate_scanner_cache();
-        return Err(scan_error_to_napi(e));
-      }
-    };
-
-    Self::process_scan_results(results, env)
+    self.with_sync_scanner(&variables, |scanner| {
+      let results = scanner
+        .scan_file(Path::new(&file_path))
+        .map_err(scan_error_to_napi)?;
+      Self::process_scan_results(results, env)
+    })
   }
 
   /// Checks whether the provided data matches any compiled YARA rule.
@@ -696,21 +629,10 @@ impl YaraX {
   /// `true` if any rule matches, `false` otherwise
   #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean>")]
   pub fn is_match(&self, data: Buffer, variables: Option<Object>) -> Result<bool> {
-    let mut scanner = self.get_or_create_scanner()?;
-
-    scanner.apply_variables_from_map(&self.variables)?;
-    scanner.apply_variables_from_object(&variables)?;
-
-    let results = match scanner.scan(data.as_ref()) {
-      Ok(r) => r,
-      Err(e) => {
-        drop(scanner);
-        self.invalidate_scanner_cache();
-        return Err(scan_error_to_napi(e));
-      }
-    };
-
-    Ok(results.matching_rules().next().is_some())
+    self.with_sync_scanner(&variables, |scanner| {
+      let results = scanner.scan(data.as_ref()).map_err(scan_error_to_napi)?;
+      Ok(results.matching_rules().next().is_some())
+    })
   }
 
   /// Checks whether a file matches any compiled YARA rule.
@@ -728,21 +650,72 @@ impl YaraX {
   /// `true` if any rule matches, `false` otherwise
   #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean>")]
   pub fn is_file_match(&self, file_path: String, variables: Option<Object>) -> Result<bool> {
-    let mut scanner = self.get_or_create_scanner()?;
+    self.with_sync_scanner(&variables, |scanner| {
+      let results = scanner
+        .scan_file(Path::new(&file_path))
+        .map_err(scan_error_to_napi)?;
+      Ok(results.matching_rules().next().is_some())
+    })
+  }
 
-    scanner.apply_variables_from_map(&self.variables)?;
-    scanner.apply_variables_from_object(&variables)?;
+  /// Scans the provided data returning a flat binary match record buffer and metadata catalog.
+  ///
+  /// This method is an ultra-fast path for high-density match reporting.
+  /// It packs matches into a contiguous 24-byte record buffer, avoiding per-match
+  /// V8 object and string allocations.
+  ///
+  /// # Arguments
+  ///
+  /// * `data` - The data to scan
+  /// * `variables` - Optional variables to set for this scan
+  ///
+  /// # Returns
+  ///
+  /// A `BinaryScanResult` containing the packed buffer, match count, and catalog
+  #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean>")]
+  pub fn scan_binary(&self, data: Buffer, variables: Option<Object>) -> Result<BinaryScanResult> {
+    self.with_sync_scanner(&variables, |scanner| {
+      let results = scanner.scan(data.as_ref()).map_err(scan_error_to_napi)?;
+      let (bytes, match_count, catalog) = extract_binary_scan_results(results);
+      Ok(BinaryScanResult {
+        buffer: Buffer::from(bytes),
+        match_count,
+        catalog,
+      })
+    })
+  }
 
-    let results = match scanner.scan_file(Path::new(&file_path)) {
-      Ok(r) => r,
-      Err(e) => {
-        drop(scanner);
-        self.invalidate_scanner_cache();
-        return Err(scan_error_to_napi(e));
-      }
-    };
-
-    Ok(results.matching_rules().next().is_some())
+  /// Scans a file returning a flat binary match record buffer and metadata catalog.
+  ///
+  /// This method is an ultra-fast path for high-density match reporting.
+  /// It packs matches into a contiguous 24-byte record buffer, avoiding per-match
+  /// V8 object and string allocations.
+  ///
+  /// # Arguments
+  ///
+  /// * `file_path` - Path to the file to scan
+  /// * `variables` - Optional variables to set for this scan
+  ///
+  /// # Returns
+  ///
+  /// A `BinaryScanResult` containing the packed buffer, match count, and catalog
+  #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean>")]
+  pub fn scan_file_binary(
+    &self,
+    file_path: String,
+    variables: Option<Object>,
+  ) -> Result<BinaryScanResult> {
+    self.with_sync_scanner(&variables, |scanner| {
+      let results = scanner
+        .scan_file(Path::new(&file_path))
+        .map_err(scan_error_to_napi)?;
+      let (bytes, match_count, catalog) = extract_binary_scan_results(results);
+      Ok(BinaryScanResult {
+        buffer: Buffer::from(bytes),
+        match_count,
+        catalog,
+      })
+    })
   }
 
   /// Emits a WASM file from the compiled YARA rules.
@@ -827,7 +800,7 @@ impl YaraX {
 
     Ok(AsyncTask::new(crate::tasks::ScanTask::new(
       self.rules.clone(),
-      data,
+      crate::tasks::ScanTarget::Buffer(data),
       vars_map,
       self.task_scan_options(false),
     )))
@@ -848,12 +821,12 @@ impl YaraX {
     &self,
     file_path: String,
     variables: Option<Object>,
-  ) -> Result<AsyncTask<crate::tasks::ScanFileTask>> {
+  ) -> Result<AsyncTask<crate::tasks::ScanTask>> {
     let vars_map = self.combine_variables(variables)?;
 
-    Ok(AsyncTask::new(crate::tasks::ScanFileTask::new(
+    Ok(AsyncTask::new(crate::tasks::ScanTask::new(
       self.rules.clone(),
-      file_path,
+      crate::tasks::ScanTarget::File(file_path),
       vars_map,
       self.task_scan_options(true),
     )))
@@ -885,7 +858,7 @@ impl YaraX {
 
     Ok(AsyncTask::new(crate::tasks::IsMatchTask::new(
       self.rules.clone(),
-      data,
+      crate::tasks::ScanTarget::Buffer(data),
       vars_map,
       self.task_scan_options(false),
     )))
@@ -912,12 +885,70 @@ impl YaraX {
     &self,
     file_path: String,
     variables: Option<Object>,
-  ) -> Result<AsyncTask<crate::tasks::IsFileMatchTask>> {
+  ) -> Result<AsyncTask<crate::tasks::IsMatchTask>> {
     let vars_map = self.combine_variables(variables)?;
 
-    Ok(AsyncTask::new(crate::tasks::IsFileMatchTask::new(
+    Ok(AsyncTask::new(crate::tasks::IsMatchTask::new(
       self.rules.clone(),
-      file_path,
+      crate::tasks::ScanTarget::File(file_path),
+      vars_map,
+      self.task_scan_options(true),
+    )))
+  }
+
+  /// Scans the provided data asynchronously returning a flat binary match buffer and catalog.
+  ///
+  /// # Arguments
+  ///
+  /// * `data` - The data to scan
+  /// * `variables` - Optional variables to set for this scan
+  ///
+  /// # Returns
+  ///
+  /// An async task that resolves to a `BinaryScanResult`
+  #[napi(
+    ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean>",
+    ts_return_type = "Promise<BinaryScanResult>"
+  )]
+  pub fn scan_binary_async(
+    &self,
+    data: Buffer,
+    variables: Option<Object>,
+  ) -> Result<AsyncTask<BinaryScanTask>> {
+    let vars_map = self.combine_variables(variables)?;
+
+    Ok(AsyncTask::new(BinaryScanTask::new(
+      self.rules.clone(),
+      crate::tasks::ScanTarget::Buffer(data),
+      vars_map,
+      self.task_scan_options(false),
+    )))
+  }
+
+  /// Scans a file asynchronously returning a flat binary match buffer and catalog.
+  ///
+  /// # Arguments
+  ///
+  /// * `file_path` - Path to the file to scan
+  /// * `variables` - Optional variables to set for this scan
+  ///
+  /// # Returns
+  ///
+  /// An async task that resolves to a `BinaryScanResult`
+  #[napi(
+    ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean>",
+    ts_return_type = "Promise<BinaryScanResult>"
+  )]
+  pub fn scan_file_binary_async(
+    &self,
+    file_path: String,
+    variables: Option<Object>,
+  ) -> Result<AsyncTask<BinaryScanTask>> {
+    let vars_map = self.combine_variables(variables)?;
+
+    Ok(AsyncTask::new(BinaryScanTask::new(
+      self.rules.clone(),
+      crate::tasks::ScanTarget::File(file_path),
       vars_map,
       self.task_scan_options(true),
     )))
@@ -976,23 +1007,10 @@ impl YaraX {
   /// at once, or use `add_rule_sources()` for batch addition.
   #[napi]
   pub fn add_rule_source(&mut self, rule_source: String, namespace: Option<String>) -> Result<()> {
-    // Push directly to avoid cloning the entire rule_sources vector
-    self.rule_sources.push(RuleSource {
-      source: rule_source.clone(),
-      namespace: namespace.clone(),
-    });
-
-    let mut compiler = Compiler::new();
-    // Replay the stored options and variables (in the same order as the
-    // original compilation) and recompile all sources in a single pass.
-    self.compile_all_sources(&mut compiler)?;
-
-    self.refresh_compilation_state(compiler);
-
-    // Keep source_code in sync for WASM emission
-    self.rebuild_source_code();
-
-    Ok(())
+    self.add_rule_sources(vec![RuleSource {
+      source: rule_source,
+      namespace,
+    }])
   }
 
   /// Adds multiple rule sources to the YARA compiler in a single compilation pass.
@@ -1090,14 +1108,14 @@ impl YaraX {
     file_paths: Vec<String>,
     options: Option<BatchScanOptions>,
     variables: Option<Object>,
-  ) -> Result<AsyncTask<BatchScanFilesTask>> {
+  ) -> Result<AsyncTask<BatchScanTask>> {
     let combined_vars = self.combine_variables(variables)?;
     let scan_opts = self.task_scan_options(true);
     let batch_opts = options.unwrap_or_default();
 
-    Ok(AsyncTask::new(BatchScanFilesTask::new(
+    Ok(AsyncTask::new(BatchScanTask::new(
       self.rules.clone(),
-      file_paths,
+      BatchScanTarget::Files(file_paths),
       scan_opts,
       combined_vars,
       batch_opts,
@@ -1140,14 +1158,14 @@ impl YaraX {
     dir_path: String,
     options: Option<BatchScanOptions>,
     variables: Option<Object>,
-  ) -> Result<AsyncTask<BatchScanDirTask>> {
+  ) -> Result<AsyncTask<BatchScanTask>> {
     let combined_vars = self.combine_variables(variables)?;
     let scan_opts = self.task_scan_options(true);
     let batch_opts = options.unwrap_or_default();
 
-    Ok(AsyncTask::new(BatchScanDirTask::new(
+    Ok(AsyncTask::new(BatchScanTask::new(
       self.rules.clone(),
-      dir_path,
+      BatchScanTarget::Directory(dir_path),
       scan_opts,
       combined_vars,
       batch_opts,

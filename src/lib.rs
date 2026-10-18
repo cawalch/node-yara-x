@@ -31,6 +31,7 @@ console.log('Matches:', matches);
 
 // Module declarations
 mod batch;
+mod binary;
 mod compiler;
 mod error;
 mod scanner;
@@ -40,6 +41,7 @@ mod variables;
 
 // Re-export public types
 pub use batch::{BatchFileError, BatchFileMatch, BatchScanOptions, BatchScanResult};
+pub use binary::{BinaryMatchView, BinaryScanCatalog, BinaryScanResult, RuleInfo};
 pub use scanner::YaraX;
 pub use types::{
   BannedModule, CompileResult, CompilerError, CompilerOptions, CompilerWarning, IgnoredRule,
