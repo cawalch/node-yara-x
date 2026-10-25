@@ -1,0 +1,54 @@
+# Changelog
+
+All notable changes to this project are documented in this file and on the [GitHub Releases](https://github.com/cawalch/node-yara-x/releases) page.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.11.0] - 2026-10-25
+
+### Added
+- **Compiled Rules Introspection**:
+  - `scanner.ruleCount`: Getter returning the total count of compiled rules.
+  - `scanner.getImports()`: Returns an array of imported YARA-X module names (`"pe"`, `"math"`, etc.).
+  - `scanner.getRules()`: Returns structured metadata (`RuleInfo[]`) including `identifier`, `namespace`, `tags`, and `patterns`.
+  - Introspection data is fully preserved across `serialize()` and `deserialize()`.
+- **Scanner `maxScanSize` Protection**:
+  - `scanner.setMaxScanSize(maxBytes: number)`: Enforces an upper bound on bytes scanned per buffer or file, guarding against memory and processing exhaustion on oversized inputs.
+  - `TaskScanOptions.maxScanSize`: Integrated into async buffer and file scanning tasks.
+- **Directory Traversal File Size Filtering**:
+  - `BatchScanOptions.minFileSize`: Filters out files below the specified byte size during native traversal.
+  - `BatchScanOptions.maxFileSize`: Filters out files exceeding the specified byte size during native traversal.
+- **`BinaryMatchView` Lazy Materialization**:
+  - `BinaryMatchView.prototype.toRuleMatches(source?: Buffer): RuleMatch[]`: Reconstructs standard `RuleMatch` objects directly from the compact binary match buffer, allowing consumers to scan using the binary ABI and lazily unpack match objects on demand.
+
+### Performance
+- **Direct Binary Packing**:
+  - Elimination of intermediate `Vec<FlatMatchRecord>` allocation in the binary scanning engine, packing directly into napi `Uint8Array` memory buffers.
+- **Batch Scanning Zero-Copy Path Consumption**:
+  - Shifted batch file list processing to move strings into worker threads without redundant cloning.
+- **$O(1)$ Compiler Error Deduplication**:
+  - Replaced linear search with `HashSet<(usize, usize)>` during compilation error deduplication in tolerant mode.
+
+---
+
+## [0.10.0] - 2026-10-19
+
+### Added
+- **Native Multi-Threaded Batch and Directory Scanning**:
+  - `scanner.scanFiles(paths, options?, variables?)` and `scanner.scanFilesSync(...)`: Parallel file scanning across a native Rayon work-stealing pool.
+  - `scanner.scanDirectory(dirPath, options?, variables?)` and `scanner.scanDirectorySync(...)`: Native recursive directory traversal with glob pattern filtering (`includePatterns`, `excludePatterns`) and `maxDepth` limits.
+- **Flat / Binary Match ABI**:
+  - High-throughput binary match scanning (`scanBinary`, `scanFileBinary`, `scanBinaryAsync`, `scanFileBinaryAsync`) returning a zero-copy `BinaryMatchView`.
+
+---
+
+## [0.8.0] - 2026-10-18
+
+### Fixed
+- Fixed missing license files in published `@litko/yara-x` and platform tarballs.
+- Dual licensing (`MIT AND BSD-3-Clause`) explicitly declared in package metadata.
+
+### Added
+- Platform support matrix, troubleshooting guides, and Sigstore / GitHub attestation verification instructions.
+- Benchmarking baseline suite (`pnpm profile:baseline`, `pnpm profile:compare`).

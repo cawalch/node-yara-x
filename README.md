@@ -10,6 +10,9 @@ Node.js bindings for [YARA-X](https://github.com/VirusTotal/yara-x), the Rust re
 - `compile()` and `fromFile()` return a scanner that reuses its compiled state, so a rule set is parsed once and scanned many times.
 - `scan()` and `scanFile()` return full match details (`RuleMatch`, tags, offsets, and context).
 - `isMatch()` and `isFileMatch()` provide a zero-allocation fast path that returns a boolean, bypassing match object construction.
+- `scanBinary()` and `scanFileBinary()` provide a high-throughput binary match ABI returning a compact `BinaryMatchView` with lazy `toRuleMatches()` materialization.
+- `ruleCount`, `getImports()`, and `getRules()` provide deep introspection into compiled rules, modules, tags, and patterns.
+- `scanFiles()` and `scanDirectory()` scan thousands of files in parallel across a Rayon worker pool with file size and glob filtering.
 - `scanAsync()` and `isMatchAsync()` run on libuv worker threads with thread-local scanner caching for high concurrency.
 - `serialize()` and `deserialize()` move compiled rules between processes and worker threads.
 - `emitWasmFile()` writes the compiled rule conditions as a WebAssembly module for inspection and sandboxing.
@@ -244,16 +247,85 @@ const scanner = compile(`
 const batch = await scanner.scanFiles(["/data/file1.bin", "/data/file2.bin"]);
 console.log(`Scanned ${batch.scannedFiles} files in ${batch.durationMs.toFixed(1)}ms (${batch.matchedFiles} matched).`);
 
-// 2. Scan an entire directory recursively with glob filters and depth limits:
+// 2. Scan an entire directory recursively with glob filters, depth limits, and size guards:
 const dirResult = await scanner.scanDirectory("/var/log", {
   maxDepth: 3,
   includePatterns: ["*.log", "*.txt"],
   excludePatterns: ["**/node_modules/**", "**/.git/**"],
+  minFileSize: 1024, // ignore files smaller than 1 KB
+  maxFileSize: 50 * 1024 * 1024, // ignore files larger than 50 MB
   onlyMatches: true, // boolean fast-path (omits full match objects)
 });
 
 for (const file of dirResult.results) {
   console.log(`Matched: ${file.filePath}`);
+}
+```
+
+## Binary match ABI
+
+When scanning large volumes with high match density, constructing hundreds of V8 JavaScript match objects and strings creates significant garbage collection overhead. The binary match ABI (`scanBinary()`, `scanFileBinary()`, `scanBinaryAsync()`, `scanFileBinaryAsync()`) packs all match records into a single contiguous flat buffer and returns a lightweight `BinaryMatchView`:
+
+```javascript
+import { compile } from "@litko/yara-x";
+
+const scanner = compile(`
+  rule DetectThreat {
+    strings:
+      $pattern1 = "malicious_string"
+      $pattern2 = "suspicious_signature"
+    condition:
+      any of them
+  }
+`);
+
+// Synchronous or asynchronous binary scan
+const view = scanner.scanBinary(sampleBuffer);
+
+console.log(`Total match occurrences: ${view.matchCount}`);
+console.log(`Matched rules: ${view.ruleNames.join(", ")}`);
+console.log(`Matched patterns: ${view.patternNames.join(", ")}`);
+
+// Fast O(1) indexed access to raw binary match records
+for (let i = 0; i < view.matchCount; i++) {
+  const record = view.getRecord(i);
+  console.log(`Match ${i}: rule ${view.ruleNames[record.ruleIndex]}, offset ${record.offset}, length ${record.length}`);
+}
+
+// Lazy materialization back to standard RuleMatch[] objects when needed
+const ruleMatches = view.toRuleMatches(sampleBuffer);
+```
+
+## Inspect compiled rules
+
+Inspect compiled rule counts, imported modules, rule names, namespaces, tags, and pattern identifiers without scanning or re-parsing:
+
+```javascript
+import { compile } from "@litko/yara-x";
+
+const rules = compile(`
+  import "pe"
+  import "math"
+
+  rule SuspiciousBinary : HighRisk {
+    strings:
+      $entry = "payload"
+    condition:
+      $entry and pe.is_pe
+  }
+`);
+
+// Total count of compiled rules
+console.log(rules.ruleCount); // 1
+
+// List of imported YARA-X modules
+console.log(rules.getImports()); // ["pe", "math"]
+
+// Structured rule metadata
+for (const rule of rules.getRules()) {
+  console.log(`Rule: ${rule.identifier} in namespace "${rule.namespace}"`);
+  console.log(`Tags: ${rule.tags.join(", ")}`);
+  console.log(`Declared patterns: ${rule.patterns.join(", ")}`);
 }
 ```
 
@@ -438,6 +510,15 @@ for (const match of matches[0]?.matches ?? []) {
 }
 ```
 
+### Maximum scan size protection
+
+Limit the maximum number of bytes scanned per buffer or file to guard against accidental scans of multi-gigabyte files or streams:
+
+```javascript
+// Scan at most 10 MB per target (offsets beyond 10 MB are ignored)
+rules.setMaxScanSize(10 * 1024 * 1024);
+```
+
 ## Emit a WebAssembly module
 
 YARA-X compiles rule conditions to WebAssembly. `compileToWasm()` and `compileFileToWasm()` write that module to disk, and an existing scanner can emit its own module with `emitWasmFile()`:
@@ -561,12 +642,19 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 
 ### YaraX methods
 
-| Method | Description |
+| Method / Property | Description |
 | :--- | :--- |
+| `ruleCount` | Total number of compiled rules (`number`). |
+| `getImports()` | Returns an array of imported YARA-X module names (`string[]`). |
+| `getRules()` | Returns metadata (`RuleInfo[]`) for all compiled rules. |
 | `scan(data, variables?)` | Scans a `Buffer` synchronously and returns the matching rules. |
 | `scanFile(filePath, variables?)` | Scans a file on disk synchronously. |
 | `scanAsync(data, variables?)` | Scans a `Buffer` on a worker thread. |
 | `scanFileAsync(filePath, variables?)` | Scans a file on disk on a worker thread. |
+| `scanBinary(data, variables?)` | Scans a `Buffer` using the binary match ABI; returns a `BinaryMatchView`. |
+| `scanFileBinary(filePath, variables?)` | Scans a file using the binary match ABI; returns a `BinaryMatchView`. |
+| `scanBinaryAsync(data, variables?)` | Scans a `Buffer` asynchronously using the binary match ABI. |
+| `scanFileBinaryAsync(filePath, variables?)` | Scans a file asynchronously using the binary match ABI. |
 | `isMatch(data, variables?)` | Checks if a `Buffer` matches any rule; returns a boolean with zero object allocations. |
 | `isFileMatch(filePath, variables?)` | Checks if a file on disk matches any rule; returns a boolean. |
 | `isMatchAsync(data, variables?)` | Checks if a `Buffer` matches on a worker thread; resolves to a boolean. |
@@ -584,12 +672,25 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 | `getIgnoredRules()` | Returns rules skipped by tolerant compilation or ignored modules. |
 | `getCompilationErrors()` | Returns source-level errors collected when `ignoreInvalidRules` is set. |
 | `setMaxMatchesPerPattern(maxMatches)` | Caps the matches collected per pattern. |
+| `setMaxScanSize(maxBytes)` | Sets the maximum number of bytes scanned per buffer or file. |
 | `setFastScan(fastScan)` | Enables or disables fast scan mode (stops pattern search at first match). |
 | `setUseMmap(useMmap)` | Enables or disables memory-mapped file scanning. |
 | `setTimeout(timeoutMs)` | Sets the scan timeout in milliseconds. |
 | `setMatchContextSize(size)` | Sets how many context bytes are returned with each match. |
 | `emitWasmFile(outputPath)` | Writes the compiled WebAssembly condition module to disk synchronously. |
 | `emitWasmFileAsync(outputPath)` | Writes the compiled WebAssembly condition module to disk asynchronously. |
+
+### BatchScanOptions
+
+| Option | Type | Description |
+| :--- | :--- | :--- |
+| `maxDepth` | `number` | Maximum directory recursion depth (default: unlimited). |
+| `includePatterns` | `string[]` | Glob patterns matching file paths to include. |
+| `excludePatterns` | `string[]` | Glob patterns matching file paths to exclude. |
+| `minFileSize` | `number` | Minimum file size in bytes to scan (smaller files are skipped). |
+| `maxFileSize` | `number` | Maximum file size in bytes to scan (larger files are skipped). |
+| `onlyMatches` | `boolean` | When `true`, omits full `RuleMatch` objects and only records matched status. |
+| `includeCleanFiles` | `boolean` | When `true`, includes files with 0 matches in the result list (default: `true`). |
 
 ### CompilerOptions
 
@@ -613,7 +714,7 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 
 ### Types
 
-`BannedModule`, `CompileResult`, `CompilerError`, `CompilerWarning`, `IgnoredRule`, `MatchData`, `RuleMatch`, `RuleSource`, and the `YaraX` class are all exported and documented in `index.d.ts`.
+`BinaryMatchView`, `BinaryMatchRecord`, `BatchScanOptions`, `BatchScanResult`, `FileScanResult`, `RuleInfo`, `BannedModule`, `CompileResult`, `CompilerError`, `CompilerWarning`, `IgnoredRule`, `MatchData`, `RuleMatch`, `RuleSource`, and the `YaraX` class are all exported and documented in `index.d.ts`.
 
 ## Platform support
 
