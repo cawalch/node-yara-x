@@ -2734,6 +2734,123 @@ rule test_1 {
       strictEqual(noMatch, false);
     });
   });
+
+  describe("Compiled Rules Introspection", () => {
+    it("should return the correct ruleCount", () => {
+      const source = `
+        rule rule_one { strings: $a = "one" condition: $a }
+        rule rule_two { strings: $b = "two" condition: $b }
+        rule rule_three { strings: $c = "three" condition: $c }
+      `;
+      const scanner = yarax.compile(source);
+      strictEqual(scanner.ruleCount, 3);
+    });
+
+    it("should return module imports via getImports", () => {
+      const source = `
+        import "math"
+        rule math_rule {
+          condition:
+            math.max(1, 2) == 2
+        }
+      `;
+      const scanner = yarax.compile(source);
+      const imports = scanner.getImports();
+      ok(Array.isArray(imports));
+      ok(imports.includes("math"), "Expected imports to include 'math'");
+    });
+
+    it("should return rule metadata via getRules", () => {
+      const source = `
+        rule tagged_rule : tag1 tag2 {
+          strings:
+            $str1 = "abc"
+            $str2 = "xyz"
+          condition:
+            any of them
+        }
+      `;
+      const scanner = yarax.compile(source);
+      const rules = scanner.getRules();
+      strictEqual(rules.length, 1);
+      strictEqual(rules[0].identifier, "tagged_rule");
+      strictEqual(rules[0].namespace, "default");
+      deepStrictEqual(rules[0].tags, ["tag1", "tag2"]);
+      deepStrictEqual(rules[0].patterns, ["$str1", "$str2"]);
+    });
+
+    it("should preserve rule inspection across serialize/deserialize", () => {
+      const source = `
+        rule serialized_rule : mytag {
+          strings:
+            $a = "needle"
+          condition:
+            $a
+        }
+      `;
+      const scanner = yarax.compile(source);
+      const serialized = scanner.serialize();
+      const restored = yarax.deserialize(serialized);
+
+      strictEqual(restored.ruleCount, 1);
+      const rules = restored.getRules();
+      strictEqual(rules.length, 1);
+      strictEqual(rules[0].identifier, "serialized_rule");
+      deepStrictEqual(rules[0].tags, ["mytag"]);
+      deepStrictEqual(rules[0].patterns, ["$a"]);
+    });
+  });
+
+  describe("maxScanSize Protection", () => {
+    it("should limit scanned byte size on buffer scans", () => {
+      const source = `
+        rule find_tail {
+          strings:
+            $tail = "tail_signature"
+          condition:
+            $tail
+        }
+      `;
+      const scanner = yarax.compile(source);
+
+      // Create a 10KB buffer with needle at byte 8,000
+      const buf = Buffer.alloc(10 * 1024, "A");
+      buf.write("tail_signature", 8000);
+
+      // Unrestricted scan matches
+      strictEqual(scanner.isMatch(buf), true);
+
+      // Restricting maxScanSize to 4,000 bytes prevents scanning the needle
+      scanner.setMaxScanSize(4000);
+      strictEqual(scanner.isMatch(buf), false);
+
+      // Re-expanding maxScanSize finds the needle
+      scanner.setMaxScanSize(10000);
+      strictEqual(scanner.isMatch(buf), true);
+    });
+
+    it("should apply maxScanSize to async scanning", async () => {
+      const source = `
+        rule find_tail_async {
+          strings:
+            $tail = "async_tail"
+          condition:
+            $tail
+        }
+      `;
+      const scanner = yarax.compile(source);
+      const buf = Buffer.alloc(10 * 1024, "X");
+      buf.write("async_tail", 8000);
+
+      scanner.setMaxScanSize(5000);
+      const isMatchCapped = await scanner.isMatchAsync(buf);
+      strictEqual(isMatchCapped, false);
+
+      scanner.setMaxScanSize(0); // clear limit
+      const isMatchUncapped = await scanner.isMatchAsync(buf);
+      strictEqual(isMatchUncapped, true);
+    });
+  });
   });
 });
 

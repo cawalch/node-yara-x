@@ -35,6 +35,10 @@ pub struct BatchScanOptions {
   pub include_clean_files: Option<bool>,
   /// If true, performs fast boolean match check instead of building full match details.
   pub only_matches: Option<bool>,
+  /// Minimum file size in bytes to include in directory scans.
+  pub min_file_size: Option<i64>,
+  /// Maximum file size in bytes to include in directory scans.
+  pub max_file_size: Option<i64>,
 }
 
 /// Result of scanning a single file within a batch.
@@ -152,6 +156,8 @@ pub fn collect_directory_files(
   dir_path: &str,
   max_depth: Option<u32>,
   follow_symlinks: Option<bool>,
+  min_file_size: Option<i64>,
+  max_file_size: Option<i64>,
   filter: &PathFilter,
 ) -> Result<Vec<String>> {
   let root = Path::new(dir_path);
@@ -182,6 +188,21 @@ pub fn collect_directory_files(
       Ok(e) => {
         let p = e.into_path();
         if p.is_file() && filter.is_match(&p) {
+          if min_file_size.is_some() || max_file_size.is_some() {
+            if let Ok(metadata) = p.metadata() {
+              let len = metadata.len() as i64;
+              if let Some(min) = min_file_size {
+                if len < min {
+                  continue;
+                }
+              }
+              if let Some(max) = max_file_size {
+                if len > max {
+                  continue;
+                }
+              }
+            }
+          }
           files.push(
             p.into_os_string()
               .into_string()
@@ -393,6 +414,8 @@ impl Task for BatchScanTask {
           dir_path,
           self.batch_options.max_depth,
           self.batch_options.follow_symlinks,
+          self.batch_options.min_file_size,
+          self.batch_options.max_file_size,
           &filter,
         )?
       }

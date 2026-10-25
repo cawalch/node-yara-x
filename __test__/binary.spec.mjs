@@ -252,4 +252,39 @@ describe('Flat / Binary Match ABI', () => {
       }
     })
   })
+
+  describe('toRuleMatches lazy materialization', () => {
+    it('should return empty array when view has no matches', () => {
+      const scanner = compile(sampleRule)
+      const data = Buffer.from('benign data')
+      const view = new BinaryMatchView(scanner.scanBinary(data))
+      const ruleMatches = view.toRuleMatches()
+      assert.deepStrictEqual(ruleMatches, [])
+    })
+
+    it('should reconstruct RuleMatch array with correct metadata and offsets', () => {
+      const scanner = compile(sampleRule)
+      const data = Buffer.from('prefix---malicious_payload---c2_server---suffix')
+      const view = new BinaryMatchView(scanner.scanBinary(data))
+
+      // Without source buffer: data is empty string
+      const matchesNoSource = view.toRuleMatches()
+      assert.strictEqual(matchesNoSource.length, 1)
+      assert.strictEqual(matchesNoSource[0].ruleIdentifier, 'DetectMalware')
+      assert.strictEqual(matchesNoSource[0].namespace, 'default')
+      assert.strictEqual(matchesNoSource[0].matches.length, 2)
+      assert.strictEqual(matchesNoSource[0].matches[0].identifier, '$str1')
+      assert.strictEqual(matchesNoSource[0].matches[0].offset, 9)
+      assert.strictEqual(matchesNoSource[0].matches[0].length, 17)
+      assert.strictEqual(matchesNoSource[0].matches[0].data, '')
+
+      // With source buffer: data string is sliced directly from buffer
+      const matchesWithSource = view.toRuleMatches(data)
+      assert.strictEqual(matchesWithSource.length, 1)
+      assert.strictEqual(matchesWithSource[0].matches[0].identifier, '$str1')
+      assert.strictEqual(matchesWithSource[0].matches[0].data, 'malicious_payload')
+      assert.strictEqual(matchesWithSource[0].matches[1].identifier, '$str2')
+      assert.strictEqual(matchesWithSource[0].matches[1].data, 'c2_server')
+    })
+  })
 })

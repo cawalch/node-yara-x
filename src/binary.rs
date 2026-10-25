@@ -5,8 +5,8 @@
 //! into a flat, contiguous 24-byte record buffer and an indexed metadata catalog.
 
 use crate::tasks::{BaseYaraTask, ScanTarget, TaskScanOptions};
-use crate::types::VariableMap;
-use napi::bindgen_prelude::Buffer;
+use crate::types::{MatchData, RuleMatch, VariableMap};
+use napi::bindgen_prelude::{Buffer, Object};
 use napi::{Env, Result, Task};
 use napi_derive::napi;
 use std::sync::Arc;
@@ -170,6 +170,78 @@ impl BinaryMatchView {
     } else {
       None
     }
+  }
+
+  /// Lazily materializes all binary match records into the standard `RuleMatch` object graph.
+  ///
+  /// If `source` buffer is provided, the matched data bytes are sliced as strings into `MatchData.data`.
+  /// Otherwise, `MatchData.data` is an empty string.
+  #[napi(ts_args_type = "source?: Buffer")]
+  pub fn to_rule_matches<'a>(
+    &self,
+    env: Env,
+    source: Option<Buffer>,
+  ) -> Result<Vec<RuleMatch<'a>>> {
+    if self.match_count == 0 || self.catalog.rules.is_empty() {
+      return Ok(Vec::new());
+    }
+
+    let mut rule_matches_map: Vec<Vec<MatchData>> = vec![Vec::new(); self.catalog.rules.len()];
+    let src_ref = source.as_ref().map(|b| b.as_ref());
+
+    for i in 0..self.match_count {
+      if let Some(record) = self.read_record(i) {
+        let rule_idx = record.rule_id as usize;
+        let pattern_idx = record.pattern_id as usize;
+
+        if let Some(rule) = self.catalog.rules.get(rule_idx) {
+          let pattern_identifier = rule.patterns.get(pattern_idx).cloned().unwrap_or_default();
+
+          let offset = record.offset as i64;
+          let length = record.length as i64;
+
+          let data = if let Some(src) = src_ref {
+            let start = record.offset as usize;
+            let end = start.saturating_add(record.length as usize);
+            if let Some(slice) = src.get(start..end) {
+              String::from_utf8_lossy(slice).into_owned()
+            } else {
+              String::new()
+            }
+          } else {
+            String::new()
+          };
+
+          rule_matches_map[rule_idx].push(MatchData {
+            offset,
+            length,
+            data,
+            identifier: pattern_identifier,
+            context_data: None,
+            context_match_offset: None,
+          });
+        }
+      }
+    }
+
+    let mut results = Vec::new();
+    for (rule_idx, matches) in rule_matches_map.into_iter().enumerate() {
+      if matches.is_empty() {
+        continue;
+      }
+      let rule_info = &self.catalog.rules[rule_idx];
+      let meta = Object::new(&env)?;
+
+      results.push(RuleMatch {
+        rule_identifier: rule_info.identifier.clone(),
+        namespace: rule_info.namespace.clone(),
+        meta,
+        tags: rule_info.tags.clone(),
+        matches,
+      });
+    }
+
+    Ok(results)
   }
 }
 
