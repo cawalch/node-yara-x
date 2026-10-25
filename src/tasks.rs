@@ -26,6 +26,7 @@ pub struct TaskScanOptions {
   pub use_mmap: Option<bool>,
   pub timeout_ms: Option<u32>,
   pub match_context_size: Option<usize>,
+  pub max_scan_size: Option<usize>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -117,6 +118,9 @@ impl BaseYaraTask {
         }
         if let Some(match_context_size) = self.options.match_context_size {
           scanner.match_context_size(match_context_size);
+        }
+        if let Some(max_scan_size) = self.options.max_scan_size {
+          scanner.max_scan_size(max_scan_size);
         }
         scanner.apply_variables_from_map(&self.variables)?;
 

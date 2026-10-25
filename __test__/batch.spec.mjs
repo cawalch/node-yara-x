@@ -206,6 +206,36 @@ test("Native Multi-Threaded Batch and Directory Scanning", async (t) => {
     assert(result.durationMs > 0);
   });
 
+  await t.test("scanDirectorySync - file size filters (minFileSize & maxFileSize)", async () => {
+    const sizeTestDir = await mkdtemp(join(tmpdir(), "yara-x-size-filter-"));
+    try {
+      await writeFile(join(sizeTestDir, "empty.txt"), ""); // 0 bytes
+      await writeFile(join(sizeTestDir, "medium.txt"), "A".repeat(50) + " SUSPICIOUS_PAYLOAD"); // ~70 bytes
+      await writeFile(join(sizeTestDir, "large.txt"), "B".repeat(500) + " SUSPICIOUS_PAYLOAD"); // ~520 bytes
+
+      // Filter: minFileSize: 10 (should exclude empty.txt)
+      const resMin = scanner.scanDirectorySync(sizeTestDir, { minFileSize: 10, includeCleanFiles: true });
+      assert.strictEqual(resMin.totalFiles, 2);
+
+      // Filter: maxFileSize: 100 (should exclude large.txt)
+      const resMax = scanner.scanDirectorySync(sizeTestDir, { maxFileSize: 100, includeCleanFiles: true });
+      assert.strictEqual(resMax.totalFiles, 2);
+
+      // Filter: between 10 and 100 bytes (should only include medium.txt)
+      const resBoth = scanner.scanDirectorySync(sizeTestDir, { minFileSize: 10, maxFileSize: 100 });
+      assert.strictEqual(resBoth.totalFiles, 1);
+      assert.strictEqual(resBoth.matchedFiles, 1);
+      assert.strictEqual(resBoth.results[0].filePath, join(sizeTestDir, "medium.txt"));
+
+      // Async scanDirectory with size filters
+      const resAsync = await scanner.scanDirectory(sizeTestDir, { minFileSize: 10, maxFileSize: 100 });
+      assert.strictEqual(resAsync.totalFiles, 1);
+      assert.strictEqual(resAsync.matchedFiles, 1);
+    } finally {
+      await rm(sizeTestDir, { recursive: true, force: true });
+    }
+  });
+
   await t.test("scanDirectory - throws on invalid directory", async () => {
     assert.throws(() => {
       scanner.scanDirectorySync(join(tempDir, "non-existent-dir"));

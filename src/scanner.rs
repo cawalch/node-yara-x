@@ -7,7 +7,7 @@ use crate::batch::{
   collect_directory_files, convert_batch_result, execute_batch_scan, BatchScanOptions,
   BatchScanResult, BatchScanTarget, BatchScanTask, PathFilter,
 };
-use crate::binary::{extract_binary_scan_results, BinaryScanResult, BinaryScanTask};
+use crate::binary::{extract_binary_scan_results, BinaryScanResult, BinaryScanTask, RuleInfo};
 use crate::compiler::{
   add_source_to_compiler_tolerant, apply_compiler_options, apply_stored_compiler_options,
   collect_ignored_rules, replay_sources_to_wasm, stored_options_from, StoredCompilerOptions,
@@ -84,6 +84,8 @@ pub struct YaraX {
   pub(crate) timeout_ms: Option<u32>,
   /// Match context size
   pub(crate) match_context_size: Option<usize>,
+  /// Maximum number of bytes to scan
+  pub(crate) max_scan_size: Option<usize>,
 }
 
 impl YaraX {
@@ -105,6 +107,7 @@ impl YaraX {
       fast_scan: None,
       timeout_ms: None,
       match_context_size: None,
+      max_scan_size: None,
     }
   }
 
@@ -169,6 +172,7 @@ impl YaraX {
       fast_scan: None,
       timeout_ms: None,
       match_context_size: None,
+      max_scan_size: None,
     })
   }
 
@@ -334,6 +338,10 @@ impl YaraX {
 
       if let Some(match_context_size) = self.match_context_size {
         scanner.match_context_size(match_context_size);
+      }
+
+      if let Some(max_scan_size) = self.max_scan_size {
+        scanner.max_scan_size(max_scan_size);
       }
 
       *cached = Some(scanner);
@@ -546,6 +554,54 @@ impl YaraX {
   pub fn set_match_context_size(&mut self, size: u32) {
     self.match_context_size = Some(size as usize);
     self.invalidate_scanner_cache();
+  }
+
+  /// Sets the maximum number of bytes to scan.
+  ///
+  /// Any data or file exceeding this size will only have its initial
+  /// bytes scanned up to this limit. Passing 0 or a negative number clears the limit.
+  ///
+  /// # Arguments
+  ///
+  /// * `max_bytes` - Maximum bytes to scan
+  #[napi]
+  pub fn set_max_scan_size(&mut self, max_bytes: i64) {
+    self.max_scan_size = if max_bytes > 0 {
+      Some(max_bytes as usize)
+    } else {
+      None
+    };
+    self.invalidate_scanner_cache();
+  }
+
+  /// Total number of compiled rules.
+  #[napi(getter)]
+  pub fn rule_count(&self) -> u32 {
+    self.rules.iter().len() as u32
+  }
+
+  /// Returns the names of all modules imported by the compiled rules (e.g. "pe", "elf", "hash").
+  #[napi]
+  pub fn get_imports(&self) -> Vec<String> {
+    self.rules.imports().map(str::to_string).collect()
+  }
+
+  /// Returns metadata for all compiled rules including identifier, namespace, tags, and patterns.
+  #[napi]
+  pub fn get_rules(&self) -> Vec<RuleInfo> {
+    self
+      .rules
+      .iter()
+      .map(|rule| RuleInfo {
+        identifier: rule.identifier().to_string(),
+        namespace: rule.namespace().to_string(),
+        tags: rule.tags().map(|t| t.identifier().to_string()).collect(),
+        patterns: rule
+          .patterns()
+          .map(|p| p.identifier().to_string())
+          .collect(),
+      })
+      .collect()
   }
 
   /// Helper to execute a synchronous scan closure with scanner caching and variable application.
@@ -962,6 +1018,7 @@ impl YaraX {
       use_mmap: if include_mmap { self.use_mmap } else { None },
       timeout_ms: self.timeout_ms,
       match_context_size: self.match_context_size,
+      max_scan_size: self.max_scan_size,
     }
   }
 
@@ -1194,6 +1251,8 @@ impl YaraX {
       &dir_path,
       batch_opts.max_depth,
       batch_opts.follow_symlinks,
+      batch_opts.min_file_size,
+      batch_opts.max_file_size,
       &filter,
     )?;
 

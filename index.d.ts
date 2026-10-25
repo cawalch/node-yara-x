@@ -35,6 +35,13 @@ export declare class BinaryMatchView {
   getPattern(index: number): string | null
   /** Slices the matched byte slice directly out of the source buffer. */
   getSlice(index: number, source: Buffer): Buffer | null
+  /**
+   * Lazily materializes all binary match records into the standard `RuleMatch` object graph.
+   *
+   * If `source` buffer is provided, the matched data bytes are sliced as strings into `MatchData.data`.
+   * Otherwise, `MatchData.data` is an empty string.
+   */
+  toRuleMatches(source?: Buffer): Array<RuleMatch>
 }
 
 /**
@@ -106,6 +113,23 @@ export declare class YaraX {
   setTimeout(timeoutMs: number): void
   /** Sets the match context size. */
   setMatchContextSize(size: number): void
+  /**
+   * Sets the maximum number of bytes to scan.
+   *
+   * Any data or file exceeding this size will only have its initial
+   * bytes scanned up to this limit. Passing 0 or a negative number clears the limit.
+   *
+   * # Arguments
+   *
+   * * `max_bytes` - Maximum bytes to scan
+   */
+  setMaxScanSize(maxBytes: number): void
+  /** Total number of compiled rules. */
+  get ruleCount(): number
+  /** Returns the names of all modules imported by the compiled rules (e.g. "pe", "elf", "hash"). */
+  getImports(): Array<string>
+  /** Returns metadata for all compiled rules including identifier, namespace, tags, and patterns. */
+  getRules(): Array<RuleInfo>
   /**
    * Scans the provided data using the compiled YARA rules.
    *
@@ -459,6 +483,10 @@ export interface BatchScanOptions {
   includeCleanFiles?: boolean
   /** If true, performs fast boolean match check instead of building full match details. */
   onlyMatches?: boolean
+  /** Minimum file size in bytes to include in directory scans. */
+  minFileSize?: number
+  /** Maximum file size in bytes to include in directory scans. */
+  maxFileSize?: number
 }
 
 /** Aggregated result of a batch scan. */
