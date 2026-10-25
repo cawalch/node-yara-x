@@ -25,23 +25,23 @@ importers:
         version: 26.6.5
     optionalDependencies:
       '@litko/yara-x-darwin-arm64':
-        specifier: 0.7.5
-        version: 0.7.5
+        specifier: 0.10.0
+        version: 0.10.0
       '@litko/yara-x-darwin-x64':
-        specifier: 0.7.5
-        version: 0.7.5
+        specifier: 0.10.0
+        version: 0.10.0
       '@litko/yara-x-linux-arm64-gnu':
-        specifier: 0.7.5
-        version: 0.7.5
+        specifier: 0.10.0
+        version: 0.10.0
       '@litko/yara-x-linux-x64-gnu':
-        specifier: 0.7.5
-        version: 0.7.5
+        specifier: 0.10.0
+        version: 0.10.0
       '@litko/yara-x-win32-arm64-msvc':
-        specifier: 0.7.5
-        version: 0.7.5
+        specifier: 0.10.0
+        version: 0.10.0
       '@litko/yara-x-win32-x64-msvc':
-        specifier: 0.7.5
-        version: 0.7.5
+        specifier: 0.10.0
+        version: 0.10.0
 
 packages:
 
@@ -206,40 +206,40 @@ packages:
       '@types/node':
         optional: true
 
-  '@litko/yara-x-darwin-arm64@0.7.5':
-    resolution: {integrity: sha512-Em0FddE+/BErYy98fPyTM4OhmDcw6woP1DkjT7oBX8cS7sx+cXhNSUQ1wyLT9aasy4dHGZtzO3+aDYkp843sGA==}
+  '@litko/yara-x-darwin-arm64@0.10.0':
+    resolution: {integrity: sha512-KOsfQd4KwRxJle4oo29Ub33cr1BwV9EyF+s1XYh4Op1oKmPyOmwx+suK6sYHBupYQxDg+nqcbDSsFjwZNfZVRQ==}
     engines: {node: '>= 20'}
     cpu: [arm64]
     os: [darwin]
 
-  '@litko/yara-x-darwin-x64@0.7.5':
-    resolution: {integrity: sha512-6zKpsI15GTIonZHXCu3Mv2NFVPW5hLnrV/hMYhHFhb238NACvvvy6zpYHhJ0LJQuYbgGMqHYvlp5ifDS0071tQ==}
+  '@litko/yara-x-darwin-x64@0.10.0':
+    resolution: {integrity: sha512-h1eljGqCXsXjwlHt/yhjilQNF7slrOT2vLwSRvELRU1WqNRJPtr1A1gvg5NKxTDqXU3J0Hs7vREwS0UApN8Dxw==}
     engines: {node: '>= 20'}
     cpu: [x64]
     os: [darwin]
 
-  '@litko/yara-x-linux-arm64-gnu@0.7.5':
-    resolution: {integrity: sha512-qb71P6yJrdhDmWL5ayepkpdo7QpS9n3pnf/0flS65SA+Bq4RNtlDJcg4zZZ3xD0EMXlz2GY2fXgdKRiKxZGXWg==}
+  '@litko/yara-x-linux-arm64-gnu@0.10.0':
+    resolution: {integrity: sha512-fzfOGfxWAjfxnIrDn+EhK2nd4f83/+XLg9h2znLgr6PbB8Y2BCL75zYgexACKHMtR7p58JakwOJDbgLcu5SCqw==}
     engines: {node: '>= 20'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@litko/yara-x-linux-x64-gnu@0.7.5':
-    resolution: {integrity: sha512-w5BPmkBdGYsqzoIzm0m33K/IS2TjwzWuhYo7Lh1x/GvnatJLnvytrt2p++aG3iPRb6DYYs28V0EmHZfhtg5iIA==}
+  '@litko/yara-x-linux-x64-gnu@0.10.0':
+    resolution: {integrity: sha512-NXEmkbgtlpCdWEcTHCW0jo1gVJa520SkWBvGabNf3c3WoSSkRjhol3SGhlMpStHBY2sjd4cnX1fszI1TYHjhoQ==}
     engines: {node: '>= 20'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@litko/yara-x-win32-arm64-msvc@0.7.5':
-    resolution: {integrity: sha512-IE/CnmYMSsr16IAydLlLn70SMzLhWdQ/tZtHDUoXh06vjel1lVtRIzHr2ee+TyN7KATx242QGhi0G7CA4cgVCw==}
+  '@litko/yara-x-win32-arm64-msvc@0.10.0':
+    resolution: {integrity: sha512-1B23BYl9CFSdOWQ4I8MlWSpdZBoVit5aqrypNYb37hPYr9M2EJZJbC6YzStoFhOgP5bw4MFkSl+ivBRt6X5TwA==}
     engines: {node: '>= 20'}
     cpu: [arm64]
     os: [win32]
 
-  '@litko/yara-x-win32-x64-msvc@0.7.5':
-    resolution: {integrity: sha512-qItpwt7jwwrScFhaAZF+ygvFcpirbj4PB3mblgtrZ6WFpsePfYPMF5QsFChq2aWgexcp0bOoI4XlFBvi8sowlw==}
+  '@litko/yara-x-win32-x64-msvc@0.10.0':
+    resolution: {integrity: sha512-fOLg3wUwtB+2z5ecFc0/9E7njTSp9KciVp6eqvML0fM5fCpBTEh8mAIOQlwNAAyjbHfRXV0QUSHXg2yYLutmHw==}
     engines: {node: '>= 20'}
     cpu: [x64]
     os: [win32]
@@ -931,22 +931,22 @@ snapshots:
     optionalDependencies:
       '@types/node': 26.6.5
 
-  '@litko/yara-x-darwin-arm64@0.7.5':
+  '@litko/yara-x-darwin-arm64@0.10.0':
     optional: true
 
-  '@litko/yara-x-darwin-x64@0.7.5':
+  '@litko/yara-x-darwin-x64@0.10.0':
     optional: true
 
-  '@litko/yara-x-linux-arm64-gnu@0.7.5':
+  '@litko/yara-x-linux-arm64-gnu@0.10.0':
     optional: true
 
-  '@litko/yara-x-linux-x64-gnu@0.7.5':
+  '@litko/yara-x-linux-x64-gnu@0.10.0':
     optional: true
 
-  '@litko/yara-x-win32-arm64-msvc@0.7.5':
+  '@litko/yara-x-win32-arm64-msvc@0.10.0':
     optional: true
 
-  '@litko/yara-x-win32-x64-msvc@0.7.5':
+  '@litko/yara-x-win32-x64-msvc@0.10.0':
     optional: true
 
   '@napi-rs/cli@3.10.8(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@26.6.5)':
