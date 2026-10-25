@@ -83,7 +83,7 @@ jobs:
           toolchain: stable
       - name: Cache cargo
         if: steps.release.outputs.skip != 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: prepare-release-debug
           cache-on-failure: false
@@ -107,7 +107,7 @@ jobs:
           pnpm test
       - name: Setup Keyless Signing (Gitsign)
         if: steps.release.outputs.skip != 'true'
-        uses: chainguard-dev/actions/setup-gitsign@3403a578b543fd3f0debdaef9dd989ae54e3fcef # v1.6.41
+        uses: chainguard-dev/actions/setup-gitsign@53668650c25af6e8864f1d1ddaa69ed4db4cdf09 # v1.6.42
       - name: Open release pull request
         if: steps.release.outputs.skip != 'true'
         env:
