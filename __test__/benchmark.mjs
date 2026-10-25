@@ -2,8 +2,11 @@ import yarax from "../index.js";
 import { readFileSync } from "fs";
 import { mkdtemp, rm, writeFile, mkdir } from "fs/promises";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 import { performance } from "perf_hooks";
+
+const __dirname = typeof import.meta.dirname !== "undefined" ? import.meta.dirname : dirname(fileURLToPath(import.meta.url));
 
 async function runBenchmark(name, iterations, fn) {
   console.log(`\nRunning benchmark: ${name}`);
@@ -139,33 +142,33 @@ const multipleRules = `
 
 console.log("=== YARA-X Scanner Benchmarks ===");
 
-runBenchmark("Scanner creation with simple rule", 100, () => {
+await runBenchmark("Scanner creation with simple rule", 100, () => {
   yarax.compile(simpleRule);
 });
 
-runBenchmark("Scanner creation with complex rule", 100, () => {
+await runBenchmark("Scanner creation with complex rule", 100, () => {
   yarax.compile(complexRule);
 });
 
-runBenchmark("Scanner creation with regex rule", 100, () => {
+await runBenchmark("Scanner creation with regex rule", 100, () => {
   yarax.compile(regexRule);
 });
 
-runBenchmark("Scanner creation with multiple rules", 100, () => {
+await runBenchmark("Scanner creation with multiple rules", 100, () => {
   yarax.compile(multipleRules);
 });
 
 const simpleScanner = yarax.compile(simpleRule);
 
-runBenchmark("Scanning small data (simple rule)", 1000, () => {
+await runBenchmark("Scanning small data (simple rule)", 1000, () => {
   simpleScanner.scan(smallData);
 });
 
-runBenchmark("Scanning medium data (simple rule)", 100, () => {
+await runBenchmark("Scanning medium data (simple rule)", 100, () => {
   simpleScanner.scan(mediumData);
 });
 
-runBenchmark("Scanning large data (simple rule)", 10, () => {
+await runBenchmark("Scanning large data (simple rule)", 10, () => {
   simpleScanner.scan(largeData);
 });
 
@@ -173,15 +176,15 @@ const complexScanner = yarax.compile(complexRule);
 const regexScanner = yarax.compile(regexRule);
 const multipleScanner = yarax.compile(multipleRules);
 
-runBenchmark("Scanning medium data (complex rule)", 100, () => {
+await runBenchmark("Scanning medium data (complex rule)", 100, () => {
   complexScanner.scan(mediumData);
 });
 
-runBenchmark("Scanning medium data (regex rule)", 100, () => {
+await runBenchmark("Scanning medium data (regex rule)", 100, () => {
   regexScanner.scan(mediumData);
 });
 
-runBenchmark("Scanning medium data (multiple rules)", 100, () => {
+await runBenchmark("Scanning medium data (multiple rules)", 100, () => {
   multipleScanner.scan(mediumData);
 });
 
@@ -200,11 +203,11 @@ const variableScanner = yarax.compile(variableRule, {
   defineVariables: { test_var: "100" },
 });
 
-runBenchmark("Scanning with variables", 1000, () => {
+await runBenchmark("Scanning with variables", 1000, () => {
   variableScanner.scan(smallData);
 });
 
-runBenchmark("Scanning with variables (override at scan time)", 1000, () => {
+await runBenchmark("Scanning with variables (override at scan time)", 1000, () => {
   variableScanner.scan(smallData, { test_var: "75" });
 });
 
@@ -212,27 +215,27 @@ console.log("\n=== Boolean Match Check Benchmarks (scan vs isMatch) ===");
 
 const cleanSmallData = Buffer.from("Clean test data without any signatures or suspicious patterns");
 
-runBenchmark("scan: small data (matching)", 1000, () => {
+await runBenchmark("scan: small data (matching)", 1000, () => {
   simpleScanner.scan(smallData);
 });
 
-runBenchmark("isMatch: small data (matching - fast path)", 1000, () => {
+await runBenchmark("isMatch: small data (matching - fast path)", 1000, () => {
   simpleScanner.isMatch(smallData);
 });
 
-runBenchmark("scan: small data (non-matching)", 1000, () => {
+await runBenchmark("scan: small data (non-matching)", 1000, () => {
   simpleScanner.scan(cleanSmallData);
 });
 
-runBenchmark("isMatch: small data (non-matching - fast path)", 1000, () => {
+await runBenchmark("isMatch: small data (non-matching - fast path)", 1000, () => {
   simpleScanner.isMatch(cleanSmallData);
 });
 
-runBenchmark("scan: medium data (matching)", 100, () => {
+await runBenchmark("scan: medium data (matching)", 100, () => {
   simpleScanner.scan(mediumData);
 });
 
-runBenchmark("isMatch: medium data (matching - fast path)", 100, () => {
+await runBenchmark("isMatch: medium data (matching - fast path)", 100, () => {
   simpleScanner.isMatch(mediumData);
 });
 
@@ -247,26 +250,26 @@ const multiMatchRule = `
 const multiScanner = yarax.compile(multiMatchRule);
 const repetitiveData = Buffer.from("test ".repeat(1000));
 
-runBenchmark("scan: repetitive data with 1000 matches (full V8 object construction)", 500, () => {
+await runBenchmark("scan: repetitive data with 1000 matches (full V8 object construction)", 500, () => {
   multiScanner.scan(repetitiveData);
 });
 
-runBenchmark("scanBinary: repetitive data with 1000 matches (flat binary match ABI)", 500, () => {
+await runBenchmark("scanBinary: repetitive data with 1000 matches (flat binary match ABI)", 500, () => {
   multiScanner.scanBinary(repetitiveData);
 });
 
-runBenchmark("isMatch: repetitive data with 1000 matches (fast-path boolean check)", 500, () => {
+await runBenchmark("isMatch: repetitive data with 1000 matches (fast-path boolean check)", 500, () => {
   multiScanner.isMatch(repetitiveData);
 });
 
 console.log("\n=== fastScan Mode Benchmarks ===");
 
-runBenchmark("scan: 1000 matches (standard full scan)", 500, () => {
+await runBenchmark("scan: 1000 matches (standard full scan)", 500, () => {
   multiScanner.scan(repetitiveData);
 });
 
 multiScanner.setFastScan(true);
-runBenchmark("scan: 1000 matches (fastScan enabled - single match)", 500, () => {
+await runBenchmark("scan: 1000 matches (fastScan enabled - single match)", 500, () => {
   multiScanner.scan(repetitiveData);
 });
 multiScanner.setFastScan(false);

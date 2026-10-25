@@ -105,11 +105,13 @@ impl BinaryMatchView {
     let offset = (index as usize).checked_mul(24)?;
     let slice = self.buffer.as_ref().get(offset..offset + 24)?;
     Some(BinaryMatchRecord {
-      rule_id: u32::from_le_bytes(slice[0..4].try_into().ok()?),
-      pattern_id: u32::from_le_bytes(slice[4..8].try_into().ok()?),
-      offset: u64::from_le_bytes(slice[8..16].try_into().ok()?),
-      length: u32::from_le_bytes(slice[16..20].try_into().ok()?),
-      flags: u32::from_le_bytes(slice[20..24].try_into().ok()?),
+      rule_id: u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]),
+      pattern_id: u32::from_le_bytes([slice[4], slice[5], slice[6], slice[7]]),
+      offset: u64::from_le_bytes([
+        slice[8], slice[9], slice[10], slice[11], slice[12], slice[13], slice[14], slice[15],
+      ]),
+      length: u32::from_le_bytes([slice[16], slice[17], slice[18], slice[19]]),
+      flags: u32::from_le_bytes([slice[20], slice[21], slice[22], slice[23]]),
     })
   }
 
@@ -146,17 +148,16 @@ impl BinaryMatchView {
   /// Gets the rule metadata for the match record at `index`.
   #[napi]
   pub fn get_rule(&self, index: u32) -> Option<RuleInfo> {
-    let rule_id = self.get_rule_id(index)? as usize;
-    self.catalog.rules.get(rule_id).cloned()
+    let record = self.read_record(index)?;
+    self.catalog.rules.get(record.rule_id as usize).cloned()
   }
 
   /// Gets the pattern identifier for the match record at `index`.
   #[napi]
   pub fn get_pattern(&self, index: u32) -> Option<String> {
-    let rule_id = self.get_rule_id(index)? as usize;
-    let pattern_id = self.get_pattern_id(index)? as usize;
-    let rule = self.catalog.rules.get(rule_id)?;
-    rule.patterns.get(pattern_id).cloned()
+    let record = self.read_record(index)?;
+    let rule = self.catalog.rules.get(record.rule_id as usize)?;
+    rule.patterns.get(record.pattern_id as usize).cloned()
   }
 
   /// Slices the matched byte slice directly out of the source buffer.
@@ -207,9 +208,9 @@ pub fn extract_binary_scan_results(
     });
   }
 
-  let mut records: Vec<BinaryMatchRecord> = Vec::with_capacity(total_matches);
+  let mut bytes = Vec::with_capacity(total_matches * 24);
 
-  // Second pass: pack binary records
+  // Second pass: pack binary records directly into byte buffer
   for (rule_id, rule) in results.matching_rules().enumerate() {
     let mut pattern_idx = 0u32;
     for pattern in rule.patterns() {
@@ -220,30 +221,19 @@ pub fn extract_binary_scan_results(
 
       for match_item in matches {
         let range = match_item.range();
-        records.push(BinaryMatchRecord {
-          rule_id: rule_id as u32,
-          pattern_id: pattern_idx,
-          offset: range.start as u64,
-          length: (range.end - range.start) as u32,
-          flags: 0,
-        });
+        bytes.extend_from_slice(&(rule_id as u32).to_le_bytes());
+        bytes.extend_from_slice(&pattern_idx.to_le_bytes());
+        bytes.extend_from_slice(&(range.start as u64).to_le_bytes());
+        bytes.extend_from_slice(&((range.end - range.start) as u32).to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
       }
       pattern_idx += 1;
     }
   }
 
-  let mut bytes = Vec::with_capacity(records.len() * 24);
-  for r in &records {
-    bytes.extend_from_slice(&r.rule_id.to_le_bytes());
-    bytes.extend_from_slice(&r.pattern_id.to_le_bytes());
-    bytes.extend_from_slice(&r.offset.to_le_bytes());
-    bytes.extend_from_slice(&r.length.to_le_bytes());
-    bytes.extend_from_slice(&r.flags.to_le_bytes());
-  }
-
   (
     bytes,
-    records.len() as u32,
+    total_matches as u32,
     BinaryScanCatalog {
       rules: catalog_rules,
     },

@@ -205,7 +205,7 @@ pub fn collect_ignored_rules(compiler: &Compiler) -> Vec<IgnoredRule> {
 /// errors so callers that tolerate compilation failures can surface them
 /// instead of silently dropping them.
 pub fn uncovered_compiler_errors(compiler: &Compiler) -> Vec<CompilerError> {
-  let covered: Vec<*const CompileError> = compiler
+  let covered: std::collections::HashSet<*const CompileError> = compiler
     .ignored_rules()
     .filter_map(|(_, reason)| match reason {
       IgnoredRuleReason::CompileError(err) => Some(std::ptr::from_ref(err)),
