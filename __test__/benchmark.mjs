@@ -2,8 +2,11 @@ import yarax from "../index.js";
 import { readFileSync } from "fs";
 import { mkdtemp, rm, writeFile, mkdir } from "fs/promises";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 import { performance } from "perf_hooks";
+
+const __dirname = typeof import.meta.dirname !== "undefined" ? import.meta.dirname : dirname(fileURLToPath(import.meta.url));
 
 async function runBenchmark(name, iterations, fn) {
   console.log(`\nRunning benchmark: ${name}`);

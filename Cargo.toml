@@ -29,7 +29,6 @@ strip = "symbols"
 codegen-units = 1
 
 # Size-optimize the compile-time JIT compiler and parser machinery
-# while keeping the scanning hot path (yara-x pattern matching + napi) at O3.
 [profile.release.package.wasmtime]
 opt-level = "z"
 [profile.release.package.wasmtime-environ]

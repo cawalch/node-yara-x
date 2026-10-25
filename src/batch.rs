@@ -180,9 +180,13 @@ pub fn collect_directory_files(
   for entry in walker {
     match entry {
       Ok(e) => {
-        let p = e.path();
-        if p.is_file() && filter.is_match(p) {
-          files.push(p.to_string_lossy().into_owned());
+        let p = e.into_path();
+        if p.is_file() && filter.is_match(&p) {
+          files.push(
+            p.into_os_string()
+              .into_string()
+              .unwrap_or_else(|os| os.to_string_lossy().into_owned()),
+          );
         }
       }
       Err(err) => {
@@ -216,40 +220,41 @@ pub fn execute_batch_scan(
   let only_matches = batch_options.only_matches.unwrap_or(false);
   let include_clean_files = batch_options.include_clean_files.unwrap_or(false);
 
-  let scan_one = |file_path: &str| -> std::result::Result<BatchFileMatchData, BatchFileError> {
+  let scan_one = |file_path: String| -> std::result::Result<BatchFileMatchData, BatchFileError> {
     if only_matches {
-      match base_task.is_file_match(file_path) {
+      match base_task.is_file_match(&file_path) {
         Ok(is_match) => Ok(BatchFileMatchData {
-          file_path: file_path.to_string(),
+          file_path,
           is_match,
           matches: Vec::new(),
         }),
         Err(err) => Err(BatchFileError {
-          file_path: file_path.to_string(),
+          file_path,
           error: err.to_string(),
         }),
       }
     } else {
-      match base_task.scan_file_to_data(file_path) {
+      match base_task.scan_file_to_data(&file_path) {
         Ok(matches) => {
           let is_match = !matches.is_empty();
           Ok(BatchFileMatchData {
-            file_path: file_path.to_string(),
+            file_path,
             is_match,
             matches,
           })
         }
         Err(err) => Err(BatchFileError {
-          file_path: file_path.to_string(),
+          file_path,
           error: err.to_string(),
         }),
       }
     }
   };
 
-  let scan_all = || -> Vec<std::result::Result<BatchFileMatchData, BatchFileError>> {
-    file_paths.par_iter().map(|p| scan_one(p)).collect()
-  };
+  let scan_all =
+    |paths: Vec<String>| -> Vec<std::result::Result<BatchFileMatchData, BatchFileError>> {
+      paths.into_par_iter().map(scan_one).collect()
+    };
 
   let raw_results = if let Some(concurrency) = batch_options.concurrency {
     if concurrency > 0 {
@@ -262,15 +267,19 @@ pub fn execute_batch_scan(
             format!("Failed to build Rayon thread pool: {e}"),
           )
         })?;
-      pool.install(scan_all)
+      pool.install(|| scan_all(file_paths))
     } else {
-      scan_all()
+      scan_all(file_paths)
     }
   } else {
-    scan_all()
+    scan_all(file_paths)
   };
 
-  let mut results = Vec::new();
+  let mut results = Vec::with_capacity(if include_clean_files {
+    total_files as usize
+  } else {
+    0
+  });
   let mut errors = Vec::new();
   let mut scanned_files = 0u32;
   let mut matched_files = 0u32;

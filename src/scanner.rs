@@ -191,7 +191,7 @@ impl YaraX {
         continue;
       }
 
-      let pattern_id = pattern.identifier();
+      let pattern_id_str = pattern.identifier().to_string();
 
       for match_item in pattern_matches {
         let range = match_item.range();
@@ -216,7 +216,7 @@ impl YaraX {
           offset: offset as i64,
           length: length as i64,
           data: matched_data,
-          identifier: pattern_id.to_string(),
+          identifier: pattern_id_str.clone(),
           context_data,
           context_match_offset,
         });
