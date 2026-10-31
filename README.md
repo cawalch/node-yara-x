@@ -356,7 +356,7 @@ console.log(`Matches from restored rules: ${matches.length}`);
 Restored rules behave exactly like freshly compiled ones. Conditions still have to be recompiled for the local platform when the blob is loaded: measured at ~1.7 ms per process for the two-rule set in [`__test__/performance-regression.mjs`](./__test__/performance-regression.mjs).
 
 > [!NOTE]
-> The producer and consumer must run the same YARA-X version (`1.21.x`) with the same module feature set. Serialized blobs contain compiled bytecode and pattern tables, and they do not obfuscate pattern strings.
+> The producer and consumer must run the same YARA-X version (the one this package builds against is pinned in [`Cargo.lock`](./Cargo.lock)) with the same module feature set. Serialized blobs contain compiled bytecode and pattern tables, and they do not obfuscate pattern strings.
 
 ## Validate rules
 
