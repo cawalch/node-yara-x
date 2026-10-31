@@ -16,6 +16,8 @@ walkdir = "2.5.0"
 yara-x = { version = "1.21.0", default-features = false, features = [
   "console-module", "pe-module", "elf-module", "macho-module", "math-module",
   "hash-module", "string-module", "time-module", "dotnet-module",
+  # ~383 KB in total; `vt-module` is omitted because it costs ~1.2 MB alone.
+  "zip-module", "lnk-module", "dex-module", "crx-module", "cuckoo-module",
   "constant-folding", "exact-atoms", "fast-regexp",
 ] }
 
