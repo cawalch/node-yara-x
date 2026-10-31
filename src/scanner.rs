@@ -20,7 +20,9 @@ use crate::types::{
 use crate::variables::{
   convert_variables_to_map, get_compiler_errors, get_compiler_warnings, VariableHandler,
 };
+use napi::bindgen_prelude::Unknown;
 use napi::bindgen_prelude::{AsyncTask, Buffer, JsObjectValue, Object};
+use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::{Env, Error, Result, Status};
 use napi_derive::napi;
 use std::cell::RefCell;
@@ -86,6 +88,11 @@ pub struct YaraX {
   pub(crate) match_context_size: Option<usize>,
   /// Maximum number of bytes to scan
   pub(crate) max_scan_size: Option<usize>,
+  /// Sink for messages emitted by rules through the `console` module. Held
+  /// behind `Arc` because `ThreadsafeFunction` is not `Clone` and the scanner
+  /// closure must own its handle for the `'static` scanner.
+  pub(crate) console_log:
+    Option<std::sync::Arc<ThreadsafeFunction<String, Unknown<'static>, String, Status, false>>>,
 }
 
 impl YaraX {
@@ -108,6 +115,7 @@ impl YaraX {
       timeout_ms: None,
       match_context_size: None,
       max_scan_size: None,
+      console_log: None,
     }
   }
 
@@ -173,6 +181,7 @@ impl YaraX {
       timeout_ms: None,
       match_context_size: None,
       max_scan_size: None,
+      console_log: None,
     })
   }
 
@@ -343,6 +352,13 @@ impl YaraX {
 
       if let Some(max_scan_size) = self.max_scan_size {
         scanner.max_scan_size(max_scan_size);
+      }
+
+      if let Some(console_log) = &self.console_log {
+        let console_log = std::sync::Arc::clone(console_log);
+        scanner.console_log(move |message: String| {
+          let _ = console_log.call(message, ThreadsafeFunctionCallMode::NonBlocking);
+        });
       }
 
       *cached = Some(scanner);
@@ -554,6 +570,47 @@ impl YaraX {
   #[napi]
   pub fn set_match_context_size(&mut self, size: u32) {
     self.match_context_size = Some(size as usize);
+    self.invalidate_scanner_cache();
+  }
+
+  /// Returns the slowest rules seen by this scanner, fastest to slowest
+  /// excluded: only rules that accumulated more than 100 ms are reported, and
+  /// timings cover synchronous scans since the last `clearProfilingData()`.
+  #[napi]
+  pub fn get_slowest_rules(&self, n: u32) -> Result<Vec<crate::types::RuleProfile>> {
+    let scanner = self.get_or_create_scanner()?;
+
+    Ok(
+      scanner
+        .slowest_rules(n as usize)
+        .into_iter()
+        .map(|data| crate::types::RuleProfile {
+          namespace: data.namespace.to_string(),
+          identifier: data.rule.to_string(),
+          pattern_matching_ms: data.pattern_matching_time.as_secs_f64() * 1000.0,
+          condition_ms: data.condition_exec_time.as_secs_f64() * 1000.0,
+        })
+        .collect(),
+    )
+  }
+
+  /// Discards the timing data behind `getSlowestRules()`.
+  #[napi]
+  pub fn clear_profiling_data(&self) -> Result<()> {
+    self.get_or_create_scanner()?.clear_profiling_data();
+    Ok(())
+  }
+
+  /// Routes messages logged by rules through the `console` module to a callback.
+  ///
+  /// Messages arrive on the Node.js event loop, so a synchronous scan returns
+  /// before the callback runs. Pass nothing to discard rule output again.
+  #[napi]
+  pub fn set_console_log(
+    &mut self,
+    callback: Option<ThreadsafeFunction<String, Unknown<'static>, String, Status, false>>,
+  ) {
+    self.console_log = callback.map(std::sync::Arc::new);
     self.invalidate_scanner_cache();
   }
 

@@ -18,7 +18,7 @@ yara-x = { version = "1.21.0", default-features = false, features = [
   "hash-module", "string-module", "time-module", "dotnet-module",
   # ~383 KB in total; `vt-module` is omitted because it costs ~1.2 MB alone.
   "zip-module", "lnk-module", "dex-module", "crx-module", "cuckoo-module",
-  "constant-folding", "exact-atoms", "fast-regexp",
+  "constant-folding", "exact-atoms", "fast-regexp", "rules-profiling",
 ] }
 
 [build-dependencies]
