@@ -223,6 +223,7 @@ impl YaraX {
           identifier: pattern_id_str.clone(),
           context_data,
           context_match_offset,
+          xor_key: match_item.xor_key(),
         });
       }
     }

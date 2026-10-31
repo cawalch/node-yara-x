@@ -29,6 +29,12 @@ export declare class BinaryMatchView {
   getLength(index: number): number | null
   /** Gets the reserved flags for the match record at `index`. */
   getFlags(index: number): number | null
+  /**
+   * Gets the XOR key for the match record at `index`, for patterns compiled
+   * with an `xor` modifier. Returns `null` for plain matches and out-of-range
+   * indexes.
+   */
+  getXorKey(index: number): number | null
   /** Gets the rule metadata for the match record at `index`. */
   getRule(index: number): RuleInfo | null
   /** Gets the pattern identifier for the match record at `index`. */
@@ -773,6 +779,11 @@ export interface MatchData {
   contextData?: string
   /** The start offset of the actual match within the context data. */
   contextMatchOffset?: number
+  /**
+   * The XOR key that produced this match, when the pattern was compiled with an
+   * `xor` modifier. Absent for plain matches.
+   */
+  xorKey?: number
 }
 
 /** Metadata for a rule that matched in a binary scan. */

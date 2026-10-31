@@ -2855,3 +2855,51 @@ rule test_1 {
 });
 
 
+
+describe("XOR key reporting", () => {
+  const xorSource = `
+    rule keyed_pattern {
+      strings:
+        $keyed = "malware" xor(0x01-0xff)
+      condition:
+        $keyed
+    }
+
+    rule plain_pattern {
+      strings:
+        $plain = "malware"
+      condition:
+        $plain
+    }
+  `;
+
+  const xorEncode = (text, key) =>
+    Buffer.from(Buffer.from(text, "latin1").map((byte) => byte ^ key));
+
+  it("should report the XOR key that produced a match", () => {
+    const scanner = yarax.compile(xorSource);
+    const matches = scanner.scan(xorEncode("malware", 0x42));
+    const keyed = matches.find((match) => match.ruleIdentifier === "keyed_pattern");
+
+    ok(keyed, "expected the xor pattern to match");
+    strictEqual(keyed.matches[0].xorKey, 0x42);
+  });
+
+  it("should not set xorKey for plain patterns", () => {
+    const scanner = yarax.compile(xorSource);
+    const matches = scanner.scan(Buffer.from("malware"));
+    const plain = matches.find((match) => match.ruleIdentifier === "plain_pattern");
+
+    ok(plain, "expected the plain pattern to match");
+    strictEqual(plain.matches[0].xorKey, undefined);
+  });
+
+  it("should report xorKey from async scans", async () => {
+    const scanner = yarax.compile(xorSource);
+    const matches = await scanner.scanAsync(xorEncode("malware", 0x7f));
+    const keyed = matches.find((match) => match.ruleIdentifier === "keyed_pattern");
+
+    ok(keyed, "expected the xor pattern to match");
+    strictEqual(keyed.matches[0].xorKey, 0x7f);
+  });
+});

@@ -283,18 +283,31 @@ const scanner = compile(`
 const view = scanner.scanBinary(sampleBuffer);
 
 console.log(`Total match occurrences: ${view.matchCount}`);
-console.log(`Matched rules: ${view.ruleNames.join(", ")}`);
-console.log(`Matched patterns: ${view.patternNames.join(", ")}`);
+console.log(
+  `Matched rules: ${view.catalog.rules.map((rule) => rule.identifier).join(", ")}`,
+);
 
 // Fast O(1) indexed access to raw binary match records
 for (let i = 0; i < view.matchCount; i++) {
-  const record = view.getRecord(i);
-  console.log(`Match ${i}: rule ${view.ruleNames[record.ruleIndex]}, offset ${record.offset}, length ${record.length}`);
+  console.log(
+    `Match ${i}: ${view.getRule(i).identifier} / ${view.getPattern(i)} ` +
+      `at offset ${view.getOffset(i)}, length ${view.getLength(i)}`,
+  );
+}
+
+// The buffer is the flat record array itself: 24 bytes per match, little-endian
+// (ruleId u32, patternId u32, offset u64, length u32, flags u32).
+for (let offset = 0; offset < view.buffer.length; offset += 24) {
+  const ruleId = view.buffer.readUInt32LE(offset);
+  const matchOffset = Number(view.buffer.readBigUInt64LE(offset + 8));
+  const flags = view.buffer.readUInt32LE(offset + 20);
 }
 
 // Lazy materialization back to standard RuleMatch[] objects when needed
 const ruleMatches = view.toRuleMatches(sampleBuffer);
 ```
+
+The `flags` word carries the XOR key of a match: bits 0-7 hold the key and bit 8 is set when the pattern was compiled with an `xor` modifier. `getXorKey(index)` decodes it for you, and `toRuleMatches()` fills `MatchData.xorKey`, so parsing the flags by hand is only necessary if you consume the raw buffer.
 
 ## Inspect compiled rules
 
@@ -510,6 +523,34 @@ for (const match of matches[0]?.matches ?? []) {
 }
 ```
 
+### XOR key matches
+
+Patterns compiled with an `xor` modifier report which key produced the match, so an obfuscated sample can be unpacked without a second scan:
+
+```javascript
+const rules = yarax.compile(`
+  rule XoredPayload {
+    strings:
+      $a = "malware" xor(0x01-0xff)
+    condition:
+      $a
+  }
+`);
+
+// "malware" XOR 0x42, as it appears in an obfuscated sample.
+const sample = Buffer.from("malware").map((byte) => byte ^ 0x42);
+
+const [match] = rules.scan(sample);
+const { xorKey, data } = match.matches[0];
+
+xorKey; // 0x42
+Buffer.from(data, "latin1").map((byte) => byte ^ xorKey).toString(); // "malware"
+```
+
+The matched bytes stay as they appear in the sample, since `data` is a lossy UTF-8 view of them; XOR keys above `0x7f` can produce bytes that do not round-trip as a string. Use `scanBinary()` with `getSlice()` when you need the exact bytes.
+
+`xorKey` is absent for plain patterns, so a rule mixing plain and XOR'd strings tells the two apart without inspecting the data.
+
 ### Maximum scan size protection
 
 Limit the maximum number of bytes scanned per buffer or file to guard against accidental scans of multi-gigabyte files or streams:
@@ -716,6 +757,16 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 
 `BinaryMatchView`, `BinaryMatchRecord`, `BatchScanOptions`, `BatchScanResult`, `FileScanResult`, `RuleInfo`, `BannedModule`, `CompileResult`, `CompilerError`, `CompilerWarning`, `IgnoredRule`, `MatchData`, `RuleMatch`, `RuleSource`, and the `YaraX` class are all exported and documented in `index.d.ts`.
 
+## YARA-X modules
+
+The native binary is built against a trimmed module set to keep the package small — `yara-x` is compiled with `default-features = false` plus an explicit feature list:
+
+| Shipped | Compiled out |
+| :--- | :--- |
+| `console`, `pe`, `elf`, `macho`, `dotnet`, `math`, `hash`, `string`, `time` | `crx`, `cuckoo`, `dex`, `lnk`, `vt`, `zip` |
+
+Rules importing a module that is compiled out fail with `error[E010]: unknown module`. `getImports()` reports the modules a compiled rule set actually uses.
+
 ## Platform support
 
 | Platform | Architectures | Binary package |
@@ -729,6 +780,8 @@ These packages are installed automatically as optional dependencies — do not d
 ## Troubleshooting
 
 **`Cannot find module '@litko/yara-x-<platform>'`** — there is no prebuilt binary for your platform and the optional dependency was skipped. The Linux builds target glibc, so musl-based images such as Alpine are not supported: use a glibc-based image such as `node:22-bookworm-slim`. On other platforms, [open an issue](https://github.com/cawalch/node-yara-x/issues/new) with your `process.platform`, `process.arch` and Node.js version.
+
+**`unknown module "zip"`** — the native binary ships only the modules listed under [YARA-X modules](#yara-x-modules); `crx`, `cuckoo`, `dex`, `lnk`, `vt` and `zip` are compiled out to keep the package small. [Open an issue](https://github.com/cawalch/node-yara-x/issues/new) if a rule set needs one of them.
 
 **`Unsupported platform` on an unusual architecture** — the six targets above are the full supported set. `armv7`, 32-bit `x86`, and `s390x` are not built.
 
