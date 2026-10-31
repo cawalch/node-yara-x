@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- See docs/release-process.md for how this section is promoted. -->
 
 ### Added
+- **Rule logging**: `setConsoleLog(callback)` routes messages rules emit through the `console` module to JavaScript. Messages are delivered on the event loop, so a synchronous scan returns before they arrive; call it with no argument to stop receiving them.
+- **Rule profiling**: `getSlowestRules(n)` and `clearProfilingData()` report the rules that dominate scan time, split into pattern-matching and condition-execution timings. Timings accumulate across synchronous scans and only rules past 100 ms in total are reported. Costs ~16 KB in the binary and no measurable scan time (2.94 ms vs 3.05 ms per 5 MB scan on a 200-rule set).
 - **Five more YARA-X modules**: `zip`, `lnk`, `dex`, `crx` and `cuckoo` are now compiled in, so rules importing them compile instead of failing with `error[E010]: unknown module`. Together they cost ~383 KB in the linked binary; `vt` stays out because the public-suffix list it needs is ~1.2 MB on its own.
 - **Bun and Deno** are documented as supported — they load the same prebuilt binary through Node-API — and CI now runs a smoke test under both.
 

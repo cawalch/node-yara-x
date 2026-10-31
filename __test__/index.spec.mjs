@@ -2903,3 +2903,55 @@ describe("XOR key reporting", () => {
     strictEqual(keyed.matches[0].xorKey, 0x7f);
   });
 });
+
+describe("Rule logging and profiling", () => {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it("should route console module output to the callback", async () => {
+    const scanner = yarax.compile(`
+      import "console"
+      rule Logging {
+        condition:
+          console.log("from rule") and true
+      }
+    `);
+
+    const messages = [];
+    scanner.setConsoleLog((message) => messages.push(message));
+    scanner.scan(Buffer.from("x"));
+
+    strictEqual(messages.length, 0, "messages arrive on the event loop, not during the scan");
+    await sleep(20);
+    deepStrictEqual(messages, ["from rule"]);
+
+    scanner.setConsoleLog();
+    scanner.scan(Buffer.from("x"));
+    await sleep(20);
+    strictEqual(messages.length, 1, "clearing the callback stops delivery");
+  });
+
+  it("should report slow rules above the throttling threshold", () => {
+    const scanner = yarax.compile(`
+      rule SlowRule {
+        strings:
+          $r = /ab+c/
+        condition:
+          $r
+      }
+    `);
+
+    const data = Buffer.alloc(1024 * 1024, "abbb");
+    for (let i = 0; i < 8 && scanner.getSlowestRules(1).length === 0; i++) {
+      scanner.scan(data);
+    }
+
+    const slowest = scanner.getSlowestRules(3);
+    ok(slowest.length >= 1, "expected the slow rule to be reported");
+    strictEqual(slowest[0].identifier, "SlowRule");
+    strictEqual(slowest[0].namespace, "default");
+    ok(slowest[0].patternMatchingMs + slowest[0].conditionMs > 100);
+
+    scanner.clearProfilingData();
+    strictEqual(scanner.getSlowestRules(3).length, 0);
+  });
+});

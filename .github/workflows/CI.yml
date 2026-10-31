@@ -193,6 +193,19 @@ jobs:
       - name: Build
         run: ${{ matrix.settings.build }}
         shell: bash
+      - name: Verify generated bindings are current
+        # `napi build` rewrites index.js and index.d.ts, and the release PR
+        # commits them. A stale local toolchain regenerates them differently
+        # (dropping loader branches the committed file has), so fail when a
+        # build leaves them changed.
+        if: matrix.settings.target == 'x86_64-unknown-linux-gnu'
+        shell: bash
+        run: |
+          if ! git diff --quiet -- index.js index.d.ts; then
+            git --no-pager diff --stat -- index.js index.d.ts
+            echo "::error::index.js / index.d.ts are stale. Run 'pnpm build' with the lockfile's @napi-rs/cli and commit the result."
+            exit 1
+          fi
       - name: Generate artifact attestation
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:

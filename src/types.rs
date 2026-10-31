@@ -25,6 +25,20 @@ pub enum VariableValue {
   String(String),
 }
 
+/// Accumulated timing for one rule, as reported by `getSlowestRules()`.
+#[napi(object)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuleProfile {
+  /// Namespace the rule belongs to.
+  pub namespace: String,
+  /// Rule identifier.
+  pub identifier: String,
+  /// Milliseconds spent matching the rule's patterns.
+  pub pattern_matching_ms: f64,
+  /// Milliseconds spent executing the rule's condition.
+  pub condition_ms: f64,
+}
+
 /// A YARA rule source and the namespace it belongs to.
 #[napi(object)]
 #[derive(Debug, Clone, PartialEq)]

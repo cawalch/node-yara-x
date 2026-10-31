@@ -551,6 +551,35 @@ The matched bytes stay as they appear in the sample, since `data` is a lossy UTF
 
 `xorKey` is absent for plain patterns, so a rule mixing plain and XOR'd strings tells the two apart without inspecting the data.
 
+### Rule logging
+
+Rules can call `console.log()` through the `console` module. Messages are delivered on the event loop, so a synchronous scan returns before the callback runs:
+
+```javascript
+const rules = compile(`
+  import "console"
+  rule Debug { condition: console.log("checked sample") and true }
+`);
+
+rules.setConsoleLog((message) => console.log(`[rule] ${message}`));
+rules.scan(buffer); // logs on the next tick
+rules.setConsoleLog(); // stop receiving messages
+```
+
+### Rule profiling
+
+`getSlowestRules()` reports which rules dominate scan time, which is usually what you need when a rule set is slower than expected:
+
+```javascript
+rules.scan(buffer);
+for (const rule of rules.getSlowestRules(5)) {
+  console.log(`${rule.identifier}: ${rule.patternMatchingMs.toFixed(1)} ms patterns, ${rule.conditionMs.toFixed(1)} ms condition`);
+}
+rules.clearProfilingData(); // reset the counters
+```
+
+Timings accumulate across synchronous scans and only rules that pass 100 ms in total are reported, so this is aimed at tuning a rule set over real traffic rather than at single-sample measurements. Async and batch scans run on their own scanners and are not included.
+
 ### Maximum scan size protection
 
 Limit the maximum number of bytes scanned per buffer or file to guard against accidental scans of multi-gigabyte files or streams:
@@ -718,6 +747,9 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 | `setUseMmap(useMmap)` | Enables or disables memory-mapped file scanning. |
 | `setTimeout(timeoutMs)` | Sets the scan timeout in milliseconds. |
 | `setMatchContextSize(size)` | Sets how many context bytes are returned with each match. |
+| `setConsoleLog(callback?)` | Routes messages rules log through the `console` module to a callback. |
+| `getSlowestRules(n)` | Returns the slowest rules seen so far, with pattern and condition timings. |
+| `clearProfilingData()` | Discards the accumulated per-rule timings. |
 | `emitWasmFile(outputPath)` | Writes the compiled WebAssembly condition module to disk synchronously. |
 | `emitWasmFileAsync(outputPath)` | Writes the compiled WebAssembly condition module to disk asynchronously. |
 

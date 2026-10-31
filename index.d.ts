@@ -120,6 +120,21 @@ export declare class YaraX {
   /** Sets the match context size. */
   setMatchContextSize(size: number): void
   /**
+   * Returns the slowest rules seen by this scanner, fastest to slowest
+   * excluded: only rules that accumulated more than 100 ms are reported, and
+   * timings cover synchronous scans since the last `clearProfilingData()`.
+   */
+  getSlowestRules(n: number): Array<RuleProfile>
+  /** Discards the timing data behind `getSlowestRules()`. */
+  clearProfilingData(): void
+  /**
+   * Routes messages logged by rules through the `console` module to a callback.
+   *
+   * Messages arrive on the Node.js event loop, so a synchronous scan returns
+   * before the callback runs. Pass nothing to discard rule output again.
+   */
+  setConsoleLog(callback?: (((arg: string) => unknown)) | undefined | null): void
+  /**
    * Sets the maximum number of bytes to scan.
    *
    * Any data or file exceeding this size will only have its initial
@@ -814,6 +829,18 @@ export interface RuleMatch {
   tags: Array<string>
   /** The matches found by the rule. */
   matches: Array<MatchData>
+}
+
+/** Accumulated timing for one rule, as reported by `getSlowestRules()`. */
+export interface RuleProfile {
+  /** Namespace the rule belongs to. */
+  namespace: string
+  /** Rule identifier. */
+  identifier: string
+  /** Milliseconds spent matching the rule's patterns. */
+  patternMatchingMs: number
+  /** Milliseconds spent executing the rule's condition. */
+  conditionMs: number
 }
 
 /** A YARA rule source and the namespace it belongs to. */
