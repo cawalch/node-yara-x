@@ -15,6 +15,10 @@ The workflow does not publish to npm.
 
 The release PR intentionally does not update root `optionalDependencies` to the future version. Those platform packages do not exist on npm until the release job publishes them, and pointing to unpublished optional packages would break frozen lockfile installs. `napi prepublish` synchronizes `optionalDependencies`, generated package metadata, and native package versions during the trusted publish job before npm packs the release.
 
+## Changelog
+
+`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Entries are written by hand under `## [Unreleased]` as changes merge; when the release PR is reviewed, that section is renamed to `## [X.Y.Z] - <date>` with the same text and a fresh `[Unreleased]` section is opened above it. Keeping the step manual is deliberate — the section is prose for consumers deciding whether to upgrade, which is better written while the change is fresh than generated from commit titles at release time.
+
 ## Publishing
 
 After the release PR is reviewed and merged, run the `Create Release` workflow from `main`. It creates the matching GitHub release for the version in `package.json`.

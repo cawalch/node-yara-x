@@ -255,7 +255,7 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - name: Update npm
-        run: npm install --global npm@^11.5.1
+        run: npm install --global npm@11.21.1
       - name: Print publish toolchain
         run: |
           node --version
