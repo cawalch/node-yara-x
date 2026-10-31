@@ -229,6 +229,42 @@ jobs:
           path: .
       - name: Test bindings
         run: node --test --test-concurrency 1 __test__/index.spec.mjs
+  runtimes:
+    name: Runtime smoke (${{ matrix.runtime }})
+    permissions:
+      contents: read
+    needs:
+      - setup
+      - build
+    if: needs.setup.outputs.src == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [bun, deno]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: 22
+      - name: Download artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bindings-x86_64-unknown-linux-gnu
+          path: .
+      - name: Install ${{ matrix.runtime }}
+        # From npm rather than a marketplace action, so there is no extra
+        # third-party action to pin and vet.
+        run: npm install --global ${{ matrix.runtime }}
+      - name: Smoke test
+        shell: bash
+        run: |
+          if [[ "${{ matrix.runtime }}" == "deno" ]]; then
+            deno run --allow-ffi --allow-read --allow-env --allow-sys __test__/runtime-smoke.mjs
+          else
+            bun __test__/runtime-smoke.mjs
+          fi
   publish:
     name: Publish
     runs-on: ubuntu-latest
@@ -460,6 +496,7 @@ jobs:
       - setup
       - build
       - test-bindings
+      - runtimes
     permissions:
       contents: read
     steps:
@@ -470,7 +507,8 @@ jobs:
           for result in \
             "${{ needs.setup.result }}" \
             "${{ needs.build.result }}" \
-            "${{ needs.test-bindings.result }}"; do
+            "${{ needs.test-bindings.result }}" \
+            "${{ needs.runtimes.result }}"; do
             case "$result" in
               success|skipped) ;;
               *)

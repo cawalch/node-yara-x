@@ -759,13 +759,13 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 
 ## YARA-X modules
 
-The native binary is built against a trimmed module set to keep the package small — `yara-x` is compiled with `default-features = false` plus an explicit feature list:
+The native binary ships every YARA-X module except `vt`, which pulls in the public-suffix list and costs ~1.2 MB on its own:
 
 | Shipped | Compiled out |
 | :--- | :--- |
-| `console`, `pe`, `elf`, `macho`, `dotnet`, `math`, `hash`, `string`, `time` | `crx`, `cuckoo`, `dex`, `lnk`, `vt`, `zip` |
+| `console`, `pe`, `elf`, `macho`, `dotnet`, `math`, `hash`, `string`, `time`, `zip`, `lnk`, `dex`, `crx`, `cuckoo` | `vt` |
 
-Rules importing a module that is compiled out fail with `error[E010]: unknown module`. `getImports()` reports the modules a compiled rule set actually uses.
+A rule importing a module that is compiled out fails with `error[E010]: unknown module`. `getImports()` reports the modules a compiled rule set actually uses.
 
 ## Platform support
 
@@ -777,11 +777,25 @@ Rules importing a module that is compiled out fail with `error[E010]: unknown mo
 
 These packages are installed automatically as optional dependencies — do not depend on them directly.
 
+## Runtimes
+
+Node.js is the primary target (>= 20). Bun and Deno load the same prebuilt binary through their Node-API compatibility layers — no separate package, no rebuild:
+
+| Runtime | Status | Notes |
+| :--- | :--- | :--- |
+| Node.js | primary | tested on every platform |
+| Bun | works | same API; expect more Node-API call overhead per scan |
+| Deno | works | needs `--allow-ffi` (plus `--allow-read` for rule files) and, for a release less than 24 hours old, `--min-dep-age 0`, since Deno's default minimum-dependency-age policy holds back fresh versions |
+
+On the same machine, a 5 MB scan measured ~0.5 ms under Node and ~3.1 ms under Bun and Deno, so the runtime cost is in the call boundary rather than the scan itself — prefer scanning larger buffers over many tiny ones there.
+
+Browsers and edge workers cannot load a native addon; use [`@virustotal/yara-x`](https://www.npmjs.com/package/@virustotal/yara-x) (WebAssembly) in those environments.
+
 ## Troubleshooting
 
 **`Cannot find module '@litko/yara-x-<platform>'`** — there is no prebuilt binary for your platform and the optional dependency was skipped. The Linux builds target glibc, so musl-based images such as Alpine are not supported: use a glibc-based image such as `node:22-bookworm-slim`. On other platforms, [open an issue](https://github.com/cawalch/node-yara-x/issues/new) with your `process.platform`, `process.arch` and Node.js version.
 
-**`unknown module "zip"`** — the native binary ships only the modules listed under [YARA-X modules](#yara-x-modules); `crx`, `cuckoo`, `dex`, `lnk`, `vt` and `zip` are compiled out to keep the package small. [Open an issue](https://github.com/cawalch/node-yara-x/issues/new) if a rule set needs one of them.
+**`unknown module "vt"`** — that is the only module compiled out, because it pulls in the public-suffix list and costs ~1.2 MB on its own. Every other YARA-X module ships; see [YARA-X modules](#yara-x-modules). [Open an issue](https://github.com/cawalch/node-yara-x/issues/new) if a rule set needs it.
 
 **`Unsupported platform` on an unusual architecture** — the six targets above are the full supported set. `armv7`, 32-bit `x86`, and `s390x` are not built.
 
