@@ -53,6 +53,9 @@ pub struct MatchData {
   pub context_data: Option<String>,
   /// The start offset of the actual match within the context data.
   pub context_match_offset: Option<i64>,
+  /// The XOR key that produced this match, when the pattern was compiled with an
+  /// `xor` modifier. Absent for plain matches.
+  pub xor_key: Option<u8>,
 }
 
 /// A thread-safe metadata value that can be transferred across thread boundaries.

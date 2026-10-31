@@ -288,3 +288,52 @@ describe('Flat / Binary Match ABI', () => {
     })
   })
 })
+
+describe('XOR key in the binary ABI', () => {
+  const xorRule = `
+    rule KeyedPattern {
+      strings:
+        $keyed = "malware" xor(0x01-0xff)
+        $plain = "benign_marker"
+      condition:
+        any of them
+    }
+  `
+
+  const key = 0x42
+  const keyed = Buffer.from(
+    Buffer.from('malware', 'latin1').map((byte) => byte ^ key),
+  )
+
+  it('should carry the XOR key in the record flags', () => {
+    const scanner = compile(xorRule)
+    const view = new BinaryMatchView(scanner.scanBinary(keyed))
+
+    assert.strictEqual(view.matchCount, 1)
+    assert.strictEqual(view.getXorKey(0), key)
+    assert.strictEqual(view.getFlags(0) & 0xff, key)
+    assert.notStrictEqual(view.getFlags(0) & (1 << 8), 0)
+  })
+
+  it('should materialize xorKey in toRuleMatches()', () => {
+    const scanner = compile(xorRule)
+    const view = new BinaryMatchView(scanner.scanBinary(keyed))
+    const [ruleMatch] = view.toRuleMatches(keyed)
+
+    assert.strictEqual(ruleMatch.matches[0].xorKey, key)
+    // toRuleMatches() slices raw bytes, so the matched data stays XOR-encoded.
+    assert.strictEqual(ruleMatch.matches[0].data, keyed.toString('latin1'))
+  })
+
+  it('should leave flags and xorKey empty for plain patterns', () => {
+    const scanner = compile(xorRule)
+    const view = new BinaryMatchView(
+      scanner.scanBinary(Buffer.from('benign_marker')),
+    )
+    const [ruleMatch] = view.toRuleMatches()
+
+    assert.strictEqual(view.getXorKey(0), null)
+    assert.strictEqual(view.getFlags(0), 0)
+    assert.strictEqual(ruleMatch.matches[0].xorKey, undefined)
+  })
+})

@@ -24,11 +24,36 @@ pub struct BinaryMatchRecord {
   pub offset: u64,
   /// Length of the matched data in bytes.
   pub length: u32,
-  /// Reserved bitflags.
+  /// Bit flags for the match. Bits 0-7 carry the XOR key when
+  /// [`FLAG_XOR_KEY_PRESENT`] is set; all other bits are reserved and zero.
   pub flags: u32,
 }
 
 const _: () = assert!(std::mem::size_of::<BinaryMatchRecord>() == 24);
+
+/// Set in [`BinaryMatchRecord::flags`] when the match was produced through an
+/// XOR key, that is when the pattern was compiled with an `xor` modifier.
+const FLAG_XOR_KEY_PRESENT: u32 = 1 << 8;
+
+/// Mask selecting the XOR key from [`BinaryMatchRecord::flags`].
+const XOR_KEY_MASK: u32 = 0xff;
+
+/// Encodes a match's XOR key into the record flags.
+fn encode_flags(xor_key: Option<u8>) -> u32 {
+  match xor_key {
+    Some(key) => FLAG_XOR_KEY_PRESENT | (key as u32 & XOR_KEY_MASK),
+    None => 0,
+  }
+}
+
+/// Decodes the XOR key from the record flags.
+fn decode_xor_key(flags: u32) -> Option<u8> {
+  if flags & FLAG_XOR_KEY_PRESENT != 0 {
+    Some((flags & XOR_KEY_MASK) as u8)
+  } else {
+    None
+  }
+}
 
 /// Metadata for a rule that matched in a binary scan.
 #[napi(object)]
@@ -145,6 +170,17 @@ impl BinaryMatchView {
     self.read_record(index).map(|r| r.flags)
   }
 
+  /// Gets the XOR key for the match record at `index`, for patterns compiled
+  /// with an `xor` modifier. Returns `null` for plain matches and out-of-range
+  /// indexes.
+  #[napi]
+  pub fn get_xor_key(&self, index: u32) -> Option<u32> {
+    self
+      .read_record(index)
+      .and_then(|r| decode_xor_key(r.flags))
+      .map(u32::from)
+  }
+
   /// Gets the rule metadata for the match record at `index`.
   #[napi]
   pub fn get_rule(&self, index: u32) -> Option<RuleInfo> {
@@ -219,6 +255,7 @@ impl BinaryMatchView {
             identifier: pattern_identifier,
             context_data: None,
             context_match_offset: None,
+            xor_key: decode_xor_key(record.flags),
           });
         }
       }
@@ -297,7 +334,7 @@ pub fn extract_binary_scan_results(
         bytes.extend_from_slice(&pattern_idx.to_le_bytes());
         bytes.extend_from_slice(&(range.start as u64).to_le_bytes());
         bytes.extend_from_slice(&((range.end - range.start) as u32).to_le_bytes());
-        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&encode_flags(match_item.xor_key()).to_le_bytes());
       }
       pattern_idx += 1;
     }
