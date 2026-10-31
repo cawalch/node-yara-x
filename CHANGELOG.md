@@ -9,12 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- See docs/release-process.md for how this section is promoted. -->
 
+---
+
+## [0.12.0] - 2026-10-31
+
 ### Added
 - **XOR key reporting**: `MatchData.xorKey` carries the XOR key that produced a match for patterns compiled with an `xor` modifier, so an obfuscated sample can be decoded without a second scan. Populated by `scan()`, `scanFile()`, the async scan APIs, and the batch/directory scanners; absent for plain patterns.
 - **`BinaryMatchView.getXorKey(index)`**: reads the same key from the binary match ABI. It rides in the existing `flags` word (bits 0-7 hold the key, bit 8 marks its presence), so the 24-byte record layout is unchanged, and `toRuleMatches()` fills `MatchData.xorKey` from it.
 
 ### Changed
 - Pinned the `npm` CLI used by the publish job to an exact version (`11.21.1`) instead of the `^11.5.1` range, so the toolchain holding the publishing credentials cannot change without review.
+- **YARA-X moved from 1.21.0 to 1.22.1**, which brings the `int64`/`int64be`/`uint64`/`uint64be` built-ins and `pe.offset_to_rva` to rule authors. Rule blobs serialized by 0.11.0 or earlier were compiled by 1.21.x and must be recompiled before they can be deserialized.
 
 ---
 
