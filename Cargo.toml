@@ -9,9 +9,11 @@ crate-type = ["cdylib"]
 [dependencies]
 globset = "0.4.20"
 # Enable napi4 and async features
-napi = { version = "3.12.0", default-features = false, features = ["napi4", "async"] }
+napi = { version = "3.12.0", default-features = false, features = ["napi6", "async"] }
 napi-derive = "3.6.2"
 rayon = "1.12.0"
+serde = "1"
+serde_json = "1"
 walkdir = "2.5.0"
 yara-x = { version = "1.21.0", default-features = false, features = [
   "console-module", "pe-module", "elf-module", "macho-module", "math-module",

@@ -4,7 +4,11 @@
 //! Node.js and the YARA-X Rust library, including match results, compiler options,
 //! and diagnostic information.
 
-use napi::bindgen_prelude::{Buffer, Object};
+use napi::bindgen_prelude::{
+  BigInt, Buffer, Env, FromNapiValue, JsObjectValue, JsValue, Object, ToNapiValue, TypeName,
+  Unknown, ValidateNapiValue,
+};
+use napi::{Error, Result, Status, ValueType};
 use napi_derive::napi;
 use std::collections::HashMap;
 use yara_x::MetaValue;
@@ -132,6 +136,111 @@ impl std::fmt::Debug for MatchData {
       .field("xor_key", &self.xor_key)
       .field("data_bytes_len", &self.data_bytes.as_ref().map(|b| b.len()))
       .finish()
+  }
+}
+
+/// Rule metadata in a form that can cross worker threads and be turned into a
+/// JavaScript object on demand.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RuleMetadata(pub Vec<(String, MetaValueData)>);
+
+impl RuleMetadata {
+  /// Reads a rule's metadata into its thread-safe representation.
+  pub fn from_rule(rule: &yara_x::Rule) -> Self {
+    Self(
+      rule
+        .metadata()
+        .map(|(key, value)| (key.to_string(), MetaValueData::from(value)))
+        .collect(),
+    )
+  }
+
+  /// Materializes the metadata as a plain JavaScript object.
+  pub fn to_object<'env>(&self, env: &Env) -> Result<Object<'env>> {
+    let raw = unsafe { ToNapiValue::to_napi_value(env.raw(), self.clone())? };
+    Ok(Object::from_raw(env.raw(), raw))
+  }
+}
+
+impl TypeName for RuleMetadata {
+  fn type_name() -> &'static str {
+    "Record<string, string | number | boolean>"
+  }
+
+  fn value_type() -> ValueType {
+    ValueType::Object
+  }
+}
+
+impl ValidateNapiValue for RuleMetadata {}
+
+impl ToNapiValue for RuleMetadata {
+  unsafe fn to_napi_value(env: napi::sys::napi_env, value: Self) -> Result<napi::sys::napi_value> {
+    let env = Env::from_raw(env);
+    let mut object = Object::new(&env)?;
+
+    for (key, value) in &value.0 {
+      match value {
+        MetaValueData::Integer(integer) => object.set_named_property(key, *integer)?,
+        MetaValueData::Float(float) => object.set_named_property(key, *float)?,
+        MetaValueData::String(string) => object.set_named_property(key, string.as_str())?,
+        MetaValueData::Bool(boolean) => object.set_named_property(key, *boolean)?,
+      }
+    }
+
+    Ok(object.value().value)
+  }
+}
+
+impl FromNapiValue for RuleMetadata {
+  unsafe fn from_napi_value(
+    env: napi::sys::napi_env,
+    value: napi::sys::napi_value,
+  ) -> Result<Self> {
+    // `BinaryMatchView` accepts a `BinaryScanResult` from JavaScript, so the
+    // metadata has to round-trip through the object representation too.
+    let object = Object::from_raw(env, value);
+    let keys = Object::keys(&object)?;
+    let mut entries = Vec::with_capacity(keys.len());
+
+    for key in keys {
+      let value = object.get_named_property::<Unknown>(&key)?;
+      entries.push((key, meta_value_from_js(value)?));
+    }
+
+    Ok(Self(entries))
+  }
+}
+
+/// Converts a JavaScript value from an incoming `RuleInfo.meta` object.
+fn meta_value_from_js(value: Unknown<'_>) -> Result<MetaValueData> {
+  match value.get_type()? {
+    ValueType::Boolean => Ok(MetaValueData::Bool(unsafe { value.cast::<bool>()? })),
+    ValueType::Number => {
+      let number = unsafe { value.cast::<f64>()? };
+      if number.fract() == 0.0 && number >= i64::MIN as f64 && number < i64::MAX as f64 {
+        Ok(MetaValueData::Integer(number as i64))
+      } else {
+        Ok(MetaValueData::Float(number))
+      }
+    }
+    ValueType::String => Ok(MetaValueData::String(unsafe { value.cast::<String>()? })),
+    ValueType::BigInt => {
+      let bigint = unsafe { value.cast::<BigInt>()? };
+      let (integer, lossless) = bigint.get_i64();
+      if lossless {
+        Ok(MetaValueData::Integer(integer))
+      } else {
+        Err(Error::new(
+          Status::InvalidArg,
+          "BigInt metadata is outside the signed 64-bit range YARA integers support",
+        ))
+      }
+    }
+    value_type => Err(Error::new(
+      Status::InvalidArg,
+      format!("Unsupported metadata value type: {value_type:?}"),
+    )),
   }
 }
 

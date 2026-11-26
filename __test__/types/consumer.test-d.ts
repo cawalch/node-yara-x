@@ -16,6 +16,7 @@ import {
   type BinaryScanResult,
   type CompileResult,
   type MatchData,
+  type RuleInfo,
   type RuleMatch,
   type YaraX,
 } from "../../index.js";
@@ -52,6 +53,21 @@ compile('rule x { condition: false }', { notAnOption: true });
 // @ts-expect-error unknown compiler option
 validate('rule x { condition: false }', { notAnOption: true });
 
+// Rule metadata is typed on both the plain and binary paths.
+const ruleInfo: RuleInfo = a.getRules()[0];
+const ruleMeta: Record<string, string | number | boolean> = ruleInfo.meta;
+const binaryMeta: Record<string, string | number | boolean> =
+  a.scanBinary(Buffer.from("x")).catalog.rules[0].meta;
+
+// defineVariable accepts typed globals, including bigint.
+a.defineVariable("threshold", 42);
+a.defineVariable("ratio", 1.5);
+a.defineVariable("flag", true);
+a.defineVariable("family", "42");
+a.defineVariable("exact", 9007199254740993n);
+// @ts-expect-error objects are not variable values
+a.defineVariable("bad", {});
+
 // Scan helpers keep their concrete return types.
 const syncMatches: Array<RuleMatch> = a.scan(Buffer.from("x"));
 const asyncMatches: Promise<Array<RuleMatch>> = a.scanAsync(Buffer.from("x"));
@@ -60,3 +76,4 @@ const match: MatchData | undefined = syncMatches[0]?.matches[0];
 
 void [b, c, d, result, rawCompile, rawCreate, rawDeserialize, rawFromFile];
 void [asyncMatches, binary, match, s];
+void [ruleMeta, binaryMeta];

@@ -1428,6 +1428,8 @@ dependencies = [
  "napi-build",
  "napi-derive",
  "rayon",
+ "serde",
+ "serde_json",
  "walkdir",
  "yara-x",
 ]

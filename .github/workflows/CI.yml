@@ -268,7 +268,7 @@ jobs:
       - name: Test bindings
         # Run every suite: batch and binary coverage needs only the downloaded
         # .node artifact and Node built-ins, and several regressions live there.
-        run: node --test --test-concurrency 1 __test__/index.spec.mjs __test__/batch.spec.mjs __test__/binary.spec.mjs
+        run: node --test --test-concurrency 1 __test__/index.spec.mjs __test__/batch.spec.mjs __test__/binary.spec.mjs __test__/performance.spec.mjs
   runtimes:
     name: Runtime smoke (${{ matrix.runtime }})
     permissions:

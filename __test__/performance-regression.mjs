@@ -273,7 +273,11 @@ class PerformanceRegressionAnalyzer {
 			`   Memory Efficiency: ${summary.memoryEfficiency.toFixed(2)} KB/ms`,
 		);
 		console.log(`   CPU Utilization: ${summary.cpuUtilization.toFixed(1)}%`);
-		console.log(`   GC Overhead: ${summary.gcOverhead.toFixed(1)}%`);
+		const gcOverhead =
+			summary.gcOverhead == null
+				? "n/a"
+				: `${summary.gcOverhead.toFixed(1)}%`;
+		console.log(`   GC Overhead: ${gcOverhead}`);
 
 		// Save detailed report
 		const reportPath = join(__dirname, "performance-report.md");
@@ -332,6 +336,9 @@ class PerformanceRegressionAnalyzer {
 
 	generatePerformanceSummary(tests) {
 		const scanTests = tests.filter((t) => t.name.includes("Scan"));
+		const gcTests = scanTests.filter(
+			(t) => t.gc && Number.isFinite(t.gc.overhead) && t.timing.total > 0,
+		);
 
 		return {
 			avgScanTime:
@@ -350,14 +357,20 @@ class PerformanceRegressionAnalyzer {
 					.reduce((sum, t) => sum + t.cpu.utilization.totalPercent, 0) /
 				scanTests.filter((t) => t.cpu).length,
 			gcOverhead:
-				scanTests
-					.filter((t) => t.gc)
-					.reduce((sum, t) => sum + (t.gc.overhead / t.timing.total) * 100, 0) /
-				scanTests.filter((t) => t.gc).length,
+				gcTests.length > 0
+					? gcTests.reduce(
+							(sum, t) => sum + (t.gc.overhead / t.timing.total) * 100,
+							0,
+						) / gcTests.length
+					: null,
 		};
 	}
 
 	saveMarkdownReport(results, bottlenecks, summary, filepath) {
+		const gcOverhead =
+			summary.gcOverhead == null
+				? "n/a"
+				: `${summary.gcOverhead.toFixed(1)}%`;
 		const report = `# YARA-X Performance Analysis Report
 
 Generated: ${results.timestamp}
@@ -373,7 +386,7 @@ Generated: ${results.timestamp}
 - Average Throughput: ${summary.avgThroughput.toFixed(1)} ops/sec
 - Memory Efficiency: ${summary.memoryEfficiency.toFixed(2)} KB/ms
 - CPU Utilization: ${summary.cpuUtilization.toFixed(1)}%
-- GC Overhead: ${summary.gcOverhead.toFixed(1)}%
+- GC Overhead: ${gcOverhead}
 
 ## Identified Bottlenecks
 ${bottlenecks

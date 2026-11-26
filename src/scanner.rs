@@ -10,15 +10,17 @@ use crate::batch::{
 use crate::binary::{extract_binary_scan_results, BinaryScanResult, BinaryScanTask, RuleInfo};
 use crate::compiler::{
   add_source_to_compiler_tolerant, apply_compiler_options, apply_stored_compiler_options,
-  collect_ignored_rules, replay_sources_to_wasm, stored_options_from, StoredCompilerOptions,
+  collect_ignored_rules, ensure_no_uncovered_errors, ignored_module_warnings,
+  replay_sources_to_wasm, stored_options_from, StoredCompilerOptions,
 };
 use crate::error::{io_error_to_napi, scan_error_to_napi};
 use crate::types::{
-  CompilerError, CompilerOptions, CompilerWarning, IgnoredRule, MatchData, RuleMatch, RuleSource,
-  VariableValue,
+  CompilerError, CompilerOptions, CompilerWarning, IgnoredRule, MatchData, RuleMatch, RuleMetadata,
+  RuleSource, VariableValue,
 };
 use crate::variables::{
-  convert_variables_to_map, get_compiler_errors, get_compiler_warnings, VariableHandler,
+  convert_variables_to_map, get_compiler_errors, get_compiler_warnings,
+  variable_value_from_unknown, VariableHandler,
 };
 use napi::bindgen_prelude::Unknown;
 use napi::bindgen_prelude::{AsyncTask, Buffer, JsObjectValue, Object};
@@ -32,6 +34,16 @@ use std::sync::Arc;
 use std::time::Duration;
 use yara_x::{Compiler, Rules, Scanner};
 
+/// A rule source together with the file it was read from, when there was one.
+///
+/// The origin is replayed on every incremental recompilation so diagnostics
+/// keep naming the file and `include` statements keep resolving next to it.
+#[derive(Debug, Clone)]
+pub(crate) struct StoredRuleSource {
+  pub source: RuleSource,
+  pub origin: Option<String>,
+}
+
 /// The main YARA-X scanner struct.
 ///
 /// This struct represents compiled YARA rules and provides methods for scanning
@@ -43,7 +55,7 @@ pub struct YaraX {
   /// The source code used to compile the YARA rules.
   pub(crate) source_code: Option<String>,
   /// The source code segments and namespaces used to compile the YARA rules.
-  pub(crate) rule_sources: Vec<RuleSource>,
+  pub(crate) rule_sources: Vec<StoredRuleSource>,
   /// Any warnings generated during the compilation process.
   pub(crate) warnings: Vec<CompilerWarning>,
   /// The variables defined for the YARA rules.
@@ -133,6 +145,7 @@ impl YaraX {
   pub fn create_scanner_from_source(
     source: String,
     options: Option<CompilerOptions>,
+    origin: Option<&str>,
   ) -> Result<Self> {
     let mut compiler = Compiler::new();
 
@@ -148,10 +161,16 @@ impl YaraX {
       &mut compiler,
       source.as_str(),
       namespace,
+      origin,
       ignore_invalid_rules,
     )?;
 
-    let warnings = get_compiler_warnings(&compiler);
+    if ignore_invalid_rules {
+      ensure_no_uncovered_errors(&compiler)?;
+    }
+
+    let mut warnings = get_compiler_warnings(&compiler);
+    warnings.extend(ignored_module_warnings(&stored_options));
     // Rules can be skipped even without `ignore_invalid_rules` (e.g. when
     // they depend on ignored modules), so the report is collected
     // unconditionally. Compilation errors are only survivable in tolerant
@@ -160,9 +179,12 @@ impl YaraX {
     let ignored_rules = collect_ignored_rules(&compiler);
     let compilation_errors = get_compiler_errors(&compiler);
     let rules = compiler.build();
-    let rule_sources = vec![RuleSource {
-      source: source.clone(),
-      namespace: namespace.map(str::to_string),
+    let rule_sources = vec![StoredRuleSource {
+      source: RuleSource {
+        source: source.clone(),
+        namespace: namespace.map(str::to_string),
+      },
+      origin: origin.map(str::to_string),
     }];
 
     Ok(YaraX {
@@ -253,6 +275,17 @@ impl YaraX {
     compiler: &mut Compiler<'_>,
     variables: Option<&HashMap<String, VariableValue>>,
   ) -> Result<()> {
+    self.compile_sources_with_vars(&self.rule_sources, compiler, variables)
+  }
+
+  /// Compiles an explicit source list, used both for the scanner's committed
+  /// sources and for staging a pending incremental addition.
+  fn compile_sources_with_vars(
+    &self,
+    sources: &[StoredRuleSource],
+    compiler: &mut Compiler<'_>,
+    variables: Option<&HashMap<String, VariableValue>>,
+  ) -> Result<()> {
     apply_stored_compiler_options(compiler, &self.stored_options)?;
 
     if let Some(vars) = variables {
@@ -261,29 +294,28 @@ impl YaraX {
       }
     }
 
-    for source in &self.rule_sources {
+    for source in sources {
       add_source_to_compiler_tolerant(
         compiler,
-        &source.source,
-        source.namespace.as_deref(),
+        &source.source.source,
+        source.source.namespace.as_deref(),
+        source.origin.as_deref(),
         self.ignore_invalid_rules,
       )?;
     }
 
-    if self.rule_sources.is_empty() {
+    if sources.is_empty() {
       let source = self.source_code.as_deref().unwrap_or_default();
       if !source.is_empty() {
-        add_source_to_compiler_tolerant(compiler, source, None, self.ignore_invalid_rules)?;
+        add_source_to_compiler_tolerant(compiler, source, None, None, self.ignore_invalid_rules)?;
       }
     }
 
-    Ok(())
-  }
+    if self.ignore_invalid_rules {
+      ensure_no_uncovered_errors(compiler)?;
+    }
 
-  /// Applies this scanner's stored compiler options and stored global
-  /// variables to a compiler, then adds all rule sources in order.
-  fn compile_all_sources(&self, compiler: &mut Compiler<'_>) -> Result<()> {
-    self.compile_all_sources_with_vars(compiler, self.variables.as_ref())
+    Ok(())
   }
 
   /// Consumes the compiler produced by a recompilation, refreshing the
@@ -291,6 +323,9 @@ impl YaraX {
   /// the rebuilt rules.
   fn refresh_compilation_state(&mut self, compiler: Compiler<'_>) {
     self.warnings = get_compiler_warnings(&compiler);
+    self
+      .warnings
+      .extend(ignored_module_warnings(&self.stored_options));
     self.ignored_rules = collect_ignored_rules(&compiler);
     self.compilation_errors = get_compiler_errors(&compiler);
     self.rules = Arc::new(compiler.build());
@@ -305,7 +340,7 @@ impl YaraX {
       if i > 0 {
         combined.push('\n');
       }
-      combined.push_str(&s.source);
+      combined.push_str(&s.source.source);
     }
     self.source_code = Some(combined);
   }
@@ -665,6 +700,7 @@ impl YaraX {
           .patterns()
           .map(|p| p.identifier().to_string())
           .collect(),
+        meta: RuleMetadata::from_rule(&rule),
       })
       .collect()
   }
@@ -858,20 +894,35 @@ impl YaraX {
     })?;
 
     let fallback_source;
-    let sources = if self.rule_sources.is_empty() {
+    let fallback_origin;
+    let owned_sources;
+    let owned_origins;
+    let (sources, origins): (&[RuleSource], &[Option<String>]) = if self.rule_sources.is_empty() {
       fallback_source = [RuleSource {
         source: source.clone(),
         namespace: None,
       }];
-      &fallback_source[..]
+      fallback_origin = [None];
+      (&fallback_source[..], &fallback_origin[..])
     } else {
-      &self.rule_sources[..]
+      owned_sources = self
+        .rule_sources
+        .iter()
+        .map(|entry| entry.source.clone())
+        .collect::<Vec<_>>();
+      owned_origins = self
+        .rule_sources
+        .iter()
+        .map(|entry| entry.origin.clone())
+        .collect::<Vec<_>>();
+      (&owned_sources[..], &owned_origins[..])
     };
 
     // Replay the stored options and variables so the emitted module matches
     // the scanner's compilation semantics (including `ignore_invalid_rules`).
     replay_sources_to_wasm(
       sources,
+      origins,
       &output_path,
       &self.stored_options,
       self.variables.as_ref(),
@@ -1113,7 +1164,16 @@ impl YaraX {
   ) -> Result<AsyncTask<crate::tasks::EmitWasmFileTask>> {
     Ok(AsyncTask::new(crate::tasks::EmitWasmFileTask {
       source_code: self.source_code.clone(),
-      rule_sources: self.rule_sources.clone(),
+      rule_sources: self
+        .rule_sources
+        .iter()
+        .map(|entry| entry.source.clone())
+        .collect(),
+      source_origins: self
+        .rule_sources
+        .iter()
+        .map(|entry| entry.origin.clone())
+        .collect(),
       output_path,
       stored_options: self.stored_options.clone(),
       variables: self.variables.clone(),
@@ -1165,18 +1225,33 @@ impl YaraX {
   /// Compared to calling `add_rule_source()` m times: O(n × m + m²).
   #[napi]
   pub fn add_rule_sources(&mut self, rule_sources: Vec<RuleSource>) -> Result<()> {
+    let entries = rule_sources
+      .into_iter()
+      .map(|source| StoredRuleSource {
+        source,
+        origin: None,
+      })
+      .collect();
+    self.add_rule_sources_internal(entries)
+  }
+
+  /// Adds sources that may carry a file origin, recompiling all of them.
+  fn add_rule_sources_internal(&mut self, rule_sources: Vec<StoredRuleSource>) -> Result<()> {
     if rule_sources.is_empty() {
       return Ok(());
     }
 
-    // Extend our sources list with the new ones
-    self.rule_sources.extend(rule_sources);
+    // Stage the new list and compile it before committing, so a rejected
+    // source cannot poison later recompilations.
+    let mut candidate = self.rule_sources.clone();
+    candidate.extend(rule_sources);
 
     let mut compiler = Compiler::new();
     // Replay the stored options and variables and recompile all sources in a
     // single pass.
-    self.compile_all_sources(&mut compiler)?;
+    self.compile_sources_with_vars(&candidate, &mut compiler, self.variables.as_ref())?;
 
+    self.rule_sources = candidate;
     self.refresh_compilation_state(compiler);
 
     // Keep source_code in sync for WASM emission
@@ -1198,7 +1273,13 @@ impl YaraX {
   pub fn add_rule_file(&mut self, file_path: String, namespace: Option<String>) -> Result<()> {
     let file_content = std::fs::read_to_string(&file_path)
       .map_err(|e| io_error_to_napi(e, &format!("reading file {file_path}")))?;
-    self.add_rule_source(file_content, namespace)
+    self.add_rule_sources_internal(vec![StoredRuleSource {
+      source: RuleSource {
+        source: file_content,
+        namespace,
+      },
+      origin: Some(file_path),
+    }])
   }
 
   /// Defines a variable for the YARA compiler.
@@ -1211,13 +1292,15 @@ impl YaraX {
   /// # Returns
   ///
   /// Ok(()) on success, or an error if compilation fails
-  #[napi]
-  pub fn define_variable(&mut self, name: String, value: String) -> Result<()> {
+  #[napi(ts_args_type = "name: string, value: string | number | boolean | bigint")]
+  pub fn define_variable(&mut self, name: String, value: Unknown) -> Result<()> {
+    let value = variable_value_from_unknown(value, &name)?;
+
     // Stage the variable in a local copy so `self.variables` is only updated
     // once the recompilation succeeds (the rules that reference the variable
     // must be compiled with it defined).
     let mut variables = self.variables.clone().unwrap_or_default();
-    variables.insert(name, VariableValue::String(value));
+    variables.insert(name, value);
 
     let mut compiler = Compiler::new();
     self.compile_all_sources_with_vars(&mut compiler, Some(&variables))?;

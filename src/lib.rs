@@ -49,7 +49,7 @@ pub use types::{
 };
 
 // Internal imports
-use compiler::{add_source_to_compiler, apply_compiler_options};
+use compiler::{add_source_to_compiler, apply_compiler_options, ignored_module_warnings};
 use error::io_error_to_napi;
 use napi::bindgen_prelude::Buffer;
 use napi::{Error, Result, Status};
@@ -81,9 +81,12 @@ pub fn validate(
   apply_compiler_options(&mut compiler, options.as_ref(), false)?;
   let namespace = options.as_ref().and_then(|opts| opts.namespace.as_deref());
 
-  let _ = add_source_to_compiler(&mut compiler, &rule_source, namespace);
+  let _ = add_source_to_compiler(&mut compiler, &rule_source, namespace, None);
 
-  let warnings = get_compiler_warnings(&compiler);
+  let mut warnings = get_compiler_warnings(&compiler);
+  warnings.extend(ignored_module_warnings(&compiler::stored_options_from(
+    options.as_ref(),
+  )));
   let errors = get_compiler_errors(&compiler);
 
   Ok(CompileResult { warnings, errors })
@@ -104,7 +107,7 @@ pub fn compile(
   rule_source: String,
   options: Option<types::CompilerOptions>,
 ) -> Result<scanner::YaraX> {
-  let yarax = scanner::YaraX::create_scanner_from_source(rule_source, options)?;
+  let yarax = scanner::YaraX::create_scanner_from_source(rule_source, options, None)?;
   Ok(yarax)
 }
 
@@ -136,7 +139,7 @@ pub fn from_file(
   let file_content = std::fs::read_to_string(&rule_path)
     .map_err(|e| io_error_to_napi(e, &format!("reading file {rule_path}")))?;
 
-  scanner::YaraX::create_scanner_from_source(file_content, options)
+  scanner::YaraX::create_scanner_from_source(file_content, options, Some(&rule_path))
 }
 
 /// Creates a new `YaraX` instance from a serialized rules blob.
@@ -185,7 +188,7 @@ pub fn compile_to_wasm(
   output_path: String,
   options: Option<types::CompilerOptions>,
 ) -> Result<()> {
-  compiler::compile_source_to_wasm(&rule_source, &output_path, options.as_ref())
+  compiler::compile_source_to_wasm(&rule_source, &output_path, options.as_ref(), None)
 }
 
 /// Compiles a YARA rule file to a WASM file.
@@ -207,5 +210,10 @@ pub fn compile_file_to_wasm(
 ) -> Result<()> {
   let file_content = std::fs::read_to_string(&rule_path)
     .map_err(|e| io_error_to_napi(e, &format!("reading file {rule_path}")))?;
-  compiler::compile_source_to_wasm(&file_content, &output_path, options.as_ref())
+  compiler::compile_source_to_wasm(
+    &file_content,
+    &output_path,
+    options.as_ref(),
+    Some(&rule_path),
+  )
 }
