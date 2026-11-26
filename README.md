@@ -417,6 +417,16 @@ if (result.errors.length > 0) {
 }
 ```
 
+A rejected rule set also throws, and the thrown error carries the same facts as fields, so branching does not mean parsing prose. `compile()`, `fromFile()`, `addRuleSource()`, `addRuleSources()`, `addRuleFile()` and `defineVariable()` set `ruleCode` to the E-code and, when the diagnostic has one, `source` / `line` / `column` (`source` is the rule file for the file-based entry points). `code` and `message` are unchanged, so handling written against the message keeps working:
+
+```javascript
+try {
+  compile(untrustedRules);
+} catch (error) {
+  if (error.ruleCode === "E018") console.error("refusing the pathological regex at", error.line);
+}
+```
+
 ## Compiler warnings
 
 `getWarnings()` returns the warnings emitted while compiling, and the compiler can be told to report fewer of them:
