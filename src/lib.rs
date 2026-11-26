@@ -25,7 +25,7 @@ pub use types::{
 use compiler::{add_source_to_compiler, apply_compiler_options, ignored_module_warnings};
 use error::io_error_to_napi;
 use napi::bindgen_prelude::Buffer;
-use napi::{Error, Result, Status};
+use napi::{Env, Error, Result, Status};
 use napi_derive::napi;
 use std::sync::Arc;
 use variables::{get_compiler_errors, get_compiler_warnings};
@@ -108,7 +108,9 @@ pub fn validate(
   apply_compiler_options(&mut compiler, options.as_ref(), false)?;
   let namespace = options.as_ref().and_then(|opts| opts.namespace.as_deref());
 
-  let _ = add_source_to_compiler(&mut compiler, &rule_source, namespace, None);
+  // The result carries the diagnostics as `CompilerError` objects, so the
+  // thrown-error decoration is not needed here (and no error is thrown).
+  let _ = add_source_to_compiler(&mut compiler, &rule_source, namespace, None, None);
 
   let mut warnings = get_compiler_warnings(&compiler);
   warnings.extend(ignored_module_warnings(&compiler::stored_options_from(
@@ -122,10 +124,11 @@ pub fn validate(
 /// Compiles a YARA rule source string and returns a `YaraX` instance with the compiled rules.
 #[napi]
 pub fn compile(
+  env: Env,
   rule_source: String,
   options: Option<types::CompilerOptions>,
 ) -> Result<scanner::YaraX> {
-  let yarax = scanner::YaraX::create_scanner_from_source(rule_source, options, None)?;
+  let yarax = scanner::YaraX::create_scanner_from_source(env, rule_source, options, None)?;
   Ok(yarax)
 }
 
@@ -138,13 +141,14 @@ pub fn create() -> scanner::YaraX {
 /// Creates a new `YaraX` instance from a file containing YARA rules.
 #[napi]
 pub fn from_file(
+  env: Env,
   rule_path: String,
   options: Option<types::CompilerOptions>,
 ) -> Result<scanner::YaraX> {
   let file_content = std::fs::read_to_string(&rule_path)
     .map_err(|e| io_error_to_napi(e, &format!("reading file {rule_path}")))?;
 
-  scanner::YaraX::create_scanner_from_source(file_content, options, Some(&rule_path))
+  scanner::YaraX::create_scanner_from_source(env, file_content, options, Some(&rule_path))
 }
 
 /// Restores a scanner from a blob produced by [`YaraX::serialize`].

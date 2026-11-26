@@ -3,15 +3,57 @@
 //! This module provides conversion functions from YARA-X errors to N-API errors,
 //! ensuring proper error propagation to JavaScript.
 
-use napi::{Error, Status};
+use crate::variables::diagnostic_location;
+use napi::bindgen_prelude::{JsObjectValue, Unknown};
+use napi::{Env, Error, JsValue, Status};
 use yara_x::errors::CompileError;
 
 /// Converts a YARA compilation error into a N-API error, prefixing the code.
-pub fn compile_error_to_napi(error: &CompileError) -> Error {
-  Error::new(
-    Status::GenericFailure,
-    format!("Compilation error ({}): {error}", error.code()),
-  )
+///
+/// With an `Env`, the thrown error also carries `ruleCode` (the `E0nn` code) and,
+/// when the diagnostic has one, `source`, `line` and `column` - the same names as
+/// the `CompilerError` objects from `getCompilationErrors()` - so a caller can
+/// branch without parsing `message`. Its `code` and `message` are exactly what
+/// they were without the fields. The background tasks have no `Env` and pass
+/// `None`, so they keep throwing the plain error.
+pub fn compile_error_to_napi(error: &CompileError, env: Option<&Env>) -> Error {
+  let message = format!("Compilation error ({}): {error}", error.code());
+
+  match env.and_then(|env| decorated(env, &message, error)) {
+    Some(error) => error,
+    None => Error::new(Status::GenericFailure, message),
+  }
+}
+
+/// Builds the thrown error as an object carrying the diagnostic fields.
+///
+/// Returns `None` if the object cannot be built or decorated: the extra fields
+/// must never cost a caller the message or the code it already had.
+fn decorated(env: &Env, message: &str, error: &CompileError) -> Option<Error> {
+  let mut object = env
+    .create_error(Error::new(Status::GenericFailure, message))
+    .ok()?;
+
+  object.set_named_property("ruleCode", error.code()).ok()?;
+
+  let (source, line, column) = diagnostic_location(error);
+  if let Some(source) = source {
+    object.set_named_property("source", source).ok()?;
+  }
+  if let Some(line) = line {
+    object.set_named_property("line", line).ok()?;
+  }
+  if let Some(column) = column {
+    object.set_named_property("column", column).ok()?;
+  }
+
+  // The object built above is the object that is thrown: napi's throw path
+  // reuses a retained JavaScript error instead of rebuilding one, so own
+  // properties reach the caller (`napi-3.16.2/src/error.rs`,
+  // `JsError::into_value`, and `Error::from_unknown_without_coercion`).
+  Some(Error::from_unknown_without_coercion(unsafe {
+    Unknown::from_raw_unchecked(env.raw(), object.raw())
+  }))
 }
 
 /// Converts a YARA scan error into a N-API error.

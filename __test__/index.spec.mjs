@@ -1842,6 +1842,11 @@ describe("yarax Tests", () => {
             error.message.includes(`(${errorCode}):`),
             `Error should have code ${errorCode}`,
           );
+          strictEqual(
+            error.ruleCode,
+            errorCode,
+            `thrown error should carry ${errorCode} as a field, not only in the message`,
+          );
         }
       });
 
@@ -1854,6 +1859,51 @@ describe("yarax Tests", () => {
           `Error code should be ${errorCode}`,
         );
       });
+    });
+
+    it("should put the diagnostic location on the thrown compile error", () => {
+      try {
+        yarax.compile("rule first { condition: false }\nrule { broken");
+        fail("Should have thrown a compile error");
+      } catch (error) {
+        strictEqual(error.ruleCode, "E001");
+        strictEqual(error.line, 2);
+        strictEqual(error.column, 6);
+        strictEqual(error.source, undefined, "a source string has no file path");
+        ok(error instanceof Error, "the thrown value stays an Error");
+        ok(
+          error.message.includes("Compilation error (E001)"),
+          "the message keeps the text consumers already parse",
+        );
+      }
+    });
+
+    it("should name the rule file on a compile error thrown by fromFile()", () => {
+      const ruleFile = join(__tempDir, "thrown-location.yar");
+      writeFileSync(ruleFile, "rule ok { condition: false }\nrule { broken");
+
+      try {
+        yarax.fromFile(ruleFile);
+        fail("Should have thrown a compile error");
+      } catch (error) {
+        strictEqual(error.ruleCode, "E001");
+        strictEqual(error.source, ruleFile);
+        strictEqual(error.line, 2);
+      }
+    });
+
+    it("should leave non-compilation errors undecorated", () => {
+      const scanner = yarax.compile("rule keep { condition: false }");
+
+      try {
+        scanner.scanFile("/definitely/missing");
+        fail("Should have thrown an I/O error");
+      } catch (error) {
+        strictEqual(error.code, "GenericFailure", "error codes are unchanged");
+        strictEqual(error.ruleCode, undefined);
+        strictEqual(error.line, undefined);
+        ok(/I\/O error/.test(error.message));
+      }
     });
 
     it("should expose structured locations on compiler diagnostics", () => {

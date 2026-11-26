@@ -143,7 +143,11 @@ impl YaraX {
   }
 
   /// Creates a new YaraX instance from a source string.
+  ///
+  /// `env` decorates a rejected compilation with `ruleCode` and the diagnostic
+  /// location; see [`compile_error_to_napi`](crate::error::compile_error_to_napi).
   pub fn create_scanner_from_source(
+    env: Env,
     source: String,
     options: Option<CompilerOptions>,
     origin: Option<&str>,
@@ -164,6 +168,7 @@ impl YaraX {
       namespace,
       origin,
       ignore_invalid_rules,
+      Some(&env),
     )?;
 
     if ignore_invalid_rules {
@@ -268,8 +273,9 @@ impl YaraX {
     &self,
     compiler: &mut Compiler<'_>,
     variables: Option<&HashMap<String, VariableValue>>,
+    env: Env,
   ) -> Result<()> {
-    self.compile_sources_with_vars(&self.rule_sources, compiler, variables)
+    self.compile_sources_with_vars(&self.rule_sources, compiler, variables, env)
   }
 
   /// Compiles an explicit source list, used both for the scanner's committed
@@ -279,6 +285,7 @@ impl YaraX {
     sources: &[StoredRuleSource],
     compiler: &mut Compiler<'_>,
     variables: Option<&HashMap<String, VariableValue>>,
+    env: Env,
   ) -> Result<()> {
     apply_stored_compiler_options(compiler, &self.stored_options)?;
 
@@ -295,13 +302,21 @@ impl YaraX {
         source.source.namespace.as_deref(),
         source.origin.as_deref(),
         self.ignore_invalid_rules,
+        Some(&env),
       )?;
     }
 
     if sources.is_empty() {
       let source = self.source_code.as_deref().unwrap_or_default();
       if !source.is_empty() {
-        add_source_to_compiler_tolerant(compiler, source, None, None, self.ignore_invalid_rules)?;
+        add_source_to_compiler_tolerant(
+          compiler,
+          source,
+          None,
+          None,
+          self.ignore_invalid_rules,
+          Some(&env),
+        )?;
       }
     }
 
@@ -1046,11 +1061,19 @@ impl YaraX {
   /// For better performance with many rules, use `compile()` with all sources
   /// at once, or use `add_rule_sources()` for batch addition.
   #[napi]
-  pub fn add_rule_source(&mut self, rule_source: String, namespace: Option<String>) -> Result<()> {
-    self.add_rule_sources(vec![RuleSource {
-      source: rule_source,
-      namespace,
-    }])
+  pub fn add_rule_source(
+    &mut self,
+    env: Env,
+    rule_source: String,
+    namespace: Option<String>,
+  ) -> Result<()> {
+    self.add_rule_sources(
+      env,
+      vec![RuleSource {
+        source: rule_source,
+        namespace,
+      }],
+    )
   }
 
   /// Adds multiple rule sources to the YARA compiler in a single compilation pass.
@@ -1064,7 +1087,7 @@ impl YaraX {
   /// O(n + m) where n = existing rules, m = new rules (single compilation pass).
   /// Compared to calling `add_rule_source()` m times: O(n × m + m²).
   #[napi]
-  pub fn add_rule_sources(&mut self, rule_sources: Vec<RuleSource>) -> Result<()> {
+  pub fn add_rule_sources(&mut self, env: Env, rule_sources: Vec<RuleSource>) -> Result<()> {
     let entries = rule_sources
       .into_iter()
       .map(|source| StoredRuleSource {
@@ -1072,11 +1095,15 @@ impl YaraX {
         origin: None,
       })
       .collect();
-    self.add_rule_sources_internal(entries)
+    self.add_rule_sources_internal(env, entries)
   }
 
   /// Adds sources that may carry a file origin, recompiling all of them.
-  fn add_rule_sources_internal(&mut self, rule_sources: Vec<StoredRuleSource>) -> Result<()> {
+  fn add_rule_sources_internal(
+    &mut self,
+    env: Env,
+    rule_sources: Vec<StoredRuleSource>,
+  ) -> Result<()> {
     if rule_sources.is_empty() {
       return Ok(());
     }
@@ -1089,7 +1116,7 @@ impl YaraX {
     let mut compiler = Compiler::new();
     // Replay the stored options and variables and recompile all sources in a
     // single pass.
-    self.compile_sources_with_vars(&candidate, &mut compiler, self.variables.as_ref())?;
+    self.compile_sources_with_vars(&candidate, &mut compiler, self.variables.as_ref(), env)?;
 
     self.rule_sources = candidate;
     self.refresh_compilation_state(compiler);
@@ -1104,22 +1131,30 @@ impl YaraX {
   ///
   /// Ok(()) on success, or an error if reading or compilation fails
   #[napi]
-  pub fn add_rule_file(&mut self, file_path: String, namespace: Option<String>) -> Result<()> {
+  pub fn add_rule_file(
+    &mut self,
+    env: Env,
+    file_path: String,
+    namespace: Option<String>,
+  ) -> Result<()> {
     let file_content = std::fs::read_to_string(&file_path)
       .map_err(|e| io_error_to_napi(e, &format!("reading file {file_path}")))?;
-    self.add_rule_sources_internal(vec![StoredRuleSource {
-      source: RuleSource {
-        source: file_content,
-        namespace,
-      },
-      origin: Some(file_path),
-    }])
+    self.add_rule_sources_internal(
+      env,
+      vec![StoredRuleSource {
+        source: RuleSource {
+          source: file_content,
+          namespace,
+        },
+        origin: Some(file_path),
+      }],
+    )
   }
 
   /// Defines a variable for the YARA compiler.
   ///
   #[napi(ts_args_type = "name: string, value: string | number | boolean | bigint")]
-  pub fn define_variable(&mut self, name: String, value: Unknown) -> Result<()> {
+  pub fn define_variable(&mut self, env: Env, name: String, value: Unknown) -> Result<()> {
     let value = variable_value_from_unknown(value, &name)?;
 
     // Stage the variable in a local copy so `self.variables` is only updated
@@ -1129,7 +1164,7 @@ impl YaraX {
     variables.insert(name, value);
 
     let mut compiler = Compiler::new();
-    self.compile_all_sources_with_vars(&mut compiler, Some(&variables))?;
+    self.compile_all_sources_with_vars(&mut compiler, Some(&variables), env)?;
 
     self.refresh_compilation_state(compiler);
     self.variables = Some(variables);
