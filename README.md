@@ -320,6 +320,30 @@ try {
 }
 ```
 
+### Branch on the class of failure
+
+An error from a synchronous entry point also carries `kind`, a stable label for what failed, so you do not have to match on message text:
+
+```javascript
+const scanner = compile("rule quiet { condition: false }");
+try {
+  scanner.scanFile("/definitely/missing");
+} catch (error) {
+  if (error.kind === "io") console.log("unreadable sample");
+}
+```
+
+| `kind`         | Failure                                                                |
+| :------------- | :--------------------------------------------------------------------- |
+| `compile`      | A rule set was rejected. `ruleCode` still names the E-code.             |
+| `timeout`      | A scan passed the deadline set with `setTimeout()`.                     |
+| `io`           | Reading a rule file, a sample, or a serialized blob failed.             |
+| `mmap`         | Memory-mapping a sample failed.                                         |
+| `protobuf`     | A module produced protobuf that could not be decoded.                    |
+| `unknown-module` | A rule referenced a module this build does not include.                |
+
+`kind` never replaces `code` (the N-API status) or `message`. An async rejection carries no `kind`: a task's compute phase has no JavaScript environment to decorate, so those errors keep only `code` and `message`.
+
 ## Compiler warnings
 
 `getWarnings()` returns the warnings emitted while compiling, and the compiler options decide how many reach you. Which problems are warnings is YARA-X's decision: a pattern no condition uses is the `E022` error, while a duplicated pattern value is the `duplicate_pattern_value` warning.

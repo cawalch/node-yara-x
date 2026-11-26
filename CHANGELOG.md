@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- See docs/release-process.md for how this section is promoted. -->
 
 ### Added
+- **`kind` on thrown errors**: every synchronous entry point stamps the class of failure (`compile`, `timeout`, `io`, `mmap`, `protobuf`, `unknown-module`) so callers branch without matching message text. `code`, `message`, and `ruleCode` keep their values (#282).
+  - An async rejection carries no stamp: a task's compute phase has no JavaScript environment to decorate.
 - **`rulesFormatInfo()`**: reports the serialized-blob format version plus the YARA-X and package versions, so a blob cache can key on compatibility.
 - **Clearer blob mismatch errors**: `deserialize()` names all three versions when a blob came from an incompatible build, instead of a bare format number.
 - **Structured diagnostic locations**: `CompilerError` and `CompilerWarning` now populate `source`, `line`, and `column` instead of always returning `undefined`. File-based entry points report the rule file path.

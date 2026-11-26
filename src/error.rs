@@ -25,6 +25,52 @@ pub fn compile_error_to_napi(error: &CompileError, env: Option<&Env>) -> Error {
   }
 }
 
+/// Stable discriminator thrown as `kind`, so a caller can branch on the class
+/// of failure without parsing `message` (#282).
+///
+/// These values are the contract: adding one is a minor change, renaming one is
+/// not. A stamp never replaces `code`, `message`, or `ruleCode` - `code` stays
+/// the N-API status, and a compile error keeps its `E0nn` in `ruleCode`.
+pub const KIND_COMPILE: &str = "compile";
+/// A scan exceeded the deadline set with `setTimeout()`.
+pub const KIND_TIMEOUT: &str = "timeout";
+/// Reading a file failed (rule file, scanned file, or serialized blob).
+pub const KIND_IO: &str = "io";
+/// Memory-mapping a scanned file failed.
+pub const KIND_MMAP: &str = "mmap";
+/// A module produced protobuf that could not be decoded.
+pub const KIND_PROTOBUF: &str = "protobuf";
+/// A rule referenced a module this build does not include.
+pub const KIND_UNKNOWN_MODULE: &str = "unknown-module";
+/// A failure the wrapper does not classify yet.
+pub const KIND_UNKNOWN: &str = "unknown";
+
+/// Builds the error to throw, stamped with `kind` wherever a JS object exists.
+///
+/// The background tasks have no `Env`, so an async rejection keeps the plain
+/// error and `kind` is absent. Decoration must never cost a caller the message
+/// or the `code` it already had: any failure to build or stamp the object
+/// throws the plain error instead.
+fn stamped(env: Option<&Env>, status: Status, message: String, kind: &'static str) -> Error {
+  let Some(env) = env else {
+    return Error::new(status, message);
+  };
+
+  match env.create_error(Error::new(status, message.clone())) {
+    Ok(mut object) => {
+      if object.set_named_property("kind", kind).is_err() {
+        return Error::new(status, message);
+      }
+      // The object built here is the object that is thrown; see the note in
+      // [`decorated`].
+      Error::from_unknown_without_coercion(unsafe {
+        Unknown::from_raw_unchecked(env.raw(), object.raw())
+      })
+    }
+    Err(_) => Error::new(status, message),
+  }
+}
+
 /// Builds the thrown error as an object carrying the diagnostic fields.
 ///
 /// Returns `None` if the object cannot be built or decorated: the extra fields
@@ -34,6 +80,7 @@ fn decorated(env: &Env, message: &str, error: &CompileError) -> Option<Error> {
     .create_error(Error::new(Status::GenericFailure, message))
     .ok()?;
 
+  object.set_named_property("kind", KIND_COMPILE).ok()?;
   object.set_named_property("ruleCode", error.code()).ok()?;
 
   let (source, line, column) = diagnostic_location(error);
@@ -56,39 +103,58 @@ fn decorated(env: &Env, message: &str, error: &CompileError) -> Option<Error> {
   }))
 }
 
-/// Converts a YARA scan error into a N-API error.
+/// Converts a YARA scan error into a N-API error carrying a `kind`.
 ///
-pub fn scan_error_to_napi(error: yara_x::ScanError) -> Error {
+/// `env` is the current environment when one exists; the background tasks pass
+/// `None` and their rejections keep the plain, unstamped error.
+pub fn scan_error_to_napi(error: yara_x::ScanError, env: Option<&Env>) -> Error {
   match error {
-    yara_x::ScanError::Timeout => Error::new(Status::Cancelled, "Scan timed out"),
-    yara_x::ScanError::OpenError { path, err } => Error::new(
+    yara_x::ScanError::Timeout => stamped(
+      env,
+      Status::Cancelled,
+      "Scan timed out".into(),
+      KIND_TIMEOUT,
+    ),
+    yara_x::ScanError::OpenError { path, err } => stamped(
+      env,
       Status::GenericFailure,
       format!("I/O error (reading file {}): {err}", path.display()),
+      KIND_IO,
     ),
-    yara_x::ScanError::MapError { path, err } => Error::new(
+    yara_x::ScanError::MapError { path, err } => stamped(
+      env,
       Status::GenericFailure,
       format!("Failed to map file '{}': {err}", path.display()),
+      KIND_MMAP,
     ),
-    yara_x::ScanError::ProtoError { module, err } => Error::new(
+    yara_x::ScanError::ProtoError { module, err } => stamped(
+      env,
       Status::GenericFailure,
       format!("Protobuf error in module '{module}': {err}"),
+      KIND_PROTOBUF,
     ),
-    yara_x::ScanError::UnknownModule { module } => Error::new(
+    yara_x::ScanError::UnknownModule { module } => stamped(
+      env,
       Status::GenericFailure,
       format!("Unknown module: '{module}'"),
+      KIND_UNKNOWN_MODULE,
     ),
-    other => Error::new(
+    other => stamped(
+      env,
       Status::GenericFailure,
       format!("Unknown scan error: {other:?}"),
+      KIND_UNKNOWN,
     ),
   }
 }
 
-/// Wraps an I/O error with a description of the failed operation.
-pub fn io_error_to_napi(error: std::io::Error, context: &str) -> Error {
-  Error::new(
+/// Wraps an I/O error with a description of the failed operation, stamped `io`.
+pub fn io_error_to_napi(error: std::io::Error, context: &str, env: Option<&Env>) -> Error {
+  stamped(
+    env,
     Status::GenericFailure,
     format!("I/O error ({context}): {error}"),
+    KIND_IO,
   )
 }
 

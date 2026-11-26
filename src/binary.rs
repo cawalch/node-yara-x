@@ -456,7 +456,7 @@ impl Task for BinaryScanTask {
         ScanTarget::Buffer(buf) => scanner.scan(buf.as_ref()),
         ScanTarget::File(path) => scanner.scan_file(std::path::Path::new(path)),
       }
-      .map_err(crate::error::scan_error_to_napi)?;
+      .map_err(|e| crate::error::scan_error_to_napi(e, None))?;
 
       let (bytes, match_count, catalog) = extract_binary_scan_results(results);
       Ok(BinaryScanTaskOutput {
