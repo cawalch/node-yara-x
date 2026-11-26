@@ -7,6 +7,7 @@
 
 mod batch;
 mod binary;
+mod cancel;
 mod compiler;
 mod error;
 mod scanner;

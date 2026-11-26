@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- See docs/release-process.md for how this section is promoted. -->
 
 ### Added
+- **`AbortSignal` on the async scan methods**: pass a signal as the last argument to `scanAsync()`, `scanFileAsync()`, `isMatchAsync()`, `isFileMatchAsync()`, `scanBinaryAsync()`, `scanFileBinaryAsync()`, `scanFiles()` and `scanDirectory()` to stop work you no longer want (#285).
+  - A cancelled call rejects — it never throws from the call — with `name` `AbortError`, `kind` `cancelled`, and `code` `Cancelled`, whether the signal fired before the call or while the work sat queued. A signal that was already aborted at the call is refused without dispatching anything.
+  - An in-flight call hangs one `abort` listener on the signal and takes it off when the task settles, so a controller held for the lifetime of the process costs no memory per scan. Measured: 1,000,000 `scanAsync()` calls made with one signal keep RSS flat, where N-API's own `AbortSignal` wrapper grew it by ~250 bytes per call with nothing reclaimed.
+  - A batch cancelled part-way through resolves with the partial sweep, `cancelled: true`, and `cancelledFiles` counting the files that never started; directory traversal stops too. Up to `concurrency` files already in flight still finish, so `scannedFiles` can overshoot the abort by that much.
+  - A scan already running cannot be interrupted: `setTimeout()` and `setMaxScanSize()` stay the in-scan bounds, and the synchronous methods take no signal.
 - **`safeRules` preset**: one option for a rule set you did not write. It turns on `errorOnSlowPattern`, forces `ignoreInvalidRules` off, and disables `include` (#291).
   - Passing `false` for any of those alongside the preset does not re-enable it; a merged options object could otherwise undo the preset quietly.
   - `errorOnSlowLoop` is not in the bundle: measured on `/a+b/` it leaves the pattern compiling. The preset is compile-time only, so a running scan still needs `setTimeout()` or `setMaxScanSize()`.
