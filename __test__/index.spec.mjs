@@ -1031,6 +1031,53 @@ describe("yarax Tests", () => {
       );
     });
 
+    it("should leave the scanner usable when defineVariable() is rejected", () => {
+      // A global cannot be removed or renamed afterwards, so a name YARA-X
+      // refuses must not be recorded: every later read would meet `invalid
+      // identifier` with nothing left to undo.
+      for (const name of ["1bad", "a b", "x.y", ""]) {
+        const scanner = yarax.compile("rule ok { condition: true }");
+        throws(
+          () => scanner.defineVariable(name, 1),
+          /invalid identifier/,
+          `defineVariable(${JSON.stringify(name)}, 1) must throw`,
+        );
+        strictEqual(scanner.recompilations(), 0, "a rejected global must not rebuild");
+        deepStrictEqual(
+          scanner.getRules().map((rule) => rule.identifier),
+          ["ok"],
+          `defineVariable(${JSON.stringify(name)}) must leave the rule set readable`,
+        );
+        scanner.defineVariable("usable_after", 1);
+        strictEqual(
+          scanner.ruleCount,
+          1,
+          "a later valid global must still be accepted after a rejected one",
+        );
+      }
+    });
+
+    it("should defer a global's type conflict to the next read, recoverably", () => {
+      // Judging the value means compiling the rules that read it, so it stays
+      // deferred — and unlike a rejected name, it can be undone.
+      const scanner = yarax.compile("rule r { condition: x_int > 3 }", {
+        defineVariables: { x_int: 1 },
+      });
+      scanner.defineVariable("x_int", "a string");
+      strictEqual(scanner.recompilations(), 0, "a value change must not rebuild");
+      throws(
+        () => scanner.ruleCount,
+        /mismatching types/,
+        "the conflict reports on the read that needs the rules",
+      );
+      scanner.defineVariable("x_int", 7);
+      strictEqual(
+        scanner.isMatch(Buffer.from("")),
+        true,
+        "redefining with a matching type must recover the scanner",
+      );
+    });
+
     it("should keep sources out of previously-set namespaces", () => {
       const scanner = yarax.compile("rule in_x { condition: true }", {
         namespace: "x",

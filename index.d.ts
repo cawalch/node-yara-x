@@ -296,11 +296,13 @@ export declare class YaraX {
    * — adding 120 rule files costs one rebuild instead of 120.
    *
    * A rule that is only wrong in combination with the rest of the set — it
-   * references a rule or tag the other sources do not define, or reuses one of
-   * their names — is checked by that rebuild, so it throws from the next
+   * references a rule or global the other sources do not define, reuses one of
+   * their names, or clashes with an identifier one of them brings in — is
+   * checked by that rebuild, so it throws from the next
    * `getRules()`/`serialize()`/`scan()` instead of here. Call `getRules()`
    * after the additions to keep the strict timing; use `ignoreInvalidRules` to
-   * skip and report such a rule instead.
+   * skip and report such a rule instead, since a strict scanner has nothing
+   * that can skip it and will report it on every read.
    */
   addRuleSource(ruleSource: string, namespace?: string | undefined | null): void
   /**
@@ -325,9 +327,15 @@ export declare class YaraX {
   /**
    * Defines a variable for the YARA compiler.
    *
-   * The value is validated here; the rules that read it are recompiled with
-   * everything else on the next read or scan, so a type conflict with an
-   * existing rule is reported then.
+   * The definition is checked here — the name must be one YARA-X accepts —
+   * rather than by the deferred rebuild: a global cannot be removed or renamed
+   * afterwards, so recording a name the compiler rejects would leave every
+   * later read meeting `invalid identifier` with nothing left to undo. A
+   * rejected call leaves the globals as they were, like a rejected addition.
+   *
+   * What is left to the rebuild is how the existing rules read the value, and
+   * that is recoverable: a type conflict reports `E003` on the next read, and
+   * redefining the same name with a matching type fixes the rule set.
    */
   defineVariable(name: string, value: string | number | boolean | bigint): void
   /** Scans multiple files concurrently across a Rayon worker thread pool. */

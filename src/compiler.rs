@@ -329,12 +329,25 @@ pub fn ensure_no_uncovered_errors(compiler: &Compiler) -> Result<()> {
 /// Tells whether a compile error can only be judged against rules that are not
 /// part of the batch being validated.
 ///
-/// `UnknownIdentifier` (`E009`) is a reference to a rule or a global, and
-/// `UnknownTag` (`E040`) to a tag defined on some rule. Either can be satisfied
-/// by a source that has not been added yet (or by a later `defineVariable()`),
-/// so an isolated compilation cannot decide them. Every other error names
-/// something inside the source it was reported on, so isolation does not change
-/// the verdict.
+/// `UnknownIdentifier` (`E009`) is a reference to a rule or a global, and either
+/// can be supplied by a source that has not been added yet (or by a later
+/// `defineVariable()`), so an isolated compilation cannot decide it. Every other
+/// error names something inside the source it was reported on, so isolation does
+/// not change the verdict.
+///
+/// `UnknownTag` (`E040`) is deferred with `E009` as a guard rather than a live
+/// path: in yara-x 1.23 it is raised only by the `Tags` linter, which reports a
+/// tag outside the configured allow-list —
+///
+/// > `TagsMode::Allowed(allowed) => { for tag in tags.iter() { if
+/// > !allowed.iter().any(|a| a == tag.name) { … errors::UnknownTag::build(…) } }
+/// > }`
+/// > — `yara-x-1.23.0/src/compiler/linters.rs:195-201`
+///
+/// — i.e. a rule-level complaint about a compiler option, not about a tag other
+/// rules define. That option is not exposed by these bindings today, so nothing
+/// currently reaches this arm; deferring it keeps a future allow-list from
+/// turning into an add-time rejection that only the rebuilt set could justify.
 fn resolvable_only_with_other_sources(error: &CompileError) -> bool {
   matches!(
     error,
@@ -348,18 +361,27 @@ fn resolvable_only_with_other_sources(error: &CompileError) -> bool {
 /// This is the cheap half of incremental recompilation — `O(new sources)`
 /// instead of `O(everything)` — which is what lets `addRuleSource()` reject a
 /// broken file where it was called while the full rebuild waits until the rule
-/// set is next read (see `YaraX::ensure_compiled`).
+/// set is next read (see `YaraX::ensure_compiled`). Called with an empty
+/// `sources` it checks the stored options and the globals alone, which is how
+/// `defineVariable()` rejects a name YARA-X would refuse without compiling a
+/// single rule.
 ///
 /// What is still reported here is everything a source is guilty of on its own:
 /// syntax, invalid UTF-8, include and module failures, and the per-rule errors
 /// that name something inside the source (invalid pattern, wrong type, slow
-/// pattern, a duplicate within the batch, …). Two classes need the rest of the
-/// rule set to be judged and are therefore reported by the rebuild instead:
+/// pattern, a duplicate within the batch, …). Anything whose cause lives in a
+/// source that is not part of this batch is left to the rebuild; the classes
+/// measured on this binding are:
 ///
-/// - a reference to a rule, tag, or global that other sources or a later
-///   `defineVariable()` provide, or none of them does (`E009`, `E040`), and
-/// - a rule identifier a source already on the scanner uses (`E012` across
-///   sources).
+/// - a reference to a rule or global that another source or a later
+///   `defineVariable()` supplies, or none of them does (`E009`, plus `E040`,
+///   see [`resolvable_only_with_other_sources`]),
+/// - a rule name a source already on the scanner uses (`E012` across sources),
+///   and
+/// - a rule identifier that clashes with one another source brings in — a rule
+///   named `pe` added after a source that does `import "pe"` is `E013` across
+///   sources. Against a *global* it still reports here, because the globals are
+///   applied below.
 ///
 /// For those the verdict is the one a single compilation of the same sources in
 /// the same order would have reached — it only arrives at the next read or scan,
