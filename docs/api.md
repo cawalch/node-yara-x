@@ -86,6 +86,7 @@ The README's [API](../README.md#api) section lists the same surface grouped by t
 | `conditionOptimization` | `boolean` | Enables rule condition optimization. |
 | `errorOnSlowPattern` | `boolean` | Promotes slow pattern warnings to errors. |
 | `errorOnSlowLoop` | `boolean` | Promotes slow loop warnings to errors. |
+| `safeRules` | `boolean` | Fail-closed preset for untrusted rules: turns on `errorOnSlowPattern`, forces `ignoreInvalidRules` off, and disables `include`. Passing `false` for any of them alongside it does not override the preset. |
 | `maxWarnings` | `number` | Maximum number of warnings reported. |
 | `disableWarnings` | `string[]` | Warning codes to suppress. |
 | `enableAllWarnings` | `boolean` | Turns all compiler warnings on or off (default `true`). |

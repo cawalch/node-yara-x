@@ -425,6 +425,21 @@ The timeout is a best-effort deadline: YARA-X stops at the next work-unit bounda
 const rules = compile(untrustedSource, { errorOnSlowPattern: true }); // throws E018 on a pathological regex
 ```
 
+For rules you did not write, `safeRules: true` is the one switch, so you do not have to know which options combine into a safe read:
+
+```javascript
+// errorOnSlowPattern is part of the preset, so this throws E018 on a pathological regex
+const rules = compile(untrustedSource, { safeRules: true });
+```
+
+| Limb | Effect |
+| :--- | :--- |
+| `errorOnSlowPattern` | A pathological regex throws `E018` instead of surviving as a `slow_pattern` warning. |
+| `ignoreInvalidRules` | Forced off, so a hostile corpus is not silently trimmed. |
+| `include` | Disabled, so a rule set cannot choose which files the compiler opens (`E044`). |
+
+Naming any of them `false` alongside the preset does not re-enable it — an options object assembled by merging can otherwise undo a preset quietly. `errorOnSlowLoop` is deliberately not in the bundle: measured on `/a+b/`, it leaves the pattern compiling. The preset is compile-time only, so a scan already running is still bounded by `setTimeout()` and `setMaxScanSize()`.
+
 ### Match context
 
 `setMatchContextSize()` returns surrounding bytes with every match, which is what triage output usually needs:
@@ -547,7 +562,7 @@ cosign verify-blob --bundle yara-x.<target>.node.sigstore yara-x.<target>.node \
 | Compile incrementally | `addRuleSource()`, `addRuleSources()`, `addRuleFile()`, `defineVariable()` |
 | Inspect and store | `ruleCount`, `getRules()`, `getImports()`, `serialize()` |
 | Reports | `getWarnings()`, `getIgnoredRules()`, `getCompilationErrors()` |
-| Guard the scan | `setMaxMatchesPerPattern()`, `setMaxScanSize()`, `setTimeout()`, `setFastScan()`, `setUseMmap()`, `errorOnSlowPattern` |
+| Guard the scan | `setMaxMatchesPerPattern()`, `setMaxScanSize()`, `setTimeout()`, `setFastScan()`, `setUseMmap()`, `errorOnSlowPattern`, `safeRules` |
 | Log and profile | `setConsoleLog()`, `getSlowestRules()`, `clearProfilingData()` |
 | WebAssembly | `compileToWasm()`, `compileFileToWasm()`, `emitWasmFile()`, `emitWasmFileAsync()` |
 | Options | `CompilerOptions` (compile-time), `BatchScanOptions` (batch scans), per-scan `variables` argument |
