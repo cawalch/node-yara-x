@@ -91,8 +91,9 @@ pub struct YaraX {
   /// Sink for messages emitted by rules through the `console` module. Held
   /// behind `Arc` because `ThreadsafeFunction` is not `Clone` and the scanner
   /// closure must own its handle for the `'static` scanner.
-  pub(crate) console_log:
-    Option<std::sync::Arc<ThreadsafeFunction<String, Unknown<'static>, String, Status, false>>>,
+  pub(crate) console_log: Option<
+    std::sync::Arc<ThreadsafeFunction<String, Unknown<'static>, String, Status, false, true>>,
+  >,
 }
 
 impl YaraX {
@@ -233,6 +234,7 @@ impl YaraX {
           context_data,
           context_match_offset,
           xor_key: match_item.xor_key(),
+          data_bytes: Some(Buffer::from(match_item.data())),
         });
       }
     }
@@ -605,10 +607,15 @@ impl YaraX {
   ///
   /// Messages arrive on the Node.js event loop, so a synchronous scan returns
   /// before the callback runs. Pass nothing to discard rule output again.
+  ///
+  /// The callback handle is created weak (un-referenced), so setting one does
+  /// not keep the Node.js process alive: a script that finishes scanning exits
+  /// normally. A consequence is that rule-log messages still queued when the
+  /// process exits may not be delivered.
   #[napi]
   pub fn set_console_log(
     &mut self,
-    callback: Option<ThreadsafeFunction<String, Unknown<'static>, String, Status, false>>,
+    callback: Option<ThreadsafeFunction<String, Unknown<'static>, String, Status, false, true>>,
   ) {
     self.console_log = callback.map(std::sync::Arc::new);
     self.invalidate_scanner_cache();
@@ -896,6 +903,10 @@ impl YaraX {
 
   /// Scans the provided data asynchronously using the compiled YARA rules.
   ///
+  /// The input buffer is copied when this method is called, so mutating the
+  /// buffer afterwards does not change the scan result. The synchronous
+  /// [`scan`](Self::scan) reads the buffer directly and stays zero-copy.
+  ///
   /// # Arguments
   ///
   /// * `data` - The data to scan
@@ -914,7 +925,7 @@ impl YaraX {
 
     Ok(AsyncTask::new(crate::tasks::ScanTask::new(
       self.rules.clone(),
-      crate::tasks::ScanTarget::Buffer(data),
+      crate::tasks::ScanTarget::Buffer(data.to_vec()),
       vars_map,
       self.task_scan_options(false),
     )))
@@ -951,6 +962,9 @@ impl YaraX {
   /// This method is a fast-path boolean check that returns true as soon as any rule matches,
   /// without allocating or constructing match objects, tags, or metadata.
   ///
+  /// The input buffer is copied when this method is called, so mutating the
+  /// buffer afterwards does not change the result.
+  ///
   /// # Arguments
   ///
   /// * `data` - The data to scan
@@ -972,7 +986,7 @@ impl YaraX {
 
     Ok(AsyncTask::new(crate::tasks::IsMatchTask::new(
       self.rules.clone(),
-      crate::tasks::ScanTarget::Buffer(data),
+      crate::tasks::ScanTarget::Buffer(data.to_vec()),
       vars_map,
       self.task_scan_options(false),
     )))
@@ -1012,6 +1026,9 @@ impl YaraX {
 
   /// Scans the provided data asynchronously returning a flat binary match buffer and catalog.
   ///
+  /// The input buffer is copied when this method is called, so mutating the
+  /// buffer afterwards does not change the result.
+  ///
   /// # Arguments
   ///
   /// * `data` - The data to scan
@@ -1033,7 +1050,7 @@ impl YaraX {
 
     Ok(AsyncTask::new(BinaryScanTask::new(
       self.rules.clone(),
-      crate::tasks::ScanTarget::Buffer(data),
+      crate::tasks::ScanTarget::Buffer(data.to_vec()),
       vars_map,
       self.task_scan_options(false),
     )))
@@ -1253,6 +1270,7 @@ impl YaraX {
     let output = execute_batch_scan(
       self.rules.clone(),
       file_paths,
+      Vec::new(),
       scan_opts,
       combined_vars,
       batch_opts,
@@ -1305,7 +1323,7 @@ impl YaraX {
       batch_opts.exclude_patterns.as_deref(),
     )?;
 
-    let files = collect_directory_files(
+    let (files, traversal_errors) = collect_directory_files(
       &dir_path,
       batch_opts.max_depth,
       batch_opts.follow_symlinks,
@@ -1317,6 +1335,7 @@ impl YaraX {
     let output = execute_batch_scan(
       self.rules.clone(),
       files,
+      traversal_errors,
       scan_opts,
       combined_vars,
       batch_opts,

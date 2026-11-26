@@ -64,7 +64,10 @@ pub struct BatchFileMatchData {
 #[napi(object)]
 #[derive(Clone)]
 pub struct BatchFileError {
-  /// Path of the file that failed.
+  /// Path of the file or directory that failed.
+  ///
+  /// Directory scans report traversal failures here, so this may name a
+  /// directory rather than a file.
   pub file_path: String,
   /// Error description.
   pub error: String,
@@ -74,6 +77,10 @@ pub struct BatchFileError {
 #[napi(object)]
 pub struct BatchScanResult<'a> {
   /// Total files discovered or submitted for scanning.
+  ///
+  /// For directory scans this counts files discovered after include/exclude
+  /// and size filtering. Files under a directory that could not be traversed
+  /// are not discovered, so compare this with `errors`.
   pub total_files: u32,
   /// Total files successfully scanned.
   pub scanned_files: u32,
@@ -82,6 +89,11 @@ pub struct BatchScanResult<'a> {
   /// Results per file (matching files only, or all files if include_clean_files is true).
   pub results: Vec<BatchFileMatch<'a>>,
   /// Errors encountered during the batch scan.
+  ///
+  /// Includes per-file scan failures and directory traversal failures. A
+  /// traversal error's `filePath` is the directory that could not be read.
+  /// The scan keeps going: a partial sweep plus reported errors beats losing
+  /// the results of everything that was readable.
   pub errors: Vec<BatchFileError>,
   /// Total scan duration in milliseconds.
   pub duration_ms: f64,
@@ -152,6 +164,10 @@ impl PathFilter {
 }
 
 /// Recursively collects matching file paths from a root directory.
+///
+/// Traversal failures do not abort the walk. They are returned alongside the
+/// files that were discovered so the caller can report them in
+/// [`BatchScanResult::errors`].
 pub fn collect_directory_files(
   dir_path: &str,
   max_depth: Option<u32>,
@@ -159,7 +175,7 @@ pub fn collect_directory_files(
   min_file_size: Option<i64>,
   max_file_size: Option<i64>,
   filter: &PathFilter,
-) -> Result<Vec<String>> {
+) -> Result<(Vec<String>, Vec<BatchFileError>)> {
   let root = Path::new(dir_path);
   if !root.exists() {
     return Err(Error::new(
@@ -183,6 +199,7 @@ pub fn collect_directory_files(
   }
 
   let mut files = Vec::new();
+  let mut traversal_errors = Vec::new();
   for entry in walker {
     match entry {
       Ok(e) => {
@@ -211,25 +228,27 @@ pub fn collect_directory_files(
         }
       }
       Err(err) => {
-        // Skip unreadable files/permission issues during traversal,
-        // but if root failed completely, bubble error.
-        if files.is_empty() && !root.exists() {
-          return Err(Error::new(
-            Status::GenericFailure,
-            format!("Error traversing directory {dir_path}: {err}"),
-          ));
-        }
+        // Keep scanning the rest of the tree, but surface the failure: a
+        // permission error or I/O failure must not look like a clean sweep.
+        traversal_errors.push(BatchFileError {
+          file_path: err
+            .path()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| dir_path.to_string()),
+          error: err.to_string(),
+        });
       }
     }
   }
 
-  Ok(files)
+  Ok((files, traversal_errors))
 }
 
 /// Core multi-threaded batch scanning engine.
 pub fn execute_batch_scan(
   rules: Arc<Rules>,
   file_paths: Vec<String>,
+  traversal_errors: Vec<BatchFileError>,
   scan_options: TaskScanOptions,
   variables: Option<VariableMap>,
   batch_options: BatchScanOptions,
@@ -301,7 +320,7 @@ pub fn execute_batch_scan(
   } else {
     0
   });
-  let mut errors = Vec::new();
+  let mut errors = traversal_errors;
   let mut scanned_files = 0u32;
   let mut matched_files = 0u32;
 
@@ -403,8 +422,8 @@ impl Task for BatchScanTask {
   type JsValue = BatchScanResult<'static>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    let files = match &mut self.target {
-      BatchScanTarget::Files(paths) => std::mem::take(paths),
+    let (files, traversal_errors) = match &mut self.target {
+      BatchScanTarget::Files(paths) => (std::mem::take(paths), Vec::new()),
       BatchScanTarget::Directory(dir_path) => {
         let filter = PathFilter::new(
           self.batch_options.include_patterns.as_deref(),
@@ -424,6 +443,7 @@ impl Task for BatchScanTask {
     execute_batch_scan(
       self.rules.clone(),
       files,
+      traversal_errors,
       self.scan_options.clone(),
       self.variables.clone(),
       self.batch_options.clone(),

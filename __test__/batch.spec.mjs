@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compile } from "../index.js";
@@ -234,6 +234,46 @@ test("Native Multi-Threaded Batch and Directory Scanning", async (t) => {
     } finally {
       await rm(sizeTestDir, { recursive: true, force: true });
     }
+  });
+
+  await t.test("scanDirectory - reports traversal errors for unreadable directories", async (t) => {
+    if (process.platform === "win32") {
+      t.skip("Windows does not enforce POSIX directory mode bits");
+      return;
+    }
+    if (typeof process.getuid === "function" && process.getuid() === 0) {
+      t.skip("root bypasses directory mode bits");
+      return;
+    }
+
+    const rootDir = await mkdtemp(join(tmpdir(), "yara-x-traversal-test-"));
+    const lockedDir = join(rootDir, "locked");
+    await mkdir(lockedDir);
+    await writeFile(join(rootDir, "open.txt"), "clean file");
+    await writeFile(join(lockedDir, "hidden.txt"), "SUSPICIOUS_PAYLOAD");
+    await chmod(lockedDir, 0o000);
+
+    t.after(async () => {
+      await chmod(lockedDir, 0o755).catch(() => {});
+      await rm(rootDir, { recursive: true, force: true });
+    });
+
+    const syncResult = scanner.scanDirectorySync(rootDir, { includeCleanFiles: true });
+    assert.ok(syncResult.errors.length >= 1, "sync scan must report the traversal error");
+    assert.ok(
+      syncResult.errors.some((error) => error.filePath.includes("locked")),
+      `traversal error must name the unreadable directory: ${JSON.stringify(syncResult.errors)}`,
+    );
+
+    const asyncResult = await scanner.scanDirectory(rootDir, { includeCleanFiles: true });
+    assert.ok(asyncResult.errors.length >= 1, "async scan must report the traversal error");
+    assert.ok(
+      asyncResult.errors.some((error) => error.filePath.includes("locked")),
+      `traversal error must name the unreadable directory: ${JSON.stringify(asyncResult.errors)}`,
+    );
+
+    // The readable part of the tree is still scanned.
+    assert.ok(syncResult.results.some((result) => result.filePath.endsWith("open.txt")));
   });
 
   await t.test("scanDirectory - throws on invalid directory", async () => {

@@ -39,13 +39,25 @@ export declare class BinaryMatchView {
   getRule(index: number): RuleInfo | null
   /** Gets the pattern identifier for the match record at `index`. */
   getPattern(index: number): string | null
-  /** Slices the matched byte slice directly out of the source buffer. */
+  /**
+   * Slices the matched byte slice directly out of the source buffer.
+   *
+   * Pass the same bytes that were scanned; the view does not retain the
+   * source. Async scans copy their input, so pass the original buffer
+   * unchanged.
+   */
   getSlice(index: number, source: Buffer): Buffer | null
   /**
    * Lazily materializes all binary match records into the standard `RuleMatch` object graph.
    *
-   * If `source` buffer is provided, the matched data bytes are sliced as strings into `MatchData.data`.
-   * Otherwise, `MatchData.data` is an empty string.
+   * If `source` buffer is provided, the matched bytes are sliced into
+   * `MatchData.data` (lossy UTF-8) and `MatchData.dataBytes` (exact bytes).
+   * Otherwise, `MatchData.data` is an empty string and `dataBytes` is absent.
+   *
+   * Pass the same bytes that were scanned; the view does not retain the
+   * source. Async scans copy their input, so mutating the buffer between
+   * `scanBinaryAsync()` and this call yields slices that no longer match the
+   * scan.
    */
   toRuleMatches(source?: Buffer): Array<RuleMatch>
 }
@@ -132,6 +144,11 @@ export declare class YaraX {
    *
    * Messages arrive on the Node.js event loop, so a synchronous scan returns
    * before the callback runs. Pass nothing to discard rule output again.
+   *
+   * The callback handle is created weak (un-referenced), so setting one does
+   * not keep the Node.js process alive: a script that finishes scanning exits
+   * normally. A consequence is that rule-log messages still queued when the
+   * process exits may not be delivered.
    */
   setConsoleLog(callback?: (((arg: string) => unknown)) | undefined | null): void
   /**
@@ -273,6 +290,10 @@ export declare class YaraX {
   /**
    * Scans the provided data asynchronously using the compiled YARA rules.
    *
+   * The input buffer is copied when this method is called, so mutating the
+   * buffer afterwards does not change the scan result. The synchronous
+   * [`scan`](Self::scan) reads the buffer directly and stays zero-copy.
+   *
    * # Arguments
    *
    * * `data` - The data to scan
@@ -302,6 +323,9 @@ export declare class YaraX {
    * This method is a fast-path boolean check that returns true as soon as any rule matches,
    * without allocating or constructing match objects, tags, or metadata.
    *
+   * The input buffer is copied when this method is called, so mutating the
+   * buffer afterwards does not change the result.
+   *
    * # Arguments
    *
    * * `data` - The data to scan
@@ -330,6 +354,9 @@ export declare class YaraX {
   isFileMatchAsync(filePath: string, variables?: Record<string, string | number | boolean>): Promise<boolean>
   /**
    * Scans the provided data asynchronously returning a flat binary match buffer and catalog.
+   *
+   * The input buffer is copied when this method is called, so mutating the
+   * buffer afterwards does not change the result.
    *
    * # Arguments
    *
@@ -472,7 +499,12 @@ export interface BannedModule {
 
 /** Error encountered while scanning an individual file in a batch. */
 export interface BatchFileError {
-  /** Path of the file that failed. */
+  /**
+   * Path of the file or directory that failed.
+   *
+   * Directory scans report traversal failures here, so this may name a
+   * directory rather than a file.
+   */
   filePath: string
   /** Error description. */
   error: string
@@ -512,7 +544,13 @@ export interface BatchScanOptions {
 
 /** Aggregated result of a batch scan. */
 export interface BatchScanResult {
-  /** Total files discovered or submitted for scanning. */
+  /**
+   * Total files discovered or submitted for scanning.
+   *
+   * For directory scans this counts files discovered after include/exclude
+   * and size filtering. Files under a directory that could not be traversed
+   * are not discovered, so compare this with `errors`.
+   */
   totalFiles: number
   /** Total files successfully scanned. */
   scannedFiles: number
@@ -520,7 +558,14 @@ export interface BatchScanResult {
   matchedFiles: number
   /** Results per file (matching files only, or all files if include_clean_files is true). */
   results: Array<BatchFileMatch>
-  /** Errors encountered during the batch scan. */
+  /**
+   * Errors encountered during the batch scan.
+   *
+   * Includes per-file scan failures and directory traversal failures. A
+   * traversal error's `filePath` is the directory that could not be read.
+   * The scan keeps going: a partial sweep plus reported errors beats losing
+   * the results of everything that was readable.
+   */
   errors: Array<BatchFileError>
   /** Total scan duration in milliseconds. */
   durationMs: number
@@ -554,7 +599,7 @@ export interface BinaryScanResult {
  *
  * A `YaraX` instance with compiled rules
  */
-export declare function compile(ruleSource: string, options?: CompilerOptionsType | undefined | null): YaraXImpl
+export declare function compile(ruleSource: string, options?: CompilerOptions | undefined | null): YaraX
 
 /**
  * Compiles a YARA rule file to a WASM file.
@@ -569,7 +614,7 @@ export declare function compile(ruleSource: string, options?: CompilerOptionsTyp
  *
  * Ok(()) on success, or an error if reading, compilation, or emission fails
  */
-export declare function compileFileToWasm(rulePath: string, outputPath: string, options?: CompilerOptionsType | undefined | null): void
+export declare function compileFileToWasm(rulePath: string, outputPath: string, options?: CompilerOptions | undefined | null): void
 
 /**
  * An error generated by the YARA compiler.
@@ -707,7 +752,7 @@ export interface CompilerWarning {
  *
  * Ok(()) on success, or an error if compilation or emission fails
  */
-export declare function compileToWasm(ruleSource: string, outputPath: string, options?: CompilerOptionsType | undefined | null): void
+export declare function compileToWasm(ruleSource: string, outputPath: string, options?: CompilerOptions | undefined | null): void
 
 /**
  * Creates a new `YaraX` instance with empty rules and no source code.
@@ -716,7 +761,7 @@ export declare function compileToWasm(ruleSource: string, outputPath: string, op
  *
  * A new `YaraX` instance with empty rules
  */
-export declare function create(): YaraXImpl
+export declare function create(): YaraX
 
 /**
  * Creates a new `YaraX` instance from a serialized rules blob.
@@ -735,7 +780,7 @@ export declare function create(): YaraXImpl
  *
  * A `YaraX` instance with the restored rules
  */
-export declare function deserialize(data: Buffer): YaraXImpl
+export declare function deserialize(data: Buffer): YaraX
 
 /**
  * Creates a new `YaraX` instance from a file containing YARA rules.
@@ -749,7 +794,7 @@ export declare function deserialize(data: Buffer): YaraXImpl
  *
  * A `YaraX` instance with compiled rules from the file
  */
-export declare function fromFile(rulePath: string, options?: CompilerOptionsType | undefined | null): YaraXImpl
+export declare function fromFile(rulePath: string, options?: CompilerOptions | undefined | null): YaraX
 
 /**
  * A rule that was skipped during compilation.
@@ -786,7 +831,12 @@ export interface MatchData {
   offset: number
   /** The length of the matched data. */
   length: number
-  /** The matched data as a string. */
+  /**
+   * The matched data decoded as a UTF-8 string.
+   *
+   * Invalid UTF-8 becomes replacement characters, so this is lossy. Use
+   * [`data_bytes`](MatchData::data_bytes) when the exact matched bytes matter.
+   */
   data: string
   /** The identifier of the pattern that matched. */
   identifier: string
@@ -799,6 +849,19 @@ export interface MatchData {
    * `xor` modifier. Absent for plain matches.
    */
   xorKey?: number
+  /**
+   * The exact matched bytes, byte-for-byte.
+   *
+   * Present whenever the scanner has the matched data (always for `scan`
+   * results, and for `toRuleMatches()` when a source buffer is supplied).
+   * Unlike `data`, this round-trips binary patterns that match invalid
+   * UTF-8.
+   *
+   * Populating this field copies the matched bytes, so high-density scans
+   * pay one allocation per match. Use `setMaxMatchesPerPattern()` or the
+   * binary match API when the bytes are not needed.
+   */
+  dataBytes?: Buffer
 }
 
 /** Metadata for a rule that matched in a binary scan. */
@@ -866,4 +929,4 @@ export interface RuleSource {
  *
  * A `CompileResult` containing any warnings and errors
  */
-export declare function validate(ruleSource: string, options?: CompilerOptionsType | undefined | null): CompileResult
+export declare function validate(ruleSource: string, options?: CompilerOptions | undefined | null): CompileResult

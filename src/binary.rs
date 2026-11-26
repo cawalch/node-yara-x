@@ -197,6 +197,10 @@ impl BinaryMatchView {
   }
 
   /// Slices the matched byte slice directly out of the source buffer.
+  ///
+  /// Pass the same bytes that were scanned; the view does not retain the
+  /// source. Async scans copy their input, so pass the original buffer
+  /// unchanged.
   #[napi]
   pub fn get_slice(&self, index: u32, source: Buffer) -> Option<Buffer> {
     let offset = self.get_offset(index)? as usize;
@@ -210,8 +214,14 @@ impl BinaryMatchView {
 
   /// Lazily materializes all binary match records into the standard `RuleMatch` object graph.
   ///
-  /// If `source` buffer is provided, the matched data bytes are sliced as strings into `MatchData.data`.
-  /// Otherwise, `MatchData.data` is an empty string.
+  /// If `source` buffer is provided, the matched bytes are sliced into
+  /// `MatchData.data` (lossy UTF-8) and `MatchData.dataBytes` (exact bytes).
+  /// Otherwise, `MatchData.data` is an empty string and `dataBytes` is absent.
+  ///
+  /// Pass the same bytes that were scanned; the view does not retain the
+  /// source. Async scans copy their input, so mutating the buffer between
+  /// `scanBinaryAsync()` and this call yields slices that no longer match the
+  /// scan.
   #[napi(ts_args_type = "source?: Buffer")]
   pub fn to_rule_matches<'a>(
     &self,
@@ -236,16 +246,19 @@ impl BinaryMatchView {
           let offset = record.offset as i64;
           let length = record.length as i64;
 
-          let data = if let Some(src) = src_ref {
+          let (data, data_bytes) = if let Some(src) = src_ref {
             let start = record.offset as usize;
             let end = start.saturating_add(record.length as usize);
             if let Some(slice) = src.get(start..end) {
-              String::from_utf8_lossy(slice).into_owned()
+              (
+                String::from_utf8_lossy(slice).into_owned(),
+                Some(Buffer::from(slice)),
+              )
             } else {
-              String::new()
+              (String::new(), None)
             }
           } else {
-            String::new()
+            (String::new(), None)
           };
 
           rule_matches_map[rule_idx].push(MatchData {
@@ -256,6 +269,7 @@ impl BinaryMatchView {
             context_data: None,
             context_match_offset: None,
             xor_key: decode_xor_key(record.flags),
+            data_bytes,
           });
         }
       }

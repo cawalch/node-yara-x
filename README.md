@@ -101,6 +101,8 @@ const matches = await rules.scanFileAsync("./samples/large_file.bin");
 console.log(`Found ${matches.length} matching rule(s).`);
 ```
 
+The buffer-based async methods (`scanAsync()`, `isMatchAsync()`, and `scanBinaryAsync()`) copy their input when the call is made. Mutating the `Buffer` after the call therefore does not change the scan result. The synchronous `scan()` / `isMatch()` / `scanBinary()` variants read the buffer directly and remain zero-copy.
+
 ## Fast boolean matching
 
 When you only need to know whether any rule matched (e.g. filtering clean files in a high-throughput pipeline), `isMatch()` and `isFileMatch()` avoid allocating `RuleMatch`, `MatchData`, string buffers, and metadata objects:
@@ -523,6 +525,20 @@ for (const match of matches[0]?.matches ?? []) {
 }
 ```
 
+### Matched bytes
+
+`MatchData.data` is a UTF-8 view of the match, so invalid bytes become replacement characters. Scan results additionally carry `dataBytes`, the exact matched slice as a `Buffer` (`toRuleMatches()` sets it when you pass the source buffer):
+
+```javascript
+const [match] = rules.scan(Buffer.from([0x80, 0xff, 0x41]));
+match.matches[0].data;      // "\uFFFD\uFFFDA" (lossy)
+match.matches[0].dataBytes; // <Buffer 80 ff 41>
+```
+
+`dataBytes` makes binary patterns round-trippable without re-slicing the input yourself, which matters for `scanFile()` results where you hold no buffer. It is copied per match, so scans that expect thousands of matches should consider `setMaxMatchesPerPattern()` or the binary match API.
+
+Metadata values are decoded the same way: values that YARA stores as raw bytes (invalid UTF-8, or strings containing NUL or escape bytes) become lossy strings rather than being dropped, and the original bytes are not exposed.
+
 ### XOR key matches
 
 Patterns compiled with an `xor` modifier report which key produced the match, so an obfuscated sample can be unpacked without a second scan:
@@ -547,7 +563,7 @@ xorKey; // 0x42
 Buffer.from(data, "latin1").map((byte) => byte ^ xorKey).toString(); // "malware"
 ```
 
-The matched bytes stay as they appear in the sample, since `data` is a lossy UTF-8 view of them; XOR keys above `0x7f` can produce bytes that do not round-trip as a string. Use `scanBinary()` with `getSlice()` when you need the exact bytes.
+The matched bytes stay as they appear in the sample, since `data` is a lossy UTF-8 view of them; XOR keys above `0x7f` can produce bytes that do not round-trip as a string. Use `match.matches[0].dataBytes` (or `scanBinary()` with `getSlice()`) when you need the exact bytes.
 
 `xorKey` is absent for plain patterns, so a rule mixing plain and XOR'd strings tells the two apart without inspecting the data.
 
@@ -565,6 +581,8 @@ rules.setConsoleLog((message) => console.log(`[rule] ${message}`));
 rules.scan(buffer); // logs on the next tick
 rules.setConsoleLog(); // stop receiving messages
 ```
+
+Setting a callback does not keep the Node.js process alive, so a script that finishes scanning exits normally. Rule-log messages still queued when the process exits may not be delivered.
 
 ### Rule profiling
 
@@ -671,7 +689,7 @@ When pattern details, offsets, and metadata are not needed, `isMatch()` avoids a
 
 ### Asynchronous scanning throughput
 
-`scanAsync()` and `isMatchAsync()` reuse thread-local scanner instances across libuv worker threads, keeping per-task dispatch overhead minimal.
+`scanAsync()` and `isMatchAsync()` reuse thread-local scanner instances across libuv worker threads to keep per-task dispatch overhead low. Buffer inputs are copied once at dispatch (see [Scan asynchronously](#scan-asynchronously)); these numbers include that copy.
 
 Benchmark with 2,000 requests against a compiled pattern:
 

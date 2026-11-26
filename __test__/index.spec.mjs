@@ -1,9 +1,10 @@
 import yarax from "../index.js";
 import { existsSync, mkdirSync, writeFileSync, rmSync, statSync, readFileSync } from "fs";
 import { join, dirname } from "path";
-import { strictEqual, ok, fail, throws, deepStrictEqual } from "assert";
+import { strictEqual, ok, fail, throws, deepStrictEqual, notStrictEqual } from "assert";
 import { describe, it, before, after } from "node:test";
 import { fileURLToPath } from "url";
+import { spawnSync } from "node:child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1236,6 +1237,56 @@ describe("yarax Tests", () => {
       true,
       "Boolean metadata should be preserved",
     );
+  });
+
+  it("should not collapse escaped metadata strings to 'unknown'", () => {
+    const rule = String.raw`
+    rule test_metadata_bytes {
+      meta:
+        author = "Alice"
+        latin1 = "Ren\xA9 "
+        with_nul = "a\x00b"
+      strings:
+        $a = "metadata bytes"
+      condition:
+        $a
+    }
+  `;
+
+    const scanner = yarax.compile(rule);
+    const matches = scanner.scan(Buffer.from("metadata bytes"));
+    const meta = matches[0].meta;
+
+    strictEqual(matches.length, 1);
+    strictEqual(meta.author, "Alice");
+    notStrictEqual(meta.latin1, "unknown", "raw metadata bytes must not become the literal 'unknown'");
+    ok(meta.latin1.startsWith("Ren"), `lossy metadata should keep its valid prefix: ${JSON.stringify(meta.latin1)}`);
+    ok(meta.latin1.endsWith(" "));
+    strictEqual(meta.with_nul, "a\u0000b", "a NUL byte stays part of the metadata string");
+  });
+
+  it("should expose the exact matched bytes in dataBytes", async () => {
+    const scanner = yarax.compile(String.raw`
+      rule binary_bytes {
+        strings:
+          $a = "\x80\xFF\x41"
+        condition:
+          $a
+      }
+    `);
+    const data = Buffer.from([0x80, 0xff, 0x41, 0x68, 0x69, 0x74]);
+    const expected = Buffer.from([0x80, 0xff, 0x41]);
+
+    const [syncMatch] = scanner.scan(data);
+    const syncBytes = syncMatch.matches[0].dataBytes;
+    ok(Buffer.isBuffer(syncBytes), "dataBytes must be a Buffer");
+    deepStrictEqual(syncBytes, expected);
+    strictEqual(syncBytes.length, syncMatch.matches[0].length);
+
+    const [asyncMatch] = await scanner.scanAsync(data);
+    const asyncBytes = asyncMatch.matches[0].dataBytes;
+    ok(Buffer.isBuffer(asyncBytes), "async dataBytes must be a Buffer");
+    deepStrictEqual(asyncBytes, expected);
   });
 
   it("should handle rule tags", () => {
@@ -2648,7 +2699,7 @@ rule test_1 {
     });
   });
 
-  describe("fastScan and zero-copy async buffer handling", () => {
+  describe("fastScan and large async buffer handling", () => {
     it("should allow enabling fastScan mode to limit pattern matches", () => {
       const rule = `
         rule test_fast_scan {
@@ -2699,7 +2750,7 @@ rule test_1 {
       strictEqual(isMatch, true);
     });
 
-    it("should scan large 20MB buffers zero-copy asynchronously without memory corruption", async () => {
+    it("should scan large 20MB buffers asynchronously without memory corruption", async () => {
       const rule = `
         rule large_buffer_test {
           strings:
@@ -2717,14 +2768,12 @@ rule test_1 {
       const targetOffset = 18 * 1024 * 1024;
       needle.copy(largeBuffer, targetOffset);
 
-      // Zero-copy async scan
       const matches = await scanner.scanAsync(largeBuffer);
       strictEqual(matches.length, 1);
       strictEqual(matches[0].ruleIdentifier, "large_buffer_test");
       strictEqual(matches[0].matches.length, 1);
       strictEqual(matches[0].matches[0].offset, targetOffset);
 
-      // Zero-copy async boolean check
       const hasMatch = await scanner.isMatchAsync(largeBuffer);
       strictEqual(hasMatch, true);
 
@@ -2732,6 +2781,44 @@ rule test_1 {
       const cleanBuffer = Buffer.alloc(1024 * 1024 * 5);
       const noMatch = await scanner.isMatchAsync(cleanBuffer);
       strictEqual(noMatch, false);
+    });
+
+    it("should snapshot async scan input at dispatch time", async () => {
+      const scanner = yarax.compile(`
+        rule snapshot_check {
+          strings:
+            $a = "SNAPSHOT_MARKER"
+          condition:
+            $a
+        }
+      `);
+
+      const makeBuffer = () =>
+        Buffer.concat([
+          Buffer.alloc(256 * 1024, 0x78),
+          Buffer.from("SNAPSHOT_MARKER"),
+          Buffer.alloc(256 * 1024, 0x79),
+        ]);
+
+      for (let i = 0; i < 5; i++) {
+        const scanBuffer = makeBuffer();
+        const scanPromise = scanner.scanAsync(scanBuffer);
+        scanBuffer.fill(0);
+        const matches = await scanPromise;
+        strictEqual(matches.length, 1, "scanAsync must scan the dispatch-time bytes");
+        strictEqual(matches[0].matches[0].length, "SNAPSHOT_MARKER".length);
+
+        const isMatchBuffer = makeBuffer();
+        const isMatchPromise = scanner.isMatchAsync(isMatchBuffer);
+        isMatchBuffer.fill(0);
+        strictEqual(await isMatchPromise, true, "isMatchAsync must scan the dispatch-time bytes");
+
+        const binaryBuffer = makeBuffer();
+        const binaryPromise = scanner.scanBinaryAsync(binaryBuffer);
+        binaryBuffer.fill(0);
+        const binaryResult = await binaryPromise;
+        strictEqual(binaryResult.matchCount, 1, "scanBinaryAsync must scan the dispatch-time bytes");
+      }
     });
   });
 
@@ -2928,6 +3015,26 @@ describe("Rule logging and profiling", () => {
     scanner.scan(Buffer.from("x"));
     await sleep(20);
     strictEqual(messages.length, 1, "clearing the callback stops delivery");
+  });
+
+  it("should not keep the process alive while a console log callback is set", () => {
+    const indexPath = new URL("../index.js", import.meta.url).href;
+    const script = `
+      import { compile } from ${JSON.stringify(indexPath)};
+      const scanner = compile('import "console" rule ExitCheck { condition: console.log("bye") and true }');
+      scanner.setConsoleLog(() => {});
+      scanner.scan(Buffer.from("x"));
+      console.log("scan finished");
+    `;
+
+    const child = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
+      encoding: "utf8",
+      timeout: 20_000,
+    });
+
+    strictEqual(child.signal, null, `child was killed: ${child.stderr}`);
+    strictEqual(child.status, 0, child.stderr);
+    ok(child.stdout.includes("scan finished"), child.stdout);
   });
 
   it("should report slow rules above the throttling threshold", () => {

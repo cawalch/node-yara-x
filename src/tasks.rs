@@ -11,7 +11,6 @@ use crate::error::scan_error_to_napi;
 use crate::scanner::YaraX;
 use crate::types::{RuleMatch, RuleMatchData, RuleSource, VariableMap};
 use crate::variables::VariableHandler;
-use napi::bindgen_prelude::Buffer;
 use napi::{Error, Result, Status, Task};
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -182,8 +181,11 @@ impl BaseYaraTask {
 }
 
 /// Target of an asynchronous scan operation (in-memory buffer or file on disk).
+///
+/// Buffers are owned by the task: the bytes are copied at dispatch time so the
+/// worker never reads memory the caller can still mutate.
 pub enum ScanTarget {
-  Buffer(Buffer),
+  Buffer(Vec<u8>),
   File(String),
 }
 

@@ -274,12 +274,12 @@ await runBenchmark("scan: 1000 matches (fastScan enabled - single match)", 500, 
 });
 multiScanner.setFastScan(false);
 
-console.log("\n=== Zero-Copy Large Buffer Async Benchmarks ===");
+console.log("\n=== Large Buffer Async Benchmarks ===");
 
 const large20Mb = Buffer.alloc(20 * 1024 * 1024);
 large20Mb.write("malware", 19 * 1024 * 1024);
 
-await runBenchmark("isMatchAsync: 20MB buffer zero-copy async scan", 20, async () => {
+await runBenchmark("isMatchAsync: 20MB buffer async scan (copy at dispatch)", 20, async () => {
   await simpleScanner.isMatchAsync(large20Mb);
 });
 
