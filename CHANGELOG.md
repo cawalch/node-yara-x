@@ -10,16 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- See docs/release-process.md for how this section is promoted. -->
 
 ### Added
+- **`rulesFormatInfo()`**: reports the serialized-blob format version plus the YARA-X and package versions, so a blob cache can key on compatibility. `deserialize()` now names all three when a blob was produced by an incompatible build, instead of a bare format number.
 - **Structured diagnostic locations**: `CompilerError` and `CompilerWarning` now populate `source`, `line`, and `column` instead of always returning `undefined`. File-based entry points report the rule file path.
 - **Metadata on the binary catalog**: `BinaryScanResult.catalog.rules[].meta` and `RuleInfo.meta` (from `getRules()`) carry rule metadata, and `toRuleMatches()` materializes the same `meta` object as `scan()`.
 - **`bigint` global variables**: exact signed 64-bit values can be passed through `defineVariables`, scan variables, and `defineVariable()`. Out-of-range BigInts throw instead of truncating.
 
 ### Changed
+- **`yara-x` is pinned exactly** (`=1.23.0`) because its private serialization format version decides blob compatibility; blob format changes now require a deliberate dependency bump and release note.
 - **Source-level errors now throw in tolerant mode**: with `ignoreInvalidRules: true`, syntax errors, invalid UTF-8, banned or unknown module imports, and missing includes are no longer silently swallowed; they throw instead of returning a scanner that silently lacks rules. Per-rule failures remain skipped and reported.
 - **Extern string variables keep their type**: a string value such as `"42"` or `"true"` is now a YARA string global instead of being coerced to an integer or boolean. Pass `42`/`true` for those types.
 - **`defineVariable()` accepts typed values**: it now takes `string | number | boolean | bigint`; previously only strings were accepted, and numeric-looking strings were coerced.
 - **Rule-file paths in diagnostics and includes**: `fromFile()`, `addRuleFile()`, and `compileFileToWasm()` set the file as the source origin, so diagnostics name the file, and `include` statements resolve next to it (explicit `includeDirectories` still win).
 - **Module option validation**: unknown names in `bannedModules` are now an error rather than a silent no-op; unknown `ignoreModules` entries produce an `unknown_ignored_module` warning.
+- **Batch filtering**: `includePatterns`/`excludePatterns` now match root-relative patterns as well as full paths, so `subdir/**` works like `**/subdir/**`. `BatchScanResult.filteredFiles` reports how many discovered files the filters removed.
+- **`setTimeout(0)` disables the timeout** instead of expiring immediately; the best-effort overshoot is documented.
+- **Concurrency pools are reused** across batch calls instead of being rebuilt each time, so `concurrency` no longer discards the worker scanner cache.
+- **Async typings match the sync API**: `variables` is `Record<string, string | number | boolean | bigint>` everywhere, and `emitWasmFileAsync()` resolves to `Promise<void>`.
 
 ---
 

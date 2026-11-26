@@ -58,6 +58,66 @@ use std::sync::Arc;
 use variables::{get_compiler_errors, get_compiler_warnings};
 use yara_x::Compiler;
 
+/// Magic header prepended to YARA-X serialized blobs.
+const RULES_MAGIC: &[u8; 8] = b"YARA-X\0\0";
+
+/// Version and build information for serialized rule blobs.
+#[napi(object)]
+pub struct RulesFormatInfo {
+  /// Binary format version written into `serialize()` output.
+  pub format_version: u32,
+  /// YARA-X version this build links against.
+  pub yara_x_version: String,
+  /// `@litko/yara-x` package version.
+  pub package_version: String,
+}
+
+/// Returns the serialized-rule format version and the versions that produce it.
+///
+/// Blob caches can key on `formatVersion`: blobs are only interchangeable
+/// between builds that report the same value.
+#[napi]
+pub fn rules_format_info() -> Result<RulesFormatInfo> {
+  Ok(RulesFormatInfo {
+    format_version: rules_format_version()?,
+    yara_x_version: yara_x::VERSION.to_string(),
+    package_version: env!("NODE_YARA_X_VERSION").to_string(),
+  })
+}
+
+/// Reads the format version that the linked YARA-X writes into blobs.
+///
+/// The constant is private upstream, so derive it once by serializing empty
+/// rules and reading the header.
+fn rules_format_version() -> Result<u32> {
+  static FORMAT_VERSION: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+
+  if let Some(version) = FORMAT_VERSION.get() {
+    return Ok(*version);
+  }
+
+  let bytes = Compiler::new().build().serialize().map_err(|e| {
+    Error::new(
+      Status::GenericFailure,
+      format!("Failed to determine the serialized rules format version: {e}"),
+    )
+  })?;
+
+  let version = bytes
+    .get(RULES_MAGIC.len()..RULES_MAGIC.len() + 4)
+    .and_then(|bytes| bytes.try_into().ok())
+    .map(u32::from_le_bytes)
+    .ok_or_else(|| {
+      Error::new(
+        Status::GenericFailure,
+        "Serialized rules header is shorter than expected",
+      )
+    })?;
+
+  let _ = FORMAT_VERSION.set(version);
+  Ok(*FORMAT_VERSION.get().unwrap_or(&version))
+}
+
 /// Compiles a YARA rule source string and returns any warnings or errors generated during the
 /// compilation process.
 ///
@@ -161,11 +221,26 @@ pub fn from_file(
 pub fn deserialize(data: Buffer) -> Result<scanner::YaraX> {
   use yara_x::Rules;
 
-  let rules = Rules::deserialize(data.as_ref()).map_err(|e| {
-    Error::new(
+  let bytes = data.as_ref();
+  if bytes.len() < RULES_MAGIC.len() || &bytes[..RULES_MAGIC.len()] != RULES_MAGIC {
+    return Err(Error::new(
       Status::InvalidArg,
-      format!("Failed to deserialize rules: {e}"),
-    )
+      "Failed to deserialize rules: not a YARA-X compiled rules file (missing the YARA-X header)"
+        .to_string(),
+    ));
+  }
+
+  let rules = Rules::deserialize(bytes).map_err(|e| {
+    let message = match &e {
+      yara_x::errors::SerializationError::InvalidVersion { expected, actual } => format!(
+        "Failed to deserialize rules: blob format version {actual} is not supported by this build (expects {expected}). This package is @litko/yara-x {} linked against YARA-X {}. Recompile the rules with the current version.",
+        env!("NODE_YARA_X_VERSION"),
+        yara_x::VERSION,
+      ),
+      _ => format!("Failed to deserialize rules: {e}"),
+    };
+
+    Error::new(Status::InvalidArg, message)
   })?;
 
   Ok(scanner::YaraX::new_empty(Arc::new(rules), None))

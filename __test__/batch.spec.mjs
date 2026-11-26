@@ -196,6 +196,100 @@ test("Native Multi-Threaded Batch and Directory Scanning", async (t) => {
     assert.strictEqual(result.matchedFiles, 2);
   });
 
+  await t.test("scanDirectory - relative excludePatterns match from the scan root", () => {
+    const result = scanner.scanDirectorySync(tempDir, {
+      excludePatterns: ["subdir/**"],
+      includeCleanFiles: true,
+    });
+
+    assert.strictEqual(result.totalFiles, 3);
+    assert.strictEqual(result.filteredFiles, 3);
+    assert.ok(
+      !result.results.some((entry) => entry.filePath.includes("subdir")),
+      "the relative exclude must remove the whole subtree",
+    );
+  });
+
+  await t.test("scanDirectory - filteredFiles counts filter misses", () => {
+    const result = scanner.scanDirectorySync(tempDir, {
+      includePatterns: ["*.bin"],
+      includeCleanFiles: true,
+    });
+
+    assert.strictEqual(result.totalFiles, 1);
+    assert.strictEqual(result.filteredFiles, 5);
+    assert.strictEqual(result.results[0].filePath, join(tempDir, "file2.bin"));
+  });
+
+  await t.test("scanFiles - filteredFiles is zero for an explicit list", () => {
+    const result = scanner.scanFilesSync([join(tempDir, "file1.txt")]);
+    assert.strictEqual(result.filteredFiles, 0);
+  });
+
+  await t.test("scanDirectorySync - results do not depend on the concurrency size", () => {
+    const expected = scanner.scanDirectorySync(tempDir, { onlyMatches: true });
+
+    // 8 sizes also exercises the pool cache's overflow path (sizes past the
+    // cached cap still get a working pool).
+    for (const concurrency of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      const result = scanner.scanDirectorySync(tempDir, { onlyMatches: true, concurrency });
+      assert.strictEqual(result.totalFiles, expected.totalFiles);
+      assert.strictEqual(result.matchedFiles, expected.matchedFiles);
+      assert.deepStrictEqual(
+        result.results.map((entry) => entry.filePath).sort(),
+        expected.results.map((entry) => entry.filePath).sort(),
+      );
+    }
+  });
+
+  await t.test("scanDirectorySync - a fixed `concurrency` reuses its thread pool (#277)", () => {
+    // Rebuilding a Rayon pool per call spawned fresh threads every time, and
+    // new threads start with an empty worker-side scanner cache, so the option
+    // cost more than omitting it. The guard is a ratio against the shared
+    // global pool, interleaved round-robin to cancel thermal/scheduling drift,
+    // measured at two sizes because the per-call cost scales with thread count
+    // — that scaling is the fingerprint of a rebuild. Margins are deliberately
+    // wide: this rejects a regression, it is not a benchmark.
+    //
+    // Measured on an idle 14-core host (median of interleaved runs, per-call
+    // `durationMs`), ratio of explicit concurrency over the global pool:
+    //   before (pool per call): concurrency 8 → 1.85x, 16 → 2.74x
+    //   after  (pool cached)  : concurrency 8 → 0.94x, 16 → 1.03x
+    const options = { onlyMatches: true };
+
+    // Keep the assertion non-vacuous if traversal ever stops discovering work.
+    assert.ok(scanner.scanDirectorySync(tempDir, options).totalFiles >= 4, "fixture has files to scan");
+
+    const median = (samples) => {
+      const sorted = [...samples].sort((a, b) => a - b);
+      return sorted[Math.floor(sorted.length / 2)];
+    };
+    const timed = (opts, iterations) => {
+      const samples = [];
+      for (let i = 0; i < iterations; i++) {
+        samples.push(scanner.scanDirectorySync(tempDir, opts).durationMs);
+      }
+      return median(samples);
+    };
+
+    for (const concurrency of [8, 16]) {
+      scanner.scanDirectorySync(tempDir, { ...options, concurrency });  // warm both lanes
+      scanner.scanDirectorySync(tempDir, options);
+
+      const pooled = [];
+      const shared = [];
+      for (let round = 0; round < 4; round++) {
+        pooled.push(timed({ ...options, concurrency }, 25));
+        shared.push(timed(options, 25));
+      }
+      const ratio = median(pooled) / median(shared);
+      assert.ok(
+        ratio <= 1.5,
+        `concurrency: ${concurrency} took ${median(pooled).toFixed(3)}ms vs ${median(shared).toFixed(3)}ms on the shared pool (${ratio.toFixed(2)}x) — thread pools must be reused across calls`,
+      );
+    }
+  });
+
   await t.test("scanDirectory (async) - full recursive parallel scan", async () => {
     const result = await scanner.scanDirectory(tempDir, {
       concurrency: 4,

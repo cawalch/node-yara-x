@@ -252,6 +252,9 @@ const scanner = compile(`
 // 1. Scan an array of file paths in parallel:
 const batch = await scanner.scanFiles(["/data/file1.bin", "/data/file2.bin"]);
 console.log(`Scanned ${batch.scannedFiles} files in ${batch.durationMs.toFixed(1)}ms (${batch.matchedFiles} matched).`);
+// `totalFiles` counts files that passed the filters, `filteredFiles` counts the
+// discovered ones that include/exclude/size filters removed — so a scan that
+// found nothing because of a typo in a pattern is visible in the result.
 
 // 2. Scan an entire directory recursively with glob filters, depth limits, and size guards:
 const dirResult = await scanner.scanDirectory("/var/log", {
@@ -352,7 +355,7 @@ for (const rule of rules.getRules()) {
 
 ## Serialize compiled rules
 
-`serialize()` returns a self-contained `Buffer` that another process or worker thread can restore with `deserialize()`, skipping rule parsing and pattern compilation:
+`serialize()` returns a self-contained `Buffer` that another process or worker thread can restore with `deserialize()`. Parsing and pattern-automaton construction are skipped; the WASM condition module is still compiled for the local platform, so the speedup is real but partial (measured ~17% on a 120-rule set: 75.5 ms compile vs 62.8 ms deserialize).
 
 ```javascript
 import { compile, deserialize } from "@litko/yara-x";
@@ -376,8 +379,18 @@ console.log(`Matches from restored rules: ${matches.length}`);
 
 Restored rules behave exactly like freshly compiled ones. Conditions still have to be recompiled for the local platform when the blob is loaded: measured at ~1.7 ms per process for the two-rule set in [`__test__/performance-regression.mjs`](./__test__/performance-regression.mjs).
 
+`rulesFormatInfo()` returns the blob format version and the YARA-X/package versions that produce it, so a cache can key on compatibility instead of discovering it at load time:
+
+```javascript
+import { rulesFormatInfo } from "@litko/yara-x";
+
+const info = rulesFormatInfo();
+// { formatVersion: 12, yaraXVersion: "1.23.0", packageVersion: "0.13.0" }
+await cache.set(`${info.formatVersion}:${info.yaraXVersion}`, rules.serialize());
+```
+
 > [!NOTE]
-> The producer and consumer must run the same YARA-X version (the one this package builds against is pinned in [`Cargo.lock`](./Cargo.lock)) with the same module feature set. Serialized blobs contain compiled bytecode and pattern tables, and they do not obfuscate pattern strings.
+> The producer and consumer must report the same `formatVersion`/`yaraXVersion` (the YARA-X version is pinned exactly in [`Cargo.toml`](./Cargo.toml)) with the same module feature set. Treat blobs as trusted input: they contain compiled bytecode and pattern tables, and they do not obfuscate pattern strings.
 
 ## Validate rules
 
@@ -508,13 +521,21 @@ const matches = rules.scanFile("./untrusted_sample.bin");
 ### Scan timeout
 
 ```javascript
-rules.setTimeout(5000); // milliseconds
+rules.setTimeout(5000); // milliseconds; 0 disables the timeout
 
 try {
   const matches = rules.scan(largeBuffer);
 } catch (error) {
   console.error(`Scan aborted: ${error.message}`);
 }
+```
+
+The timeout is a best-effort deadline, not a hard interrupt. YARA-X stops at the next work-unit boundary, so a scan can overrun the configured value — measured runs with a 50 ms setting have taken over a second on pathological regexes. Use `setMaxScanSize()` when you need a hard bound on the bytes examined.
+
+Because `0` means *no deadline*, an unbounded scan is only as safe as the rules you feed it: a regex whose atom matches at nearly every offset (`/a+b/` over a run of `a`) is quadratic by construction and no timeout is there to save it. When compiling rule sets you did not write, bound the work structurally as well — `errorOnSlowPattern: true` rejects those patterns at compile time (YARA-X reports them as the `slow_pattern` warning otherwise, which only reaches you if you call `getWarnings()`):
+
+```javascript
+const rules = compile(untrustedSource, { errorOnSlowPattern: true }); // throws E018 on a pathological regex
 ```
 
 ### Match context
@@ -769,7 +790,7 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 | `setMaxScanSize(maxBytes)` | Sets the maximum number of bytes scanned per buffer or file. |
 | `setFastScan(fastScan)` | Enables or disables fast scan mode (stops pattern search at first match). |
 | `setUseMmap(useMmap)` | Enables or disables memory-mapped file scanning. |
-| `setTimeout(timeoutMs)` | Sets the scan timeout in milliseconds. |
+| `setTimeout(timeoutMs)` | Sets the best-effort scan timeout in milliseconds (`0` disables it). |
 | `setMatchContextSize(size)` | Sets how many context bytes are returned with each match. |
 | `setConsoleLog(callback?)` | Routes messages rules log through the `console` module to a callback. |
 | `getSlowestRules(n)` | Returns the slowest rules seen so far, with pattern and condition timings. |
@@ -782,8 +803,8 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 | Option | Type | Description |
 | :--- | :--- | :--- |
 | `maxDepth` | `number` | Maximum directory recursion depth (default: unlimited). |
-| `includePatterns` | `string[]` | Glob patterns matching file paths to include. |
-| `excludePatterns` | `string[]` | Glob patterns matching file paths to exclude. |
+| `includePatterns` | `string[]` | Glob patterns matching file paths to include. Patterns can be relative to the scanned root (`subdir/**`) or full-path globs (`**/subdir/**`). |
+| `excludePatterns` | `string[]` | Glob patterns matching file paths to exclude. Same relative/full-path rules as `includePatterns`. |
 | `minFileSize` | `number` | Minimum file size in bytes to scan (smaller files are skipped). |
 | `maxFileSize` | `number` | Maximum file size in bytes to scan (larger files are skipped). |
 | `onlyMatches` | `boolean` | When `true`, omits full `RuleMatch` objects and only records matched status. |

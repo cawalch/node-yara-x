@@ -34,6 +34,17 @@ use std::sync::Arc;
 use std::time::Duration;
 use yara_x::{Compiler, Rules, Scanner};
 
+/// A cached scanner plus the `Arc<Rules>` that keeps its rules allocation alive.
+///
+/// `scanner` is declared first so it is dropped before the `Arc` clone; the
+/// scanner borrows the same allocation the `Arc` owns, so the owner provably
+/// outlives the borrow regardless of `YaraX`'s own field order.
+pub(crate) struct CachedScanner {
+  scanner: Scanner<'static>,
+  #[allow(dead_code)]
+  rules: Arc<Rules>,
+}
+
 /// A rule source together with the file it was read from, when there was one.
 ///
 /// The origin is replayed on every incremental recompilation so diagnostics
@@ -87,7 +98,7 @@ pub struct YaraX {
   /// sources with the same options.
   pub(crate) stored_options: StoredCompilerOptions,
   /// Cached scanner for reuse (thread-local, not Send/Sync safe)
-  pub(crate) cached_scanner: RefCell<Option<Scanner<'static>>>,
+  pub(crate) cached_scanner: RefCell<Option<CachedScanner>>,
   /// Maximum number of matches per pattern
   pub(crate) max_matches_per_pattern: Option<usize>,
   /// Whether to use memory-mapped files for scanning
@@ -358,12 +369,11 @@ impl YaraX {
     let needs_new_scanner = cached.is_none();
 
     if needs_new_scanner {
-      // SAFETY: The transmute extends the borrow lifetime of `self.rules` to `'static`.
-      // This is sound because `self.rules` is an `Arc<Rules>` that outlives the cached
-      // scanner, and `invalidate_scanner_cache()` is called whenever `self.rules` is
-      // replaced (in `add_rule_source`, `define_variable`, and option setters).
+      // The cache owns a clone of the Arc below, so the transmuted reference is
+      // backed by an allocation that lives at least as long as the scanner.
+      let rules = Arc::clone(&self.rules);
       let mut scanner = Scanner::new(unsafe {
-        std::mem::transmute::<&yara_x::Rules, &'static yara_x::Rules>(&*self.rules)
+        std::mem::transmute::<&yara_x::Rules, &'static yara_x::Rules>(&*rules)
       });
 
       // Apply scan options
@@ -398,10 +408,12 @@ impl YaraX {
         });
       }
 
-      *cached = Some(scanner);
+      *cached = Some(CachedScanner { scanner, rules });
     }
 
-    Ok(std::cell::RefMut::map(cached, |opt| opt.as_mut().unwrap()))
+    Ok(std::cell::RefMut::map(cached, |opt| {
+      &mut opt.as_mut().unwrap().scanner
+    }))
   }
 
   /// Invalidates the cached scanner, forcing recreation on next use.
@@ -596,10 +608,14 @@ impl YaraX {
     self.invalidate_scanner_cache();
   }
 
-  /// Sets the scan timeout in milliseconds.
+  /// Sets the scan timeout in milliseconds. `0` disables the timeout.
+  ///
+  /// The timeout is a best-effort deadline checked between work units, not a
+  /// hard interrupt: a scan can overrun it, especially with rules that have
+  /// few patterns. Use `setMaxScanSize()` when a hard bound on work matters.
   #[napi]
   pub fn set_timeout(&mut self, timeout_ms: u32) {
-    self.timeout_ms = Some(timeout_ms);
+    self.timeout_ms = (timeout_ms > 0).then_some(timeout_ms);
     self.invalidate_scanner_cache();
   }
 
@@ -732,7 +748,7 @@ impl YaraX {
   /// # Returns
   ///
   /// A vector of matching rules
-  #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean>")]
+  #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>")]
   pub fn scan<'a>(
     &self,
     env: Env,
@@ -756,7 +772,7 @@ impl YaraX {
   /// # Returns
   ///
   /// A vector of matching rules
-  #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean>")]
+  #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean | bigint>")]
   pub fn scan_file<'a>(
     &self,
     env: Env,
@@ -784,7 +800,7 @@ impl YaraX {
   /// # Returns
   ///
   /// `true` if any rule matches, `false` otherwise
-  #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean>")]
+  #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>")]
   pub fn is_match(&self, data: Buffer, variables: Option<Object>) -> Result<bool> {
     self.with_sync_scanner(&variables, |scanner| {
       let results = scanner.scan(data.as_ref()).map_err(scan_error_to_napi)?;
@@ -805,7 +821,7 @@ impl YaraX {
   /// # Returns
   ///
   /// `true` if any rule matches, `false` otherwise
-  #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean>")]
+  #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean | bigint>")]
   pub fn is_file_match(&self, file_path: String, variables: Option<Object>) -> Result<bool> {
     self.with_sync_scanner(&variables, |scanner| {
       let results = scanner
@@ -829,7 +845,7 @@ impl YaraX {
   /// # Returns
   ///
   /// A `BinaryScanResult` containing the packed buffer, match count, and catalog
-  #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean>")]
+  #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>")]
   pub fn scan_binary(&self, data: Buffer, variables: Option<Object>) -> Result<BinaryScanResult> {
     self.with_sync_scanner(&variables, |scanner| {
       let results = scanner.scan(data.as_ref()).map_err(scan_error_to_napi)?;
@@ -856,7 +872,7 @@ impl YaraX {
   /// # Returns
   ///
   /// A `BinaryScanResult` containing the packed buffer, match count, and catalog
-  #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean>")]
+  #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean | bigint>")]
   pub fn scan_file_binary(
     &self,
     file_path: String,
@@ -966,7 +982,10 @@ impl YaraX {
   /// # Returns
   ///
   /// An async task that resolves to a vector of matching rules
-  #[napi(ts_return_type = "Promise<Array<RuleMatch>>")]
+  #[napi(
+    ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>",
+    ts_return_type = "Promise<Array<RuleMatch>>"
+  )]
   pub fn scan_async(
     &self,
     data: Buffer,
@@ -992,7 +1011,10 @@ impl YaraX {
   /// # Returns
   ///
   /// An async task that resolves to a vector of matching rules
-  #[napi(ts_return_type = "Promise<Array<RuleMatch>>")]
+  #[napi(
+    ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean | bigint>",
+    ts_return_type = "Promise<Array<RuleMatch>>"
+  )]
   pub fn scan_file_async(
     &self,
     file_path: String,
@@ -1025,7 +1047,7 @@ impl YaraX {
   ///
   /// An async task that resolves to a boolean indicating whether any rule matched
   #[napi(
-    ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean>",
+    ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>",
     ts_return_type = "Promise<boolean>"
   )]
   pub fn is_match_async(
@@ -1057,7 +1079,7 @@ impl YaraX {
   ///
   /// An async task that resolves to a boolean indicating whether any rule matched
   #[napi(
-    ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean>",
+    ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean | bigint>",
     ts_return_type = "Promise<boolean>"
   )]
   pub fn is_file_match_async(
@@ -1089,7 +1111,7 @@ impl YaraX {
   ///
   /// An async task that resolves to a `BinaryScanResult`
   #[napi(
-    ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean>",
+    ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>",
     ts_return_type = "Promise<BinaryScanResult>"
   )]
   pub fn scan_binary_async(
@@ -1118,7 +1140,7 @@ impl YaraX {
   ///
   /// An async task that resolves to a `BinaryScanResult`
   #[napi(
-    ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean>",
+    ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean | bigint>",
     ts_return_type = "Promise<BinaryScanResult>"
   )]
   pub fn scan_file_binary_async(
@@ -1157,7 +1179,7 @@ impl YaraX {
   /// # Returns
   ///
   /// An async task that completes when the WASM file is written
-  #[napi]
+  #[napi(ts_return_type = "Promise<void>")]
   pub fn emit_wasm_file_async(
     &self,
     output_path: String,
@@ -1317,7 +1339,10 @@ impl YaraX {
   /// * `file_paths` - Array of file paths to scan
   /// * `options` - Batch scanning options (concurrency, only_matches, etc.)
   /// * `variables` - Optional scan-time variables
-  #[napi(ts_return_type = "Promise<BatchScanResult>")]
+  #[napi(
+    ts_args_type = "filePaths: Array<string>, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null",
+    ts_return_type = "Promise<BatchScanResult>"
+  )]
   pub fn scan_files(
     &self,
     file_paths: Vec<String>,
@@ -1338,7 +1363,9 @@ impl YaraX {
   }
 
   /// Scans multiple files synchronously across a Rayon worker thread pool.
-  #[napi]
+  #[napi(
+    ts_args_type = "filePaths: Array<string>, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null"
+  )]
   pub fn scan_files_sync(
     &self,
     env: Env,
@@ -1353,6 +1380,7 @@ impl YaraX {
     let output = execute_batch_scan(
       self.rules.clone(),
       file_paths,
+      0,
       Vec::new(),
       scan_opts,
       combined_vars,
@@ -1368,7 +1396,10 @@ impl YaraX {
   /// * `dir_path` - Root directory path to scan
   /// * `options` - Batch scanning options (concurrency, max_depth, include/exclude globs, etc.)
   /// * `variables` - Optional scan-time variables
-  #[napi(ts_return_type = "Promise<BatchScanResult>")]
+  #[napi(
+    ts_args_type = "dirPath: string, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null",
+    ts_return_type = "Promise<BatchScanResult>"
+  )]
   pub fn scan_directory(
     &self,
     dir_path: String,
@@ -1389,7 +1420,9 @@ impl YaraX {
   }
 
   /// Recursively scans a directory synchronously across a Rayon worker thread pool.
-  #[napi]
+  #[napi(
+    ts_args_type = "dirPath: string, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null"
+  )]
   pub fn scan_directory_sync(
     &self,
     env: Env,
@@ -1406,7 +1439,7 @@ impl YaraX {
       batch_opts.exclude_patterns.as_deref(),
     )?;
 
-    let (files, traversal_errors) = collect_directory_files(
+    let (files, traversal_errors, filtered_files) = collect_directory_files(
       &dir_path,
       batch_opts.max_depth,
       batch_opts.follow_symlinks,
@@ -1418,6 +1451,7 @@ impl YaraX {
     let output = execute_batch_scan(
       self.rules.clone(),
       files,
+      filtered_files,
       traversal_errors,
       scan_opts,
       combined_vars,

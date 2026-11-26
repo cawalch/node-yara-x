@@ -843,4 +843,5 @@ module.exports.compileToWasm = nativeBinding.compileToWasm
 module.exports.create = nativeBinding.create
 module.exports.deserialize = nativeBinding.deserialize
 module.exports.fromFile = nativeBinding.fromFile
+module.exports.rulesFormatInfo = nativeBinding.rulesFormatInfo
 module.exports.validate = nativeBinding.validate
