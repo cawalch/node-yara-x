@@ -326,6 +326,99 @@ pub fn ensure_no_uncovered_errors(compiler: &Compiler) -> Result<()> {
   ))
 }
 
+/// Tells whether a compile error can only be judged against rules that are not
+/// part of the batch being validated.
+///
+/// `UnknownIdentifier` (`E009`) is a reference to a rule or a global, and
+/// `UnknownTag` (`E040`) to a tag defined on some rule. Either can be satisfied
+/// by a source that has not been added yet (or by a later `defineVariable()`),
+/// so an isolated compilation cannot decide them. Every other error names
+/// something inside the source it was reported on, so isolation does not change
+/// the verdict.
+fn resolvable_only_with_other_sources(error: &CompileError) -> bool {
+  matches!(
+    error,
+    CompileError::UnknownIdentifier(_) | CompileError::UnknownTag(_)
+  )
+}
+
+/// Checks sources against the scanner's options and globals, without the rules
+/// that are already on the scanner.
+///
+/// This is the cheap half of incremental recompilation — `O(new sources)`
+/// instead of `O(everything)` — which is what lets `addRuleSource()` reject a
+/// broken file where it was called while the full rebuild waits until the rule
+/// set is next read (see `YaraX::ensure_compiled`).
+///
+/// What is still reported here is everything a source is guilty of on its own:
+/// syntax, invalid UTF-8, include and module failures, and the per-rule errors
+/// that name something inside the source (invalid pattern, wrong type, slow
+/// pattern, a duplicate within the batch, …). Two classes need the rest of the
+/// rule set to be judged and are therefore reported by the rebuild instead:
+///
+/// - a reference to a rule, tag, or global that other sources or a later
+///   `defineVariable()` provide, or none of them does (`E009`, `E040`), and
+/// - a rule identifier a source already on the scanner uses (`E012` across
+///   sources).
+///
+/// For those the verdict is the one a single compilation of the same sources in
+/// the same order would have reached — it only arrives at the next read or scan,
+/// with the same message and `ruleCode`. A caller that wants the strict timing
+/// calls `getRules()` inside the same `try` as the additions; a caller loading
+/// rules it does not control should use `ignoreInvalidRules`, where such a rule
+/// is skipped and reported instead of blocking the rule set.
+///
+/// `tolerate` mirrors `ignore_invalid_rules`: per-rule failures are only
+/// reported through the ignored-rules list, so a tolerant scanner keeps
+/// throwing just for the errors no rule can be blamed for (see
+/// [`ensure_no_uncovered_errors`]).
+pub fn validate_sources_standalone(
+  stored: &StoredCompilerOptions,
+  variables: Option<&VariableMap>,
+  tolerate: bool,
+  sources: &[RuleSource],
+  origins: &[Option<String>],
+  env: Option<&Env>,
+) -> Result<()> {
+  let mut compiler = Compiler::new();
+
+  apply_stored_compiler_options(&mut compiler, stored)?;
+
+  if let Some(vars) = variables {
+    for (key, value) in vars {
+      compiler.apply_variable_value(key, value)?;
+    }
+  }
+
+  for (index, source) in sources.iter().enumerate() {
+    // Tolerated on purpose: the errors are inspected below instead of being
+    // returned by the first failing rule, and one broken rule in a batch must
+    // not hide the rest of the batch.
+    add_source_to_compiler_tolerant(
+      &mut compiler,
+      &source.source,
+      source.namespace.as_deref(),
+      origins.get(index).and_then(Option::as_deref),
+      true,
+      None,
+    )?;
+  }
+
+  if tolerate {
+    return ensure_no_uncovered_errors(&compiler);
+  }
+
+  if let Some(error) = compiler
+    .errors()
+    .iter()
+    .find(|error| !resolvable_only_with_other_sources(error))
+  {
+    return Err(compile_error_to_napi(error, env));
+  }
+
+  Ok(())
+}
+
 /// Applies compiler options to a YARA compiler instance.
 ///
 /// This function configures the compiler based on the provided options,
