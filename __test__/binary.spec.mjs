@@ -337,6 +337,124 @@ describe('Flat / Binary Match ABI', () => {
       )
     })
   })
+
+  describe('catalog accessor caching', () => {
+    const catalogRule = `
+      rule CachedA {
+        meta:
+          author = "cache"
+        strings:
+          $a = "aa"
+        condition:
+          $a
+      }
+
+      rule CachedB {
+        strings:
+          $b = "bb"
+        condition:
+          $b
+      }
+    `
+
+    const view = () =>
+      new BinaryMatchView(
+        compile(catalogRule).scanBinary(Buffer.from('aa bb aa bb')),
+      )
+
+    it('should hand back the same catalog object on every read', () => {
+      const scanner = view()
+      const first = scanner.catalog
+
+      assert.strictEqual(
+        scanner.catalog,
+        first,
+        'a repeated catalog read must reuse the built object, not re-marshal it',
+      )
+    })
+
+    it('should build the cached catalog with the shape consumers parse', () => {
+      assert.deepStrictEqual(view().catalog, {
+        rules: [
+          {
+            identifier: 'CachedA',
+            namespace: 'default',
+            tags: [],
+            patterns: ['$a'],
+            meta: { author: 'cache' },
+          },
+          {
+            identifier: 'CachedB',
+            namespace: 'default',
+            tags: [],
+            patterns: ['$b'],
+            meta: {},
+          },
+        ],
+      })
+    })
+
+    it('should release the catalog reference once the view is collected', async (t) => {
+      if (typeof global.gc !== 'function') {
+        t.skip('--expose-gc is required: node --expose-gc --test __test__/binary.spec.mjs')
+        return
+      }
+
+      const rules = compile(
+        Array.from(
+          {
+            length: 60,
+          },
+          (_, i) =>
+            `rule LeakCheck${i} {\n          meta:\n            author = "${'m'.repeat(80)}"\n          strings:\n            $a = "aa"\n          condition:\n            $a\n        }`,
+        ).join('\n\n'),
+      )
+      const data = Buffer.from('aa bb aa bb')
+
+      const buildCatalogs = () => {
+        for (let i = 0; i < 500; i++) {
+          const scanner = new BinaryMatchView(rules.scanBinary(data))
+          if (scanner.catalog.rules.length !== 60) {
+            throw new Error('catalog was not built')
+          }
+        }
+      }
+
+      buildCatalogs()
+      // Catalogs of views that are already unreachable are still referenced
+      // here, so this is the retained size, not garbage awaiting a collection.
+      const live = process.memoryUsage().heapUsed
+      for (let round = 0; round < 3; round++) {
+        global.gc()
+        // The wrapper finalizer runs outside the collection itself.
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      const collected = process.memoryUsage().heapUsed
+
+      assert.ok(
+        collected < live / 2,
+        `cached catalogs must become collectable with their views (retained ${live}, after collection ${collected})`,
+      )
+    })
+
+    it('should keep the record accessors consistent with the cached catalog', () => {
+      const scanner = view()
+      const catalog = scanner.catalog
+
+      assert.strictEqual(scanner.matchCount, 4)
+      for (let i = 0; i < scanner.matchCount; i++) {
+        assert.strictEqual(
+          scanner.getRule(i).identifier,
+          catalog.rules[scanner.getRuleId(i)].identifier,
+        )
+        assert.strictEqual(
+          scanner.getPattern(i),
+          catalog.rules[scanner.getRuleId(i)].patterns[scanner.getPatternId(i)],
+        )
+      }
+      assert.strictEqual(scanner.toRuleMatches().length, 2)
+    })
+  })
 })
 
 describe('XOR key in the binary ABI', () => {
