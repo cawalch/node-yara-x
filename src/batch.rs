@@ -4,9 +4,9 @@
 //! native recursive directory traversal, glob-based pattern filtering, and
 //! thread-local scanner reuse across Rayon worker threads.
 //!
-//! A batch is also the one scan that can be cancelled part-way through: the signal
-//! stops files from being *started*, and the sweep resolves with what it finished
-//! rather than throwing minutes of work away. See [`crate::cancel`].
+//! A batch is also the one scan that can be cancelled part-way through: the signal stops
+//! files from being *started*, and the sweep resolves with what it finished. See
+//! [`crate::cancel`].
 
 use crate::cancel::{CancelFlag, CancelState};
 use crate::error::stamped_abort;
@@ -103,12 +103,11 @@ pub struct BatchScanResult<'a> {
   /// error's `filePath` is the directory that could not be read. The scan
   /// continues past both, so a partial sweep is reported rather than lost.
   pub errors: Vec<BatchFileError>,
-  /// Whether the signal fired during the sweep, so `results` is partial. A signal
-  /// that fired after the last file had started stopped nothing, and reports
-  /// `cancelledFiles` 0; a sweep cancelled before it started rejects instead.
+  /// Whether the signal fired during the sweep, so `results` is partial. A sweep
+  /// cancelled before it started rejects instead of resolving.
   pub cancelled: bool,
-  /// Files discovered but never started. A truncated traversal never found the rest
-  /// of the tree, so counters can fall short — `cancelled` says it was cut short.
+  /// Files discovered but never started. A truncated traversal never found the rest of
+  /// the tree, so the counters can fall short of what is on disk.
   pub cancelled_files: u32,
   /// Total scan duration in milliseconds.
   pub duration_ms: f64,
@@ -228,8 +227,7 @@ pub fn collect_directory_files(
   let mut traversal_errors = Vec::new();
   let mut filtered_files = 0u32;
   for entry in walker {
-    // Traversal of a large tree takes time too. Files past here were never
-    // discovered, which is why they are not in `cancelled_files`.
+    // Traversal of a large tree takes time too; files past here were never discovered.
     if cancel.is_cancelled() {
       break;
     }
@@ -370,7 +368,7 @@ fn thread_pool(threads: usize) -> Result<Arc<rayon::ThreadPool>> {
 }
 
 /// The files a sweep runs over, plus what discovery already reported: both are only
-/// carried through to the result, so they travel together.
+/// carried through to the result.
 pub struct BatchInput {
   pub file_paths: Vec<String>,
   pub filtered_files: u32,
@@ -398,9 +396,8 @@ pub fn execute_batch_scan(
   let only_matches = batch_options.only_matches.unwrap_or(false);
   let include_clean_files = batch_options.include_clean_files.unwrap_or(false);
 
-  // A file that has not started is the last thing a cancellation can stop: with
-  // `concurrency` workers, `scanned_files` can overshoot the abort by that many.
-  // Skipping is recorded separately from failing.
+  // A file that has not started is the last thing a cancellation can stop, so with
+  // `concurrency` workers `scanned_files` can overshoot the abort by that many.
   let cancelled_files = AtomicU32::new(0);
   let scan_one =
     |file_path: String| -> Option<std::result::Result<BatchFileMatchData, BatchFileError>> {
@@ -466,9 +463,7 @@ pub fn execute_batch_scan(
 
   for item in raw_results {
     match item {
-      None => {
-        // Counted in `cancelled_files`; there is no result to report.
-      }
+      None => {}
       Some(Ok(match_data)) => {
         scanned_files += 1;
         if match_data.is_match {
@@ -493,7 +488,6 @@ pub fn execute_batch_scan(
     matched_files,
     results,
     errors,
-    // The flag says the signal fired; the counter says whether it stopped anything.
     cancelled: cancel.is_cancelled(),
     cancelled_files: cancelled_files.load(Ordering::Relaxed),
     duration_ms,
@@ -575,8 +569,8 @@ impl Task for BatchScanTask {
   type JsValue = BatchScanResult<'static>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    // Cancelled before the first file: there is no partial sweep to report, so
-    // this rejects like any other cancelled call rather than resolving empty.
+    // Cancelled before the first file: nothing to report, so reject rather than
+    // resolving an empty sweep.
     self.cancel.reject_if_cancelled()?;
 
     let input = match &mut self.target {

@@ -1,17 +1,16 @@
-//! Cancellation for the asynchronous entry points: a `signal?: AbortSignal` stops
-//! work that has not started. Already-aborted rejects before dispatch, aborted while
-//! queued is caught at the top of `compute()`, and a batch skips what it had not
-//! reached and resolves with the part it got. A running scan cannot be preempted —
-//! that stays `setTimeout()` / `setMaxScanSize()`. Every cancellation rejects with
-//! `name`/`message` `AbortError` and `code` `Cancelled`, and none throws from the call.
+//! Cancellation for the asynchronous entry points: a `signal?: AbortSignal` stops work
+//! that has not started. Already-aborted rejects before dispatch, aborted while queued is
+//! caught at the top of `compute()`, and a batch skips what it had not reached and
+//! resolves with the part it got. A running scan cannot be preempted — that stays
+//! `setTimeout()` / `setMaxScanSize()`. Every cancellation rejects with `AbortError` and
+//! `code` `Cancelled`, and none throws from the call.
 //!
-//! The abort is watched by a listener hung on the signal for the life of the call — not
-//! N-API's `AbortSignal` wrapper, which retains ~250 bytes per call for as long as the
-//! signal lives (measurements in the PR that added this file). A flag is a slot index
-//! plus the stamp that slot carried while the call owned it, and the listener gets that
-//! pair as its N-API `data`: no Rust allocation is reachable from JavaScript, so a
-//! listener that fires late writes nothing, and memory follows cancelled scans *in
-//! flight*, not scans ever made.
+//! The abort is watched by a listener hung on the signal for the life of the call, not by
+//! N-API's `AbortSignal` wrapper, which retains ~250 bytes per call (measurements in the
+//! PR that added this file). A flag is a slot index plus the stamp that slot carried
+//! while the call owned it, and the listener gets that pair as its N-API `data`: no Rust
+//! allocation is reachable from JavaScript, so a listener that fires late writes nothing,
+//! and memory follows cancelled scans *in flight*, not scans ever made.
 
 use napi::bindgen_prelude::{FromNapiValue, Object, TypeName, ValidateNapiValue};
 use napi::{Env, Error, Result, Status, ValueType};
@@ -89,8 +88,8 @@ impl CancelFlag {
 /// owns it, which is what makes a stale stamp inert.
 static TABLE: [AtomicU64; 1 << SLOT_BITS] = [const { AtomicU64::new(0) }; 1 << SLOT_BITS];
 
-/// Slots returned and waiting to be handed out again; the guard also serialises
-/// first-time assignment, the only allocation here.
+/// Slots waiting to be handed out again; the guard also serialises first-time
+/// assignment, the only allocation here.
 static FREE: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 static NEXT_SLOT: AtomicUsize = AtomicUsize::new(0);
 static NEXT_STAMP: AtomicU64 = AtomicU64::new(0);
@@ -154,7 +153,6 @@ struct Held {
 
 // SAFETY: handles into the environment the call was made on, touched only on the
 // JavaScript thread — attached during the call, released in `Task::finally`.
-// Workers reach the abort through `CancelFlag`, which is `Send + Sync`.
 unsafe impl Send for Held {}
 
 impl CancelState {
@@ -204,7 +202,6 @@ impl CancelState {
           signal_value,
           listener_value,
           c"removeEventListener",
-          false,
         );
       }
     }
@@ -349,7 +346,7 @@ impl CancelSignal {
     let attached = unsafe {
       napi::sys::napi_create_reference(raw_env, self.signal, 1, &mut refs[0]) == OK
         && napi::sys::napi_create_reference(raw_env, listener, 1, &mut refs[1]) == OK
-        && event_listener(raw_env, self.signal, listener, c"addEventListener", true)
+        && event_listener(raw_env, self.signal, listener, c"addEventListener")
     };
     if !attached {
       unsafe {
@@ -429,8 +426,9 @@ unsafe fn named_function(
   Some(method)
 }
 
-/// `signal[method]("abort", listener)`, `{ once: true }` when adding — that is what
-/// takes the listener off an aborted signal without waiting for this side to settle.
+/// `signal[method]("abort", listener, { once: true })`. The options go on removal too:
+/// `removeEventListener` reads only `capture` from them, and `once` is what takes a
+/// listener off a signal on its own if this side is ever refused.
 ///
 /// # Safety
 ///
@@ -440,14 +438,12 @@ unsafe fn event_listener(
   signal: napi::sys::napi_value,
   listener: napi::sys::napi_value,
   method: &CStr,
-  once: bool,
 ) -> bool {
   let Some(callback) = (unsafe { named_function(env, signal, method) }) else {
     return false;
   };
-  // A failing string creation means a dying environment, with nothing left to
-  // attach a listener to.
-  let mut event = ptr::null_mut();
+  // A failing creation here means a dying environment, with nothing to attach to.
+  let (mut event, mut yes, mut options) = (ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
   if unsafe {
     napi::sys::napi_create_string_utf8(
       env,
@@ -456,29 +452,17 @@ unsafe fn event_listener(
       &mut event,
     )
   } != OK
+    || unsafe { napi::sys::napi_get_boolean(env, true, &mut yes) } != OK
+    || unsafe { napi::sys::napi_create_object(env, &mut options) } != OK
+    || unsafe { napi::sys::napi_set_named_property(env, options, c"once".as_ptr(), yes) } != OK
   {
     return false;
   }
 
-  let mut argv = [event, listener, ptr::null_mut()];
-  let mut argc = 2;
-  if once {
-    let mut yes = ptr::null_mut();
-    let mut options = ptr::null_mut();
-    if unsafe { napi::sys::napi_get_boolean(env, true, &mut yes) } != OK
-      || unsafe { napi::sys::napi_create_object(env, &mut options) } != OK
-      || unsafe { napi::sys::napi_set_named_property(env, options, c"once".as_ptr(), yes) } != OK
-    {
-      return false;
-    }
-    argv[2] = options;
-    argc = 3;
-  }
-
+  let argv = [event, listener, options];
   let mut ignored = ptr::null_mut();
-  if (unsafe {
-    napi::sys::napi_call_function(env, signal, callback, argc, argv.as_ptr(), &mut ignored)
-  }) != OK
+  if unsafe { napi::sys::napi_call_function(env, signal, callback, 3, argv.as_ptr(), &mut ignored) }
+    != OK
   {
     unsafe { clear_pending(env) };
     return false;

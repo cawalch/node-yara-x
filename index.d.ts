@@ -453,14 +453,13 @@ export interface BatchScanResult {
    */
   errors: Array<BatchFileError>
   /**
-   * Whether the signal fired during the sweep, so `results` is partial. A signal
-   * that fired after the last file had started stopped nothing, and reports
-   * `cancelledFiles` 0; a sweep cancelled before it started rejects instead.
+   * Whether the signal fired during the sweep, so `results` is partial. A sweep
+   * cancelled before it started rejects instead of resolving.
    */
   cancelled: boolean
   /**
-   * Files discovered but never started. A truncated traversal never found the rest
-   * of the tree, so counters can fall short — `cancelled` says it was cut short.
+   * Files discovered but never started. A truncated traversal never found the rest of
+   * the tree, so the counters can fall short of what is on disk.
    */
   cancelledFiles: number
   /** Total scan duration in milliseconds. */

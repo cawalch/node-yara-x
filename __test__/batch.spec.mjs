@@ -379,15 +379,13 @@ test("Native Multi-Threaded Batch and Directory Scanning", async (t) => {
     assert.strictEqual(result.totalFiles, files.length, "every file was submitted");
     assert.strictEqual(result.cancelled, true, "a cancelled sweep must say so");
     assert.ok(result.cancelledFiles > 0, `files never started must be counted, got ${result.cancelledFiles}`);
+    const { scannedFiles, cancelledFiles, errors, totalFiles } = result;
     assert.strictEqual(
-      result.scannedFiles + result.cancelledFiles + result.errors.length,
-      result.totalFiles,
+      scannedFiles + cancelledFiles + errors.length,
+      totalFiles,
       "no file may disappear between the counters",
     );
-    assert.ok(
-      result.results.length <= result.scannedFiles,
-      "results cannot outnumber the files that were scanned",
-    );
+    assert.ok(result.results.length <= scannedFiles, "results cannot outnumber the scans");
 
     const full = await scanner.scanFiles(files, { concurrency: 1 });
     assert.strictEqual(full.cancelled, false, "no signal means no cancellation");
@@ -417,11 +415,8 @@ test("Native Multi-Threaded Batch and Directory Scanning", async (t) => {
       const { result } = outcome;
       assert.strictEqual(result.cancelled, true, "a sweep cut short must report the cancellation");
       assert.ok(result.scannedFiles < 2000, `the walk must stop early, scanned ${result.scannedFiles}`);
-      assert.strictEqual(
-        result.scannedFiles + result.cancelledFiles + result.errors.length,
-        result.totalFiles,
-        "no discovered file may disappear between the counters",
-      );
+      const { scannedFiles, cancelledFiles, errors, totalFiles } = result;
+      assert.strictEqual(scannedFiles + cancelledFiles + errors.length, totalFiles, "no discovered file may disappear");
     }
   });
   await t.test("scanDirectory - throws on invalid directory", async () => {

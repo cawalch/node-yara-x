@@ -60,10 +60,6 @@ The README's [API](../README.md#api) section lists the same surface grouped by t
 | `emitWasmFile(outputPath)` | Writes the WebAssembly condition module synchronously. |
 | `emitWasmFileAsync(outputPath)` | Writes the WebAssembly condition module asynchronously. |
 
-### Cancellation
-
-The `signal` argument on the async scan methods is an `AbortSignal`. Wherever it fires before the work starts the call rejects — never throws — with `name` `AbortError` and `code` `Cancelled`; a batch cut part-way resolves with the partial sweep plus `cancelled` and `cancelledFiles`; a scan already running cannot be interrupted, so `setTimeout()` and `setMaxScanSize()` stay the in-scan bounds, and sync methods take no signal. A call in flight hangs one `abort` listener on the signal and removes it when the task settles, leaving `signal.onabort` and the caller's listeners alone. See [Cancel work you no longer want](../README.md#cancel-work-you-no-longer-want).
-
 ## BatchScanOptions
 
 | Option | Type | Description |

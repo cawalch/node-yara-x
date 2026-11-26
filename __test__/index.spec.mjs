@@ -3715,11 +3715,11 @@ describe("AbortSignal cancellation", () => {
     return dir;
   };
 
+  // One branch for every way a cancellation can land: the platform `name` plus the
+  // N-API status the adapter gives cancelled async work.
   const asAbort = (name) => (error) => {
-    strictEqual(error.name, "AbortError", `${name} must reject with the platform abort name`);
-    // `Cancelled` is the N-API status the adapter gives cancelled async work,
-    // so a cancellation is one branch for every way it can land.
-    strictEqual(error.code, "Cancelled", `${name} must carry the N-API cancelled status`);
+    strictEqual(error.name, "AbortError", `${name}: ${error.message}`);
+    strictEqual(error.code, "Cancelled", `${name}: code`);
     return true;
   };
 
@@ -3761,37 +3761,26 @@ describe("AbortSignal cancellation", () => {
 
     for (const [name, call] of Object.entries(asyncCalls)) {
       await call(scanner, file, dir, controller.signal);
-      strictEqual(
-        listenerCount(controller.signal, "abort"),
-        0,
-        `${name} left an abort listener on the signal`,
-      );
+      strictEqual(listenerCount(controller.signal, "abort"), 0, `${name} left a listener`);
       strictEqual(controller.signal.aborted, false, `${name} touched the caller's signal`);
     }
   });
 
   it("cancels a scan that was still queued when the signal fired", () => {
-    // One libuv thread means one async slot, so the second scan cannot start
-    // until the first has finished: the abort lands while it is still waiting,
-    // which is the backlog a client disconnect is supposed to drain. The slow
-    // input is sized to take about a second — the test asserts the outcome, not
-    // the duration, so a faster machine cannot turn a rejection into a pass.
+    // One libuv thread means one async slot, so the second scan cannot start until the
+    // first finishes: the abort lands while it is still waiting, which is the backlog a
+    // client disconnect is supposed to drain. The outcome is asserted, not the duration.
     const indexPath = new URL("../index.js", import.meta.url).href;
     const script = `
       import { compile } from ${JSON.stringify(indexPath)};
       const scanner = compile('rule Queue { strings: $a = /a+b/ condition: any of them }');
-      const slow = Buffer.alloc(8 * 1024, 0x61);
-      slow[slow.length - 1] = 0x62;
-
+      const slow = Buffer.alloc(8 * 1024, 0x61); slow[slow.length - 1] = 0x62;
       const running = scanner.scanAsync(slow);
       const controller = new AbortController();
       const queued = scanner.scanAsync(Buffer.from("data CANCEL_PAYLOAD"), null, controller.signal);
       controller.abort();
-
-      queued.then(
-        () => console.log("QUEUED RESOLVED"),
-        (error) => console.log(\`QUEUED REJECTED \${error.name} \${error.code}\`),
-      );
+      queued.then(() => console.log("QUEUED RESOLVED"),
+        (error) => console.log(\`QUEUED REJECTED \${error.name} \${error.code}\`));
       console.log(\`RUNNING OK \${(await running).length}\`);
     `;
 

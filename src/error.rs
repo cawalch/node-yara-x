@@ -55,9 +55,8 @@ fn stamped(env: Option<&Env>, status: Status, message: String, kind: &'static st
   stamped_prop(env, status, message, "kind", kind)
 }
 
-/// Builds the error to throw with one own string property `key`. `stamped` is the
-/// `kind` case; the abort rejection uses this for `name`, which an `Error` built in
-/// Rust cannot carry.
+/// Builds the error to throw with one own string property `key`; the abort rejection
+/// uses this for `name`, which an `Error` built in Rust cannot carry.
 fn stamped_prop(
   env: Option<&Env>,
   status: Status,
@@ -84,14 +83,12 @@ fn stamped_prop(
   }
 }
 
-/// `name` and `message` of a cancelled scan, matching what N-API gives async work it
-/// cancels (`async_work.rs`, `complete_impl`), so callers have one shape to check.
+/// `name` and `message` N-API gives async work it cancels (`async_work.rs`).
 const ABORT_MESSAGE: &str = "AbortError";
 
-/// Builds the rejection for work cancelled through an `AbortSignal`: `code`
-/// `Cancelled`, `name` and `message` `AbortError`, so one check catches a scan
-/// cancelled here and one N-API cancelled itself. Off-thread the `name` cannot be
-/// stamped, which is what [`stamped_abort`] is for.
+/// Builds the rejection for work cancelled through an `AbortSignal`: `code` `Cancelled`,
+/// `name` and `message` `AbortError`, so one check catches a scan cancelled here and one
+/// N-API cancelled itself. Off-thread the `name` cannot be stamped: [`stamped_abort`].
 pub fn abort_error(env: Option<&Env>) -> Error {
   stamped_prop(
     env,
@@ -102,9 +99,8 @@ pub fn abort_error(env: Option<&Env>) -> Error {
   )
 }
 
-/// Adds the abort `name` to a rejection built on a worker thread; `Task::reject` is
-/// the only later place with an environment. Anything not an abort error is returned
-/// untouched — a scan timeout is `Cancelled` too and keeps its own message.
+/// Adds the abort `name` to a rejection built on a worker thread; `Task::reject` is the
+/// only later place with an environment. Anything else is returned untouched.
 pub fn stamped_abort(env: &Env, error: Error) -> Error {
   if error.status == Status::Cancelled && error.reason == ABORT_MESSAGE {
     abort_error(Some(env))
