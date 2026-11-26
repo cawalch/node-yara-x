@@ -661,6 +661,17 @@ impl YaraX {
     self.invalidate_scanner_cache();
   }
 
+  /// Number of Rayon scan pools built since process start.
+  ///
+  /// A `concurrency` value reuses its pool, so repeated calls at one size must
+  /// not raise this. Instrumentation for the batch test that pins #277; not
+  /// consumer API, so it is deliberately absent from `index.d.ts` while
+  /// remaining reachable on the exported class.
+  #[napi(skip_typescript)]
+  pub fn thread_pool_builds(&self) -> u32 {
+    crate::batch::pool_build_count()
+  }
+
   /// Total number of compiled rules.
   #[napi(getter)]
   pub fn rule_count(&self) -> u32 {

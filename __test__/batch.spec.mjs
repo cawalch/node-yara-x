@@ -245,49 +245,44 @@ test("Native Multi-Threaded Batch and Directory Scanning", async (t) => {
   await t.test("scanDirectorySync - a fixed `concurrency` reuses its thread pool (#277)", () => {
     // Rebuilding a Rayon pool per call spawned fresh threads every time, and
     // new threads start with an empty worker-side scanner cache, so the option
-    // cost more than omitting it. The guard is a ratio against the shared
-    // global pool, interleaved round-robin to cancel thermal/scheduling drift,
-    // measured at two sizes because the per-call cost scales with thread count
-    // — that scaling is the fingerprint of a rebuild. Margins are deliberately
-    // wide: this rejects a regression, it is not a benchmark.
-    //
-    // Measured on an idle 14-core host (median of interleaved runs, per-call
-    // `durationMs`), ratio of explicit concurrency over the global pool:
-    //   before (pool per call): concurrency 8 → 1.85x, 16 → 2.74x
-    //   after  (pool cached)  : concurrency 8 → 0.94x, 16 → 1.03x
+    // cost more than omitting it. The guard used to time that against the
+    // shared pool; on runners the per-call medians are ~0.1 ms and the ratio
+    // landed at 1.5x-2.5x either way (#296), so assert the mechanism instead:
+    // a thread count that is already cached must not build another pool.
     const options = { onlyMatches: true };
 
-    // Keep the assertion non-vacuous if traversal ever stops discovering work.
-    assert.ok(scanner.scanDirectorySync(tempDir, options).totalFiles >= 4, "fixture has files to scan");
+    assert.ok(
+      scanner.scanDirectorySync(tempDir, options).totalFiles >= 4,
+      "fixture has files to scan",
+    );
 
-    const median = (samples) => {
-      const sorted = [...samples].sort((a, b) => a - b);
-      return sorted[Math.floor(sorted.length / 2)];
-    };
-    const timed = (opts, iterations) => {
-      const samples = [];
-      for (let i = 0; i < iterations; i++) {
-        samples.push(scanner.scanDirectorySync(tempDir, opts).durationMs);
-      }
-      return median(samples);
-    };
+    // Sizes no other test in this file asks for, so the cache cannot be warm.
+    const reused = 9;
+    const fresh = 13;
 
-    for (const concurrency of [8, 16]) {
-      scanner.scanDirectorySync(tempDir, { ...options, concurrency });  // warm both lanes
+    scanner.scanDirectorySync(tempDir, { ...options, concurrency: reused });
+    const afterWarm = scanner.threadPoolBuilds();
+
+    for (let i = 0; i < 5; i++) {
+      scanner.scanDirectorySync(tempDir, { ...options, concurrency: reused });
+      // Interleave the default lane, as the timing version did.
       scanner.scanDirectorySync(tempDir, options);
-
-      const pooled = [];
-      const shared = [];
-      for (let round = 0; round < 4; round++) {
-        pooled.push(timed({ ...options, concurrency }, 25));
-        shared.push(timed(options, 25));
-      }
-      const ratio = median(pooled) / median(shared);
-      assert.ok(
-        ratio <= 1.5,
-        `concurrency: ${concurrency} took ${median(pooled).toFixed(3)}ms vs ${median(shared).toFixed(3)}ms on the shared pool (${ratio.toFixed(2)}x) — thread pools must be reused across calls`,
-      );
     }
+
+    assert.strictEqual(
+      scanner.threadPoolBuilds() - afterWarm,
+      0,
+      "calls at a fixed `concurrency` must reuse the cached pool",
+    );
+
+    // Non-vacuity: the counter really does move when a pool is built.
+    const beforeFresh = scanner.threadPoolBuilds();
+    scanner.scanDirectorySync(tempDir, { ...options, concurrency: fresh });
+    assert.strictEqual(
+      scanner.threadPoolBuilds() - beforeFresh,
+      1,
+      "a first call at a new thread count must build exactly one pool",
+    );
   });
 
   await t.test("scanDirectory (async) - full recursive parallel scan", async () => {
