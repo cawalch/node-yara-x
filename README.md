@@ -527,7 +527,7 @@ for (const match of matches[0]?.matches ?? []) {
 
 ### Matched bytes
 
-`MatchData.data` is a UTF-8 view of the match, so invalid bytes become replacement characters. Every match also carries `dataBytes`, the exact matched slice as a `Buffer`:
+`MatchData.data` is a UTF-8 view of the match, so invalid bytes become replacement characters. Scan results additionally carry `dataBytes`, the exact matched slice as a `Buffer` (`toRuleMatches()` sets it when you pass the source buffer):
 
 ```javascript
 const [match] = rules.scan(Buffer.from([0x80, 0xff, 0x41]));

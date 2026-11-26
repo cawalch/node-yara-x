@@ -237,6 +237,10 @@ test("Native Multi-Threaded Batch and Directory Scanning", async (t) => {
   });
 
   await t.test("scanDirectory - reports traversal errors for unreadable directories", async (t) => {
+    if (process.platform === "win32") {
+      t.skip("Windows does not enforce POSIX directory mode bits");
+      return;
+    }
     if (typeof process.getuid === "function" && process.getuid() === 0) {
       t.skip("root bypasses directory mode bits");
       return;
