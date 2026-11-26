@@ -4,10 +4,12 @@
 //! cloning strings creates significant GC pauses. This module serializes matches
 //! into a flat, contiguous 24-byte record buffer and an indexed metadata catalog.
 
+use crate::cancel::CancelState;
+use crate::error::stamped_abort;
 use crate::tasks::{BaseYaraTask, ScanTarget, TaskScanOptions};
 use crate::types::{MatchData, RuleMatch, RuleMetadata, VariableMap};
 use napi::bindgen_prelude::{Buffer, Object, ObjectFinalize, ObjectRef, ToNapiValue};
-use napi::{Env, JsValue, Result, Task};
+use napi::{Env, Error, JsValue, Result, Task};
 use napi_derive::napi;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -430,6 +432,7 @@ pub struct BinaryScanTaskOutput {
 pub struct BinaryScanTask {
   base: BaseYaraTask,
   target: ScanTarget,
+  cancel: CancelState,
 }
 
 impl BinaryScanTask {
@@ -438,10 +441,12 @@ impl BinaryScanTask {
     target: ScanTarget,
     variables: Option<VariableMap>,
     options: TaskScanOptions,
+    cancel: CancelState,
   ) -> Self {
     Self {
       base: BaseYaraTask::new(rules, variables, options),
       target,
+      cancel,
     }
   }
 }
@@ -451,6 +456,7 @@ impl Task for BinaryScanTask {
   type JsValue = BinaryScanResult;
 
   fn compute(&mut self) -> Result<Self::Output> {
+    self.cancel.reject_if_cancelled()?;
     self.base.with_scanner(|scanner| {
       let results = match &self.target {
         ScanTarget::Buffer(buf) => scanner.scan(buf.as_ref()),
@@ -467,11 +473,20 @@ impl Task for BinaryScanTask {
     })
   }
 
+  fn reject(&mut self, env: Env, err: Error) -> Result<Self::JsValue> {
+    Err(stamped_abort(&env, err))
+  }
+
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
     Ok(BinaryScanResult {
       buffer: Buffer::from(output.bytes),
       match_count: output.match_count,
       catalog: output.catalog,
     })
+  }
+
+  fn finally(mut self, env: Env) -> Result<()> {
+    self.cancel.release(&env);
+    Ok(())
   }
 }

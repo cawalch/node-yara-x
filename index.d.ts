@@ -254,10 +254,14 @@ export declare class YaraX {
    * The input buffer is copied when this method is called, so mutating the
    * buffer afterwards does not change the scan result. The synchronous
    * [`scan`](Self::scan) reads the buffer directly and stays zero-copy.
+   *
+   * `signal` rejects the scan with `name` `AbortError` if it fires before a worker
+   * picks it up (including one already aborted at the call); one that has started runs
+   * to completion — bound that with [`setTimeout`](Self::set_timeout).
    */
-  scanAsync(data: Buffer, variables?: Record<string, string | number | boolean | bigint>): Promise<Array<RuleMatch>>
+  scanAsync(data: Buffer, variables?: Record<string, string | number | boolean | bigint>, signal?: AbortSignal): Promise<Array<RuleMatch>>
   /** Scans a file asynchronously using the compiled YARA rules. */
-  scanFileAsync(filePath: string, variables?: Record<string, string | number | boolean | bigint>): Promise<Array<RuleMatch>>
+  scanFileAsync(filePath: string, variables?: Record<string, string | number | boolean | bigint>, signal?: AbortSignal): Promise<Array<RuleMatch>>
   /**
    * Checks whether the provided data matches any compiled YARA rule asynchronously.
    *
@@ -267,23 +271,23 @@ export declare class YaraX {
    * The input buffer is copied when this method is called, so mutating the
    * buffer afterwards does not change the result.
    */
-  isMatchAsync(data: Buffer, variables?: Record<string, string | number | boolean | bigint>): Promise<boolean>
+  isMatchAsync(data: Buffer, variables?: Record<string, string | number | boolean | bigint>, signal?: AbortSignal): Promise<boolean>
   /**
    * Checks whether a file matches any compiled YARA rule asynchronously.
    *
    * This method is a fast-path boolean check that returns true as soon as any rule matches,
    * without allocating or constructing match objects, tags, or metadata.
    */
-  isFileMatchAsync(filePath: string, variables?: Record<string, string | number | boolean | bigint>): Promise<boolean>
+  isFileMatchAsync(filePath: string, variables?: Record<string, string | number | boolean | bigint>, signal?: AbortSignal): Promise<boolean>
   /**
    * Scans the provided data asynchronously returning a flat binary match buffer and catalog.
    *
    * The input buffer is copied when this method is called, so mutating the
    * buffer afterwards does not change the result.
    */
-  scanBinaryAsync(data: Buffer, variables?: Record<string, string | number | boolean | bigint>): Promise<BinaryScanResult>
+  scanBinaryAsync(data: Buffer, variables?: Record<string, string | number | boolean | bigint>, signal?: AbortSignal): Promise<BinaryScanResult>
   /** Scans a file asynchronously returning a flat binary match buffer and catalog. */
-  scanFileBinaryAsync(filePath: string, variables?: Record<string, string | number | boolean | bigint>): Promise<BinaryScanResult>
+  scanFileBinaryAsync(filePath: string, variables?: Record<string, string | number | boolean | bigint>, signal?: AbortSignal): Promise<BinaryScanResult>
   /** Emits a WASM file asynchronously from the compiled YARA rules. */
   emitWasmFileAsync(outputPath: string): Promise<void>
   /**
@@ -338,12 +342,25 @@ export declare class YaraX {
    * redefining the same name with a matching type fixes the rule set.
    */
   defineVariable(name: string, value: string | number | boolean | bigint): void
-  /** Scans multiple files concurrently across a Rayon worker thread pool. */
-  scanFiles(filePaths: Array<string>, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null): Promise<BatchScanResult>
+  /**
+   * Scans multiple files concurrently across a Rayon worker thread pool.
+   *
+   * `signal` cancels the sweep: files not started yet are skipped and
+   * the promise resolves with the partial sweep, `cancelled` true and
+   * `cancelledFiles` counting what was skipped. Cancelling before the first
+   * file starts rejects with `name` `AbortError` instead, like the other async
+   * entry points.
+   */
+  scanFiles(filePaths: Array<string>, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null, signal?: AbortSignal): Promise<BatchScanResult>
   /** Scans multiple files synchronously across a Rayon worker thread pool. */
   scanFilesSync(filePaths: Array<string>, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null): BatchScanResult
-  /** Recursively scans a directory across a Rayon worker thread pool. */
-  scanDirectory(dirPath: string, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null): Promise<BatchScanResult>
+  /**
+   * Recursively scans a directory across a Rayon worker thread pool.
+   *
+   * `signal` cancels the sweep, stopping the traversal as well as the files;
+   * see [`scan_files`](Self::scan_files) for what a cancelled result reports.
+   */
+  scanDirectory(dirPath: string, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null, signal?: AbortSignal): Promise<BatchScanResult>
   /** Recursively scans a directory synchronously across a Rayon worker thread pool. */
   scanDirectorySync(dirPath: string, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null): BatchScanResult
 }
@@ -435,6 +452,16 @@ export interface BatchScanResult {
    * continues past both, so a partial sweep is reported rather than lost.
    */
   errors: Array<BatchFileError>
+  /**
+   * Whether the signal fired during the sweep, so `results` is partial. A sweep
+   * cancelled before it started rejects instead of resolving.
+   */
+  cancelled: boolean
+  /**
+   * Files discovered but never started. A truncated traversal never found the rest of
+   * the tree, so the counters can fall short of what is on disk.
+   */
+  cancelledFiles: number
   /** Total scan duration in milliseconds. */
   durationMs: number
 }

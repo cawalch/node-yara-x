@@ -6,12 +6,13 @@
 //! Scanning is performed in `compute()` (worker thread) using thread-safe `RuleMatchData`,
 //! then converted to N-API `RuleMatch` objects in `resolve()` (main thread).
 
+use crate::cancel::CancelState;
 use crate::compiler::{replay_sources_to_wasm, StoredCompilerOptions};
-use crate::error::scan_error_to_napi;
+use crate::error::{scan_error_to_napi, stamped_abort};
 use crate::scanner::YaraX;
 use crate::types::{RuleMatch, RuleMatchData, RuleSource, VariableMap};
 use crate::variables::VariableHandler;
-use napi::{Error, Result, Status, Task};
+use napi::{Env, Error, Result, Status, Task};
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Duration;
@@ -213,6 +214,7 @@ impl ScanTarget {
 pub struct ScanTask {
   base: BaseYaraTask,
   target: ScanTarget,
+  cancel: CancelState,
 }
 
 impl ScanTask {
@@ -222,10 +224,12 @@ impl ScanTask {
     target: ScanTarget,
     variables: Option<VariableMap>,
     options: TaskScanOptions,
+    cancel: CancelState,
   ) -> Self {
     Self {
       base: BaseYaraTask::new(rules, variables, options),
       target,
+      cancel,
     }
   }
 }
@@ -235,11 +239,21 @@ impl Task for ScanTask {
   type JsValue = Vec<RuleMatch<'static>>;
 
   fn compute(&mut self) -> Result<Self::Output> {
+    self.cancel.reject_if_cancelled()?;
     self.target.scan_to_data(&self.base)
+  }
+
+  fn reject(&mut self, env: Env, err: Error) -> Result<Self::JsValue> {
+    Err(stamped_abort(&env, err))
   }
 
   fn resolve(&mut self, env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
     YaraX::convert_to_rule_matches(env, output)
+  }
+
+  fn finally(mut self, env: Env) -> Result<()> {
+    self.cancel.release(&env);
+    Ok(())
   }
 }
 
@@ -249,6 +263,7 @@ impl Task for ScanTask {
 pub struct IsMatchTask {
   base: BaseYaraTask,
   target: ScanTarget,
+  cancel: CancelState,
 }
 
 impl IsMatchTask {
@@ -258,10 +273,12 @@ impl IsMatchTask {
     target: ScanTarget,
     variables: Option<VariableMap>,
     options: TaskScanOptions,
+    cancel: CancelState,
   ) -> Self {
     Self {
       base: BaseYaraTask::new(rules, variables, options),
       target,
+      cancel,
     }
   }
 }
@@ -271,11 +288,21 @@ impl Task for IsMatchTask {
   type JsValue = bool;
 
   fn compute(&mut self) -> Result<Self::Output> {
+    self.cancel.reject_if_cancelled()?;
     self.target.is_match(&self.base)
+  }
+
+  fn reject(&mut self, env: Env, err: Error) -> Result<Self::JsValue> {
+    Err(stamped_abort(&env, err))
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
     Ok(output)
+  }
+
+  fn finally(mut self, env: Env) -> Result<()> {
+    self.cancel.release(&env);
+    Ok(())
   }
 }
 

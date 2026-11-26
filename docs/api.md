@@ -26,19 +26,19 @@ The README's [API](../README.md#api) section lists the same surface grouped by t
 | `getRules()` | `RuleInfo[]` metadata for every compiled rule. |
 | `scan(data, variables?)` | Scans a `Buffer` synchronously; returns the matching rules. |
 | `scanFile(filePath, variables?)` | Scans a file synchronously. |
-| `scanAsync(data, variables?)` | Scans a `Buffer` on a worker thread. |
-| `scanFileAsync(filePath, variables?)` | Scans a file on a worker thread. |
+| `scanAsync(data, variables?, signal?)` | Scans a `Buffer` on a worker thread. |
+| `scanFileAsync(filePath, variables?, signal?)` | Scans a file on a worker thread. |
 | `scanBinary(data, variables?)` | Scans a `Buffer` with the binary match ABI; returns `BinaryScanResult`. |
 | `scanFileBinary(filePath, variables?)` | Scans a file with the binary match ABI; returns `BinaryScanResult`. |
-| `scanBinaryAsync(data, variables?)` | Scans a `Buffer` asynchronously; resolves to `BinaryScanResult`. |
-| `scanFileBinaryAsync(filePath, variables?)` | Scans a file asynchronously; resolves to `BinaryScanResult`. |
+| `scanBinaryAsync(data, variables?, signal?)` | Scans a `Buffer` asynchronously; resolves to `BinaryScanResult`. |
+| `scanFileBinaryAsync(filePath, variables?, signal?)` | Scans a file asynchronously; resolves to `BinaryScanResult`. |
 | `isMatch(data, variables?)` | Boolean match test on a `Buffer`; allocates no match objects. |
 | `isFileMatch(filePath, variables?)` | Boolean match test on a file. |
-| `isMatchAsync(data, variables?)` | Boolean match test on a `Buffer`, on a worker thread. |
-| `isFileMatchAsync(filePath, variables?)` | Boolean match test on a file, on a worker thread. |
-| `scanFiles(filePaths, options?, variables?)` | Scans paths in parallel across a Rayon pool; resolves to `BatchScanResult`. |
+| `isMatchAsync(data, variables?, signal?)` | Boolean match test on a `Buffer`, on a worker thread. |
+| `isFileMatchAsync(filePath, variables?, signal?)` | Boolean match test on a file, on a worker thread. |
+| `scanFiles(filePaths, options?, variables?, signal?)` | Scans paths in parallel across a Rayon pool; resolves to `BatchScanResult`. |
 | `scanFilesSync(filePaths, options?, variables?)` | Same, synchronously. |
-| `scanDirectory(dirPath, options?, variables?)` | Recursively scans a directory in parallel with native traversal. |
+| `scanDirectory(dirPath, options?, variables?, signal?)` | Recursively scans a directory in parallel with native traversal. |
 | `scanDirectorySync(dirPath, options?, variables?)` | Same, synchronously. |
 | `serialize()` | Serializes compiled rules into a portable `Buffer`. |
 | `addRuleSource(ruleSource, namespace?)` | Adds one rule source to an incremental scanner. |

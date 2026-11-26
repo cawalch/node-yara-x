@@ -361,10 +361,64 @@ test("Native Multi-Threaded Batch and Directory Scanning", async (t) => {
       `traversal error must name the unreadable directory: ${JSON.stringify(asyncResult.errors)}`,
     );
 
-    // The readable part of the tree is still scanned.
     assert.ok(syncResult.results.some((result) => result.filePath.endsWith("open.txt")));
   });
 
+  await t.test("AbortSignal - a sweep cancelled part-way through keeps what it scanned", async () => {
+    // Long enough that the abort lands inside the sweep: 12,000 files on one thread
+    // against a 5 ms delay. The uncancelled run afterwards is what shows these
+    // assertions are about cancellation and not about a sweep too short to finish.
+    const files = Array.from({ length: 12_000 }, () => join(tempDir, "file1.txt"));
+    const controller = new AbortController();
+
+    const sweep = scanner.scanFiles(files, { concurrency: 1 }, null, controller.signal);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    controller.abort();
+    const result = await sweep;
+
+    assert.strictEqual(result.totalFiles, files.length, "every file was submitted");
+    assert.strictEqual(result.cancelled, true, "a cancelled sweep must say so");
+    assert.ok(result.cancelledFiles > 0, `files never started must be counted, got ${result.cancelledFiles}`);
+    const { scannedFiles, cancelledFiles, errors, totalFiles } = result;
+    assert.strictEqual(
+      scannedFiles + cancelledFiles + errors.length,
+      totalFiles,
+      "no file may disappear between the counters",
+    );
+    assert.ok(result.results.length <= scannedFiles, "results cannot outnumber the scans");
+
+    const full = await scanner.scanFiles(files, { concurrency: 1 });
+    assert.strictEqual(full.cancelled, false, "no signal means no cancellation");
+    assert.strictEqual(full.cancelledFiles, 0);
+    assert.strictEqual(full.scannedFiles, files.length);
+  });
+
+  await t.test("AbortSignal - a signal aborted during traversal stops the walk", async () => {
+    // Queued means a rejection, walking means a partial sweep; both are documented
+    // outcomes, so each branch is asserted on its own terms. What must never happen
+    // is a sweep that settles with nothing reported, or one that never settles.
+    const treeDir = await mkdtemp(join(tmpdir(), "yara-x-cancel-tree-"));
+    t.after(() => rm(treeDir, { recursive: true, force: true }));
+    await Promise.all(
+      Array.from({ length: 2000 }, (_, i) => writeFile(join(treeDir, `f${i}.txt`), "benign contents")),
+    );
+
+    const controller = new AbortController();
+    const sweep = scanner.scanDirectory(treeDir, { concurrency: 1, onlyMatches: true }, null, controller.signal);
+    controller.abort();
+
+    const outcome = await sweep.then((result) => ({ result }), (error) => ({ error }));
+    if (outcome.error) {
+      assert.strictEqual(outcome.error.name, "AbortError", "cancelling queued work rejects as an abort");
+      assert.strictEqual(outcome.error.code, "Cancelled");
+    } else {
+      const { result } = outcome;
+      assert.strictEqual(result.cancelled, true, "a sweep cut short must report the cancellation");
+      assert.ok(result.scannedFiles < 2000, `the walk must stop early, scanned ${result.scannedFiles}`);
+      const { scannedFiles, cancelledFiles, errors, totalFiles } = result;
+      assert.strictEqual(scannedFiles + cancelledFiles + errors.length, totalFiles, "no discovered file may disappear");
+    }
+  });
   await t.test("scanDirectory - throws on invalid directory", async () => {
     assert.throws(() => {
       scanner.scanDirectorySync(join(tempDir, "non-existent-dir"));

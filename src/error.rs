@@ -52,13 +52,25 @@ pub const KIND_UNKNOWN: &str = "unknown";
 /// or the `code` it already had: any failure to build or stamp the object
 /// throws the plain error instead.
 fn stamped(env: Option<&Env>, status: Status, message: String, kind: &'static str) -> Error {
+  stamped_prop(env, status, message, "kind", kind)
+}
+
+/// Builds the error to throw with one own string property `key`; the abort rejection
+/// uses this for `name`, which an `Error` built in Rust cannot carry.
+fn stamped_prop(
+  env: Option<&Env>,
+  status: Status,
+  message: String,
+  key: &str,
+  value: &str,
+) -> Error {
   let Some(env) = env else {
     return Error::new(status, message);
   };
 
   match env.create_error(Error::new(status, message.clone())) {
     Ok(mut object) => {
-      if object.set_named_property("kind", kind).is_err() {
+      if object.set_named_property(key, value).is_err() {
         return Error::new(status, message);
       }
       // The object built here is the object that is thrown; see the note in
@@ -68,6 +80,32 @@ fn stamped(env: Option<&Env>, status: Status, message: String, kind: &'static st
       })
     }
     Err(_) => Error::new(status, message),
+  }
+}
+
+/// `name` and `message` N-API gives async work it cancels (`async_work.rs`).
+const ABORT_MESSAGE: &str = "AbortError";
+
+/// Builds the rejection for work cancelled through an `AbortSignal`: `code` `Cancelled`,
+/// `name` and `message` `AbortError`, so one check catches a scan cancelled here and one
+/// N-API cancelled itself. Off-thread the `name` cannot be stamped: [`stamped_abort`].
+pub fn abort_error(env: Option<&Env>) -> Error {
+  stamped_prop(
+    env,
+    Status::Cancelled,
+    ABORT_MESSAGE.to_owned(),
+    "name",
+    ABORT_MESSAGE,
+  )
+}
+
+/// Adds the abort `name` to a rejection built on a worker thread; `Task::reject` is the
+/// only later place with an environment. Anything else is returned untouched.
+pub fn stamped_abort(env: &Env, error: Error) -> Error {
+  if error.status == Status::Cancelled && error.reason == ABORT_MESSAGE {
+    abort_error(Some(env))
+  } else {
+    error
   }
 }
 
