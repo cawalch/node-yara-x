@@ -13,6 +13,7 @@ use napi_derive::napi;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use walkdir::WalkDir;
@@ -262,6 +263,16 @@ pub fn collect_directory_files(
 /// Number of distinct `concurrency` sizes kept warm at once.
 const POOL_CACHE_SIZE: usize = 4;
 
+/// Number of scan pools built because the cache had no entry for that thread
+/// count. Read through `YaraX::thread_pool_builds` so a test can assert pool
+/// reuse directly instead of timing a scan.
+static POOL_BUILDS: AtomicU32 = AtomicU32::new(0);
+
+/// Reads [`POOL_BUILDS`] for `YaraX::thread_pool_builds`.
+pub fn pool_build_count() -> u32 {
+  POOL_BUILDS.load(Ordering::Relaxed)
+}
+
 /// Returns the Rayon pool for `threads`, caching [`POOL_CACHE_SIZE`] sizes LRU.
 ///
 /// Pools are cached because a fresh pool starts empty threads, which discards
@@ -290,6 +301,7 @@ fn thread_pool(threads: usize) -> Result<Arc<rayon::ThreadPool>> {
   }
 
   // Built outside the lock so thread spawn never blocks another caller.
+  POOL_BUILDS.fetch_add(1, Ordering::Relaxed);
   let pool = Arc::new(
     rayon::ThreadPoolBuilder::new()
       .num_threads(threads)
