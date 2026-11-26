@@ -38,10 +38,6 @@ pub trait VariableHandler {
   fn apply_string_variable(&mut self, name: &str, value: &str) -> Result<()>;
 
   /// Applies variables from a map to the handler.
-  ///
-  /// # Arguments
-  ///
-  /// * `variables` - Optional map of variable names to values
   fn apply_variables_from_map(&mut self, variables: &Option<VariableMap>) -> Result<()> {
     if let Some(vars) = variables {
       for (key, value) in vars {
@@ -52,10 +48,6 @@ pub trait VariableHandler {
   }
 
   /// Applies variables from a JavaScript object to the handler.
-  ///
-  /// # Arguments
-  ///
-  /// * `variables` - Optional N-API object containing variables
   fn apply_variables_from_object(&mut self, variables: &Option<Object>) -> Result<()> {
     if let Some(vars) = variables {
       let property_names = Object::keys(vars)?;
@@ -211,14 +203,6 @@ pub fn diagnostic_location<T: serde::Serialize>(
 ///
 /// This is used for async operations where we need to transfer variables
 /// across thread boundaries.
-///
-/// # Arguments
-///
-/// * `variables` - Optional N-API object containing variables
-///
-/// # Returns
-///
-/// An optional HashMap of variable names to values
 pub fn convert_variables_to_map(variables: Option<Object>) -> Result<Option<VariableMap>> {
   let Some(vars) = variables else {
     return Ok(None);
@@ -242,26 +226,11 @@ pub fn convert_variables_to_map(variables: Option<Object>) -> Result<Option<Vari
 /// Converts a list of compiler messages to a vector of output types.
 ///
 /// This is a generic helper for converting both warnings and errors.
-///
-/// # Arguments
-///
-/// * `messages` - Slice of compiler messages
-/// * `to_output` - Function to convert each message to the output type
-///
-/// # Returns
-///
-/// A vector of converted messages
 pub fn convert_compiler_messages<T, U>(messages: &[T], to_output: impl Fn(&T) -> U) -> Vec<U> {
   messages.iter().map(to_output).collect()
 }
 
 /// Extracts compiler errors from a Compiler instance.
-///
-/// # Arguments
-///
-/// * `compiler` - The YARA compiler
-///
-/// # Returns
 ///
 /// A vector of CompilerError structs
 pub fn get_compiler_errors(compiler: &Compiler) -> Vec<CompilerError> {
@@ -278,14 +247,6 @@ pub fn get_compiler_errors(compiler: &Compiler) -> Vec<CompilerError> {
 }
 
 /// Extracts compiler warnings from a Compiler instance.
-///
-/// # Arguments
-///
-/// * `compiler` - The YARA compiler
-///
-/// # Returns
-///
-/// A vector of CompilerWarning structs
 pub fn get_compiler_warnings(compiler: &Compiler) -> Vec<CompilerWarning> {
   convert_compiler_messages(compiler.warnings(), |w| {
     let (source, line, column) = diagnostic_location(w);

@@ -40,24 +40,18 @@ export declare class BinaryMatchView {
   /** Gets the pattern identifier for the match record at `index`. */
   getPattern(index: number): string | null
   /**
-   * Slices the matched byte slice directly out of the source buffer.
+   * Slices the matched bytes out of the scanned source buffer.
    *
-   * Pass the same bytes that were scanned; the view does not retain the
-   * source. Async scans copy their input, so pass the original buffer
-   * unchanged.
+   * The view does not retain the source, so pass the bytes that were scanned.
    */
   getSlice(index: number, source: Buffer): Buffer | null
   /**
-   * Lazily materializes all binary match records into the standard `RuleMatch` object graph.
+   * Materializes the binary match records into the `RuleMatch` object graph.
    *
-   * If `source` buffer is provided, the matched bytes are sliced into
-   * `MatchData.data` (lossy UTF-8) and `MatchData.dataBytes` (exact bytes).
-   * Otherwise, `MatchData.data` is an empty string and `dataBytes` is absent.
-   *
-   * Pass the same bytes that were scanned; the view does not retain the
-   * source. Async scans copy their input, so mutating the buffer between
-   * `scanBinaryAsync()` and this call yields slices that no longer match the
-   * scan.
+   * With `source`, fills `MatchData.data` (lossy UTF-8) and
+   * `MatchData.dataBytes` (exact bytes); without it, `data` is empty and
+   * `dataBytes` is absent. The view does not retain the source, so pass the
+   * bytes that were scanned.
    */
   toRuleMatches(source?: Buffer): Array<RuleMatch>
 }
@@ -80,8 +74,6 @@ export declare class YaraX {
    * rule name, the reason it was skipped (`ignored_module`, `ignored_rule`,
    * or `compile_error`), and a detail string.
    *
-   * # Returns
-   *
    * A vector of `IgnoredRule` objects (empty when nothing was skipped)
    */
   getIgnoredRules(): Array<IgnoredRule>
@@ -98,36 +90,21 @@ export declare class YaraX {
    * imports, include failures) — in strict mode those abort compilation
    * instead. Mirrors the upstream Python binding's `Compiler.errors()`.
    *
-   * # Returns
-   *
    * A vector of `CompilerError` objects (empty when no errors occurred)
    */
   getCompilationErrors(): Array<CompilerError>
-  /**
-   * Sets the maximum number of matches per pattern.
-   *
-   * # Arguments
-   *
-   * * `max_matches` - The maximum number of matches per pattern
-   */
+  /** Sets the maximum number of matches per pattern. */
   setMaxMatchesPerPattern(maxMatches: number): void
-  /**
-   * Sets whether to use memory-mapped files for scanning.
-   *
-   * # Arguments
-   *
-   * * `use_mmap` - Whether to use memory-mapped files
-   */
+  /** Sets whether to use memory-mapped files for scanning. */
   setUseMmap(useMmap: boolean): void
-  /**
-   * Sets whether to use fast scan mode (stops searching for a pattern as soon as the first match is found).
-   *
-   * # Arguments
-   *
-   * * `fast_scan` - Whether to enable fast scan mode
-   */
+  /** Sets whether to use fast scan mode (stops searching for a pattern as soon as the first match is found). */
   setFastScan(fastScan: boolean): void
-  /** Sets the scan timeout in milliseconds. */
+  /**
+   * Sets the scan timeout in milliseconds; `0` disables it.
+   *
+   * Best-effort: YARA-X checks the deadline between work units, so a scan can
+   * overrun it. Use `setMaxScanSize()` for a hard bound.
+   */
   setTimeout(timeoutMs: number): void
   /** Sets the match context size. */
   setMatchContextSize(size: number): void
@@ -142,13 +119,11 @@ export declare class YaraX {
   /**
    * Routes messages logged by rules through the `console` module to a callback.
    *
-   * Messages arrive on the Node.js event loop, so a synchronous scan returns
-   * before the callback runs. Pass nothing to discard rule output again.
+   * Messages arrive on the event loop, so a synchronous scan returns before
+   * the callback runs. Pass nothing to stop receiving them.
    *
-   * The callback handle is created weak (un-referenced), so setting one does
-   * not keep the Node.js process alive: a script that finishes scanning exits
-   * normally. A consequence is that rule-log messages still queued when the
-   * process exits may not be delivered.
+   * The handle is weak, so it does not keep the process alive; messages still
+   * queued at exit may be dropped.
    */
   setConsoleLog(callback?: (((arg: string) => unknown)) | undefined | null): void
   /**
@@ -156,10 +131,6 @@ export declare class YaraX {
    *
    * Any data or file exceeding this size will only have its initial
    * bytes scanned up to this limit. Passing 0 or a negative number clears the limit.
-   *
-   * # Arguments
-   *
-   * * `max_bytes` - Maximum bytes to scan
    */
   setMaxScanSize(maxBytes: number): void
   /** Total number of compiled rules. */
@@ -168,108 +139,46 @@ export declare class YaraX {
   getImports(): Array<string>
   /** Returns metadata for all compiled rules including identifier, namespace, tags, and patterns. */
   getRules(): Array<RuleInfo>
-  /**
-   * Scans the provided data using the compiled YARA rules.
-   *
-   * # Arguments
-   *
-   * * `env` - The N-API environment
-   * * `data` - The data to scan
-   * * `variables` - Optional variables to set for this scan
-   *
-   * # Returns
-   *
-   * A vector of matching rules
-   */
-  scan(data: Buffer, variables?: Record<string, string | number | boolean>): Array<RuleMatch>
-  /**
-   * Scans a file using the compiled YARA rules.
-   *
-   * # Arguments
-   *
-   * * `env` - The N-API environment
-   * * `file_path` - Path to the file to scan
-   * * `variables` - Optional variables to set for this scan
-   *
-   * # Returns
-   *
-   * A vector of matching rules
-   */
-  scanFile(filePath: string, variables?: Record<string, string | number | boolean>): Array<RuleMatch>
+  /** Scans the provided data using the compiled YARA rules. */
+  scan(data: Buffer, variables?: Record<string, string | number | boolean | bigint>): Array<RuleMatch>
+  /** Scans a file using the compiled YARA rules. */
+  scanFile(filePath: string, variables?: Record<string, string | number | boolean | bigint>): Array<RuleMatch>
   /**
    * Checks whether the provided data matches any compiled YARA rule.
    *
    * This method is a fast-path boolean check that returns true as soon as any rule matches,
    * without allocating or constructing match objects, tags, or metadata.
    *
-   * # Arguments
-   *
-   * * `data` - The data to scan
-   * * `variables` - Optional variables to set for this scan
-   *
-   * # Returns
-   *
    * `true` if any rule matches, `false` otherwise
    */
-  isMatch(data: Buffer, variables?: Record<string, string | number | boolean>): boolean
+  isMatch(data: Buffer, variables?: Record<string, string | number | boolean | bigint>): boolean
   /**
    * Checks whether a file matches any compiled YARA rule.
    *
    * This method is a fast-path boolean check that returns true as soon as any rule matches,
    * without allocating or constructing match objects, tags, or metadata.
    *
-   * # Arguments
-   *
-   * * `file_path` - Path to the file to scan
-   * * `variables` - Optional variables to set for this scan
-   *
-   * # Returns
-   *
    * `true` if any rule matches, `false` otherwise
    */
-  isFileMatch(filePath: string, variables?: Record<string, string | number | boolean>): boolean
+  isFileMatch(filePath: string, variables?: Record<string, string | number | boolean | bigint>): boolean
   /**
    * Scans the provided data returning a flat binary match record buffer and metadata catalog.
    *
    * This method is an ultra-fast path for high-density match reporting.
    * It packs matches into a contiguous 24-byte record buffer, avoiding per-match
    * V8 object and string allocations.
-   *
-   * # Arguments
-   *
-   * * `data` - The data to scan
-   * * `variables` - Optional variables to set for this scan
-   *
-   * # Returns
-   *
-   * A `BinaryScanResult` containing the packed buffer, match count, and catalog
    */
-  scanBinary(data: Buffer, variables?: Record<string, string | number | boolean>): BinaryScanResult
+  scanBinary(data: Buffer, variables?: Record<string, string | number | boolean | bigint>): BinaryScanResult
   /**
    * Scans a file returning a flat binary match record buffer and metadata catalog.
    *
    * This method is an ultra-fast path for high-density match reporting.
    * It packs matches into a contiguous 24-byte record buffer, avoiding per-match
    * V8 object and string allocations.
-   *
-   * # Arguments
-   *
-   * * `file_path` - Path to the file to scan
-   * * `variables` - Optional variables to set for this scan
-   *
-   * # Returns
-   *
-   * A `BinaryScanResult` containing the packed buffer, match count, and catalog
    */
-  scanFileBinary(filePath: string, variables?: Record<string, string | number | boolean>): BinaryScanResult
+  scanFileBinary(filePath: string, variables?: Record<string, string | number | boolean | bigint>): BinaryScanResult
   /**
    * Emits a WASM file from the compiled YARA rules.
-   *
-   * # Arguments
-   *
-   * * `output_path` - Path where the WASM file should be written
-   *
-   * # Returns
    *
    * Ok(()) on success, or an error if emission fails
    */
@@ -281,10 +190,6 @@ export declare class YaraX {
    * the compiled WASM conditions) and can be restored on any platform with
    * the [`deserialize`](crate::deserialize) function, provided the same
    * YARA-X version is used on both sides.
-   *
-   * # Returns
-   *
-   * A Buffer containing the serialized rules
    */
   serialize(): Buffer
   /**
@@ -293,30 +198,10 @@ export declare class YaraX {
    * The input buffer is copied when this method is called, so mutating the
    * buffer afterwards does not change the scan result. The synchronous
    * [`scan`](Self::scan) reads the buffer directly and stays zero-copy.
-   *
-   * # Arguments
-   *
-   * * `data` - The data to scan
-   * * `variables` - Optional variables to set for this scan
-   *
-   * # Returns
-   *
-   * An async task that resolves to a vector of matching rules
    */
-  scanAsync(data: Buffer, variables?: object | undefined | null): Promise<Array<RuleMatch>>
-  /**
-   * Scans a file asynchronously using the compiled YARA rules.
-   *
-   * # Arguments
-   *
-   * * `file_path` - Path to the file to scan
-   * * `variables` - Optional variables to set for this scan
-   *
-   * # Returns
-   *
-   * An async task that resolves to a vector of matching rules
-   */
-  scanFileAsync(filePath: string, variables?: object | undefined | null): Promise<Array<RuleMatch>>
+  scanAsync(data: Buffer, variables?: Record<string, string | number | boolean | bigint>): Promise<Array<RuleMatch>>
+  /** Scans a file asynchronously using the compiled YARA rules. */
+  scanFileAsync(filePath: string, variables?: Record<string, string | number | boolean | bigint>): Promise<Array<RuleMatch>>
   /**
    * Checks whether the provided data matches any compiled YARA rule asynchronously.
    *
@@ -325,86 +210,30 @@ export declare class YaraX {
    *
    * The input buffer is copied when this method is called, so mutating the
    * buffer afterwards does not change the result.
-   *
-   * # Arguments
-   *
-   * * `data` - The data to scan
-   * * `variables` - Optional variables to set for this scan
-   *
-   * # Returns
-   *
-   * An async task that resolves to a boolean indicating whether any rule matched
    */
-  isMatchAsync(data: Buffer, variables?: Record<string, string | number | boolean>): Promise<boolean>
+  isMatchAsync(data: Buffer, variables?: Record<string, string | number | boolean | bigint>): Promise<boolean>
   /**
    * Checks whether a file matches any compiled YARA rule asynchronously.
    *
    * This method is a fast-path boolean check that returns true as soon as any rule matches,
    * without allocating or constructing match objects, tags, or metadata.
-   *
-   * # Arguments
-   *
-   * * `file_path` - Path to the file to scan
-   * * `variables` - Optional variables to set for this scan
-   *
-   * # Returns
-   *
-   * An async task that resolves to a boolean indicating whether any rule matched
    */
-  isFileMatchAsync(filePath: string, variables?: Record<string, string | number | boolean>): Promise<boolean>
+  isFileMatchAsync(filePath: string, variables?: Record<string, string | number | boolean | bigint>): Promise<boolean>
   /**
    * Scans the provided data asynchronously returning a flat binary match buffer and catalog.
    *
    * The input buffer is copied when this method is called, so mutating the
    * buffer afterwards does not change the result.
-   *
-   * # Arguments
-   *
-   * * `data` - The data to scan
-   * * `variables` - Optional variables to set for this scan
-   *
-   * # Returns
-   *
-   * An async task that resolves to a `BinaryScanResult`
    */
-  scanBinaryAsync(data: Buffer, variables?: Record<string, string | number | boolean>): Promise<BinaryScanResult>
-  /**
-   * Scans a file asynchronously returning a flat binary match buffer and catalog.
-   *
-   * # Arguments
-   *
-   * * `file_path` - Path to the file to scan
-   * * `variables` - Optional variables to set for this scan
-   *
-   * # Returns
-   *
-   * An async task that resolves to a `BinaryScanResult`
-   */
-  scanFileBinaryAsync(filePath: string, variables?: Record<string, string | number | boolean>): Promise<BinaryScanResult>
-  /**
-   * Emits a WASM file asynchronously from the compiled YARA rules.
-   *
-   * # Arguments
-   *
-   * * `output_path` - Path where the WASM file should be written
-   *
-   * # Returns
-   *
-   * An async task that completes when the WASM file is written
-   */
-  emitWasmFileAsync(outputPath: string): Promise<unknown>
+  scanBinaryAsync(data: Buffer, variables?: Record<string, string | number | boolean | bigint>): Promise<BinaryScanResult>
+  /** Scans a file asynchronously returning a flat binary match buffer and catalog. */
+  scanFileBinaryAsync(filePath: string, variables?: Record<string, string | number | boolean | bigint>): Promise<BinaryScanResult>
+  /** Emits a WASM file asynchronously from the compiled YARA rules. */
+  emitWasmFileAsync(outputPath: string): Promise<void>
   /**
    * Adds a rule source to the YARA compiler.
    *
-   * # Arguments
-   *
-   * * `rule_source` - The YARA rule source code to add
-   *
-   * # Returns
-   *
-   * Ok(()) on success, or an error if compilation fails
-   *
-   * # Performance Note
+   * # Performance
    *
    * This method recompiles all rules (existing + new) on each call, resulting
    * in O(n) time per call and O(n²) total for n incremental additions.
@@ -419,14 +248,6 @@ export declare class YaraX {
    * as it compiles all sources in a single pass instead of recompiling
    * existing rules for each addition.
    *
-   * # Arguments
-   *
-   * * `rule_sources` - Vector of rule sources to add
-   *
-   * # Returns
-   *
-   * Ok(()) on success, or an error if compilation fails
-   *
    * # Performance
    *
    * O(n + m) where n = existing rules, m = new rules (single compilation pass).
@@ -436,50 +257,19 @@ export declare class YaraX {
   /**
    * Adds a rule file to the YARA compiler.
    *
-   * # Arguments
-   *
-   * * `file_path` - Path to the file containing YARA rules
-   *
-   * # Returns
-   *
    * Ok(()) on success, or an error if reading or compilation fails
    */
   addRuleFile(filePath: string, namespace?: string | undefined | null): void
-  /**
-   * Defines a variable for the YARA compiler.
-   *
-   * # Arguments
-   *
-   * * `name` - The variable name
-   * * `value` - The variable value
-   *
-   * # Returns
-   *
-   * Ok(()) on success, or an error if compilation fails
-   */
+  /** Defines a variable for the YARA compiler. */
   defineVariable(name: string, value: string | number | boolean | bigint): void
-  /**
-   * Scans multiple files concurrently across a Rayon worker thread pool.
-   *
-   * # Arguments
-   * * `file_paths` - Array of file paths to scan
-   * * `options` - Batch scanning options (concurrency, only_matches, etc.)
-   * * `variables` - Optional scan-time variables
-   */
-  scanFiles(filePaths: Array<string>, options?: BatchScanOptions | undefined | null, variables?: object | undefined | null): Promise<BatchScanResult>
+  /** Scans multiple files concurrently across a Rayon worker thread pool. */
+  scanFiles(filePaths: Array<string>, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null): Promise<BatchScanResult>
   /** Scans multiple files synchronously across a Rayon worker thread pool. */
-  scanFilesSync(filePaths: Array<string>, options?: BatchScanOptions | undefined | null, variables?: object | undefined | null): BatchScanResult
-  /**
-   * Recursively scans a directory across a Rayon worker thread pool.
-   *
-   * # Arguments
-   * * `dir_path` - Root directory path to scan
-   * * `options` - Batch scanning options (concurrency, max_depth, include/exclude globs, etc.)
-   * * `variables` - Optional scan-time variables
-   */
-  scanDirectory(dirPath: string, options?: BatchScanOptions | undefined | null, variables?: object | undefined | null): Promise<BatchScanResult>
+  scanFilesSync(filePaths: Array<string>, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null): BatchScanResult
+  /** Recursively scans a directory across a Rayon worker thread pool. */
+  scanDirectory(dirPath: string, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null): Promise<BatchScanResult>
   /** Recursively scans a directory synchronously across a Rayon worker thread pool. */
-  scanDirectorySync(dirPath: string, options?: BatchScanOptions | undefined | null, variables?: object | undefined | null): BatchScanResult
+  scanDirectorySync(dirPath: string, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null): BatchScanResult
 }
 
 /**
@@ -499,12 +289,7 @@ export interface BannedModule {
 
 /** Error encountered while scanning an individual file in a batch. */
 export interface BatchFileError {
-  /**
-   * Path of the file or directory that failed.
-   *
-   * Directory scans report traversal failures here, so this may name a
-   * directory rather than a file.
-   */
+  /** Path of the file or directory that failed. */
   filePath: string
   /** Error description. */
   error: string
@@ -528,9 +313,19 @@ export interface BatchScanOptions {
   maxDepth?: number
   /** Whether to follow symbolic links during directory traversal. Default: false. */
   followSymlinks?: boolean
-  /** Glob patterns to include (e.g. `["*.exe", "*.dll"]`). */
+  /**
+   * Glob patterns to include (e.g. `["*.exe", "*.dll"]`).
+   *
+   * Patterns may be written relative to the scanned directory (`subdir/**`)
+   * or as full-path globs (`**\/subdir/**`); both are tested.
+   */
   includePatterns?: Array<string>
-  /** Glob patterns to exclude (e.g. `["*.log", ".git/**"]`). */
+  /**
+   * Glob patterns to exclude (e.g. `["*.log", ".git/**"]`).
+   *
+   * Patterns may be written relative to the scanned directory (`subdir/**`)
+   * or as full-path globs (`**\/subdir/**`); both are tested.
+   */
   excludePatterns?: Array<string>
   /** If true, includes files with 0 matches in results. Default: false (only matching files). */
   includeCleanFiles?: boolean
@@ -545,13 +340,13 @@ export interface BatchScanOptions {
 /** Aggregated result of a batch scan. */
 export interface BatchScanResult {
   /**
-   * Total files discovered or submitted for scanning.
-   *
-   * For directory scans this counts files discovered after include/exclude
-   * and size filtering. Files under a directory that could not be traversed
-   * are not discovered, so compare this with `errors`.
+   * Files discovered or submitted for scanning, after filtering. Files under
+   * a directory that could not be traversed are not counted, so compare with
+   * `errors`.
    */
   totalFiles: number
+  /** Files discovered but excluded by include/exclude patterns or size filters. */
+  filteredFiles: number
   /** Total files successfully scanned. */
   scannedFiles: number
   /** Total files that matched at least one rule. */
@@ -559,12 +354,9 @@ export interface BatchScanResult {
   /** Results per file (matching files only, or all files if include_clean_files is true). */
   results: Array<BatchFileMatch>
   /**
-   * Errors encountered during the batch scan.
-   *
-   * Includes per-file scan failures and directory traversal failures. A
-   * traversal error's `filePath` is the directory that could not be read.
-   * The scan keeps going: a partial sweep plus reported errors beats losing
-   * the results of everything that was readable.
+   * Per-file scan failures and directory traversal failures; a traversal
+   * error's `filePath` is the directory that could not be read. The scan
+   * continues past both, so a partial sweep is reported rather than lost.
    */
   errors: Array<BatchFileError>
   /** Total scan duration in milliseconds. */
@@ -587,33 +379,10 @@ export interface BinaryScanResult {
   catalog: BinaryScanCatalog
 }
 
-/**
- * Compiles a YARA rule source string and returns a `YaraX` instance with the compiled rules.
- *
- * # Arguments
- *
- * * `rule_source` - The YARA rule source code
- * * `options` - Optional compiler options
- *
- * # Returns
- *
- * A `YaraX` instance with compiled rules
- */
+/** Compiles a YARA rule source string and returns a `YaraX` instance with the compiled rules. */
 export declare function compile(ruleSource: string, options?: CompilerOptions | undefined | null): YaraX
 
-/**
- * Compiles a YARA rule file to a WASM file.
- *
- * # Arguments
- *
- * * `rule_path` - Path to the file containing YARA rules
- * * `output_path` - Path where the WASM file should be written
- * * `options` - Optional compiler options
- *
- * # Returns
- *
- * Ok(()) on success, or an error if reading, compilation, or emission fails
- */
+/** Compiles a YARA rule file to a WASM file. */
 export declare function compileFileToWasm(rulePath: string, outputPath: string, options?: CompilerOptions | undefined | null): void
 
 /**
@@ -742,58 +511,24 @@ export interface CompilerWarning {
 /**
  * Compiles a YARA rule source string to a WASM file.
  *
- * # Arguments
- *
- * * `rule_source` - The YARA rule source code
- * * `output_path` - Path where the WASM file should be written
- * * `options` - Optional compiler options
- *
- * # Returns
- *
  * Ok(()) on success, or an error if compilation or emission fails
  */
 export declare function compileToWasm(ruleSource: string, outputPath: string, options?: CompilerOptions | undefined | null): void
 
-/**
- * Creates a new `YaraX` instance with empty rules and no source code.
- *
- * # Returns
- *
- * A new `YaraX` instance with empty rules
- */
+/** Creates a new `YaraX` instance with empty rules and no source code. */
 export declare function create(): YaraX
 
 /**
- * Creates a new `YaraX` instance from a serialized rules blob.
+ * Restores a scanner from a blob produced by [`YaraX::serialize`].
  *
- * The blob must have been produced by [`YaraX::serialize`] (or
- * `yara_x::Rules::serialize`) using the same YARA-X version. The rules are
- * restored with full scanning capability (including WASM condition
- * recompilation for the current platform) and can be used with `scan`,
- * `scan_file`, `scan_async`, and `scan_file_async`.
- *
- * # Arguments
- *
- * * `data` - Buffer containing the serialized rules
- *
- * # Returns
- *
- * A `YaraX` instance with the restored rules
+ * Blobs are format-versioned per YARA-X release: compare
+ * [`rulesFormatInfo`] before loading a cached one. WASM conditions are
+ * recompiled for the current platform on load, and only trusted blobs should
+ * be deserialized.
  */
 export declare function deserialize(data: Buffer): YaraX
 
-/**
- * Creates a new `YaraX` instance from a file containing YARA rules.
- *
- * # Arguments
- *
- * * `rule_path` - Path to the file containing YARA rules
- * * `options` - Optional compiler options
- *
- * # Returns
- *
- * A `YaraX` instance with compiled rules from the file
- */
+/** Creates a new `YaraX` instance from a file containing YARA rules. */
 export declare function fromFile(rulePath: string, options?: CompilerOptions | undefined | null): YaraX
 
 /**
@@ -850,16 +585,11 @@ export interface MatchData {
    */
   xorKey?: number
   /**
-   * The exact matched bytes, byte-for-byte.
+   * The exact matched bytes, which round-trip patterns that match invalid
+   * UTF-8 (unlike the lossy [`data`](MatchData::data)).
    *
-   * Present whenever the scanner has the matched data (always for `scan`
-   * results, and for `toRuleMatches()` when a source buffer is supplied).
-   * Unlike `data`, this round-trips binary patterns that match invalid
-   * UTF-8.
-   *
-   * Populating this field copies the matched bytes, so high-density scans
-   * pay one allocation per match. Use `setMaxMatchesPerPattern()` or the
-   * binary match API when the bytes are not needed.
+   * One copy per match, so high-density scans allocate proportionally; skip
+   * it via `setMaxMatchesPerPattern()` or the binary match API.
    */
   dataBytes?: Buffer
 }
@@ -911,6 +641,24 @@ export interface RuleProfile {
   conditionMs: number
 }
 
+/**
+ * Returns the serialized-rule format version and the versions that produce it.
+ *
+ * Blob caches can key on `formatVersion`: blobs are only interchangeable
+ * between builds that report the same value.
+ */
+export declare function rulesFormatInfo(): RulesFormatInfo
+
+/** Version and build information for serialized rule blobs. */
+export interface RulesFormatInfo {
+  /** Binary format version written into `serialize()` output. */
+  formatVersion: number
+  /** YARA-X version this build links against. */
+  yaraXVersion: string
+  /** `@litko/yara-x` package version. */
+  packageVersion: string
+}
+
 /** A YARA rule source and the namespace it belongs to. */
 export interface RuleSource {
   /** The YARA rule source code. */
@@ -924,13 +672,6 @@ export interface RuleSource {
  * compilation process.
  *
  * This function validates YARA rules without creating a scanner instance.
- *
- * # Arguments
- *
- * * `rule_source` - The YARA rule source code
- * * `options` - Optional compiler options
- *
- * # Returns
  *
  * A `CompileResult` containing any warnings and errors
  */

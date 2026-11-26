@@ -7,12 +7,13 @@
 use crate::scanner::YaraX;
 use crate::tasks::{BaseYaraTask, TaskScanOptions};
 use crate::types::{RuleMatch, RuleMatchData, VariableMap};
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{Candidate, Glob, GlobSet, GlobSetBuilder};
 use napi::{Error, Result, Status, Task};
 use napi_derive::napi;
 use rayon::prelude::*;
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use walkdir::WalkDir;
 use yara_x::Rules;
@@ -28,8 +29,14 @@ pub struct BatchScanOptions {
   /// Whether to follow symbolic links during directory traversal. Default: false.
   pub follow_symlinks: Option<bool>,
   /// Glob patterns to include (e.g. `["*.exe", "*.dll"]`).
+  ///
+  /// Patterns may be written relative to the scanned directory (`subdir/**`)
+  /// or as full-path globs (`**/subdir/**`); both are tested.
   pub include_patterns: Option<Vec<String>>,
   /// Glob patterns to exclude (e.g. `["*.log", ".git/**"]`).
+  ///
+  /// Patterns may be written relative to the scanned directory (`subdir/**`)
+  /// or as full-path globs (`**/subdir/**`); both are tested.
   pub exclude_patterns: Option<Vec<String>>,
   /// If true, includes files with 0 matches in results. Default: false (only matching files).
   pub include_clean_files: Option<bool>,
@@ -65,9 +72,6 @@ pub struct BatchFileMatchData {
 #[derive(Clone)]
 pub struct BatchFileError {
   /// Path of the file or directory that failed.
-  ///
-  /// Directory scans report traversal failures here, so this may name a
-  /// directory rather than a file.
   pub file_path: String,
   /// Error description.
   pub error: String,
@@ -76,24 +80,21 @@ pub struct BatchFileError {
 /// Aggregated result of a batch scan.
 #[napi(object)]
 pub struct BatchScanResult<'a> {
-  /// Total files discovered or submitted for scanning.
-  ///
-  /// For directory scans this counts files discovered after include/exclude
-  /// and size filtering. Files under a directory that could not be traversed
-  /// are not discovered, so compare this with `errors`.
+  /// Files discovered or submitted for scanning, after filtering. Files under
+  /// a directory that could not be traversed are not counted, so compare with
+  /// `errors`.
   pub total_files: u32,
+  /// Files discovered but excluded by include/exclude patterns or size filters.
+  pub filtered_files: u32,
   /// Total files successfully scanned.
   pub scanned_files: u32,
   /// Total files that matched at least one rule.
   pub matched_files: u32,
   /// Results per file (matching files only, or all files if include_clean_files is true).
   pub results: Vec<BatchFileMatch<'a>>,
-  /// Errors encountered during the batch scan.
-  ///
-  /// Includes per-file scan failures and directory traversal failures. A
-  /// traversal error's `filePath` is the directory that could not be read.
-  /// The scan keeps going: a partial sweep plus reported errors beats losing
-  /// the results of everything that was readable.
+  /// Per-file scan failures and directory traversal failures; a traversal
+  /// error's `filePath` is the directory that could not be read. The scan
+  /// continues past both, so a partial sweep is reported rather than lost.
   pub errors: Vec<BatchFileError>,
   /// Total scan duration in milliseconds.
   pub duration_ms: f64,
@@ -103,6 +104,7 @@ pub struct BatchScanResult<'a> {
 #[derive(Clone)]
 pub struct BatchScanResultData {
   pub total_files: u32,
+  pub filtered_files: u32,
   pub scanned_files: u32,
   pub matched_files: u32,
   pub results: Vec<BatchFileMatchData>,
@@ -148,26 +150,33 @@ impl PathFilter {
   }
 
   /// Returns true if the path passes the include/exclude filters.
-  pub fn is_match(&self, path: &Path) -> bool {
+  ///
+  /// Both the full path and the `relative` path (from the scan root) are
+  /// tested, so `sub/**` and `**/sub/**` behave alike.
+  pub fn is_match(&self, path: &Path, relative: Option<&Path>) -> bool {
+    let matches = |set: &GlobSet| {
+      set.is_match_candidate(&Candidate::new(path))
+        || relative.is_some_and(|relative| set.is_match_candidate(&Candidate::new(relative)))
+    };
+
     if let Some(ref excludes) = self.exclude_set {
-      if excludes.is_match(path) {
+      if matches(excludes) {
         return false;
       }
     }
 
     if let Some(ref includes) = self.include_set {
-      return includes.is_match(path);
+      return matches(includes);
     }
 
     true
   }
 }
 
-/// Recursively collects matching file paths from a root directory.
+/// Collects matching file paths under a root directory.
 ///
-/// Traversal failures do not abort the walk. They are returned alongside the
-/// files that were discovered so the caller can report them in
-/// [`BatchScanResult::errors`].
+/// Traversal failures do not abort the walk; they are returned alongside the
+/// discovered files for [`BatchScanResult::errors`].
 pub fn collect_directory_files(
   dir_path: &str,
   max_depth: Option<u32>,
@@ -175,7 +184,7 @@ pub fn collect_directory_files(
   min_file_size: Option<i64>,
   max_file_size: Option<i64>,
   filter: &PathFilter,
-) -> Result<(Vec<String>, Vec<BatchFileError>)> {
+) -> Result<(Vec<String>, Vec<BatchFileError>, u32)> {
   let root = Path::new(dir_path);
   if !root.exists() {
     return Err(Error::new(
@@ -200,32 +209,38 @@ pub fn collect_directory_files(
 
   let mut files = Vec::new();
   let mut traversal_errors = Vec::new();
+  let mut filtered_files = 0u32;
   for entry in walker {
     match entry {
       Ok(e) => {
         let p = e.into_path();
-        if p.is_file() && filter.is_match(&p) {
-          if min_file_size.is_some() || max_file_size.is_some() {
-            if let Ok(metadata) = p.metadata() {
-              let len = metadata.len() as i64;
-              if let Some(min) = min_file_size {
-                if len < min {
-                  continue;
-                }
-              }
-              if let Some(max) = max_file_size {
-                if len > max {
-                  continue;
-                }
-              }
+        if !p.is_file() {
+          continue;
+        }
+
+        let relative = p.strip_prefix(root).ok();
+        if !filter.is_match(&p, relative) {
+          filtered_files += 1;
+          continue;
+        }
+
+        if min_file_size.is_some() || max_file_size.is_some() {
+          if let Ok(metadata) = p.metadata() {
+            let len = metadata.len() as i64;
+            if min_file_size.is_some_and(|min| len < min)
+              || max_file_size.is_some_and(|max| len > max)
+            {
+              filtered_files += 1;
+              continue;
             }
           }
-          files.push(
-            p.into_os_string()
-              .into_string()
-              .unwrap_or_else(|os| os.to_string_lossy().into_owned()),
-          );
         }
+
+        files.push(
+          p.into_os_string()
+            .into_string()
+            .unwrap_or_else(|os| os.to_string_lossy().into_owned()),
+        );
       }
       Err(err) => {
         // Keep scanning the rest of the tree, but surface the failure: a
@@ -241,13 +256,90 @@ pub fn collect_directory_files(
     }
   }
 
-  Ok((files, traversal_errors))
+  Ok((files, traversal_errors, filtered_files))
+}
+
+/// Number of distinct `concurrency` sizes kept warm at once.
+const POOL_CACHE_SIZE: usize = 4;
+
+/// Returns the Rayon pool for `threads`, caching [`POOL_CACHE_SIZE`] sizes LRU.
+///
+/// Pools are cached because a fresh pool starts empty threads, which discards
+/// the worker thread-local scanner cache; the bound caps total thread count.
+fn thread_pool(threads: usize) -> Result<Arc<rayon::ThreadPool>> {
+  #[derive(Default)]
+  struct PoolCache {
+    // (pool, last use tick); the tick avoids a VecDeque bookkeeping pass.
+    pools: HashMap<usize, (Arc<rayon::ThreadPool>, u64)>,
+    clock: u64,
+  }
+
+  static POOLS: OnceLock<Mutex<PoolCache>> = OnceLock::new();
+  let cache = POOLS.get_or_init(|| Mutex::new(PoolCache::default()));
+
+  {
+    let mut guard = cache
+      .lock()
+      .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.clock = guard.clock.wrapping_add(1);
+    let now = guard.clock;
+    if let Some(entry) = guard.pools.get_mut(&threads) {
+      entry.1 = now;
+      return Ok(Arc::clone(&entry.0));
+    }
+  }
+
+  // Built outside the lock so thread spawn never blocks another caller.
+  let pool = Arc::new(
+    rayon::ThreadPoolBuilder::new()
+      .num_threads(threads)
+      .build()
+      .map_err(|e| {
+        Error::new(
+          Status::GenericFailure,
+          format!("Failed to build Rayon thread pool: {e}"),
+        )
+      })?,
+  );
+
+  let evicted = {
+    let mut guard = cache
+      .lock()
+      .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.clock = guard.clock.wrapping_add(1);
+    let now = guard.clock;
+
+    // Lost a same-size race; keep the winner's pool.
+    if let Some(existing) = guard.pools.get(&threads) {
+      return Ok(Arc::clone(&existing.0));
+    }
+
+    // An in-flight call keeps an evicted pool alive through its Arc clone.
+    let mut evicted = None;
+    if guard.pools.len() >= POOL_CACHE_SIZE {
+      let lru = guard
+        .pools
+        .iter()
+        .min_by_key(|entry| entry.1 .1)
+        .map(|(size, _)| *size);
+      if let Some(size) = lru {
+        evicted = guard.pools.remove(&size).map(|(pool, _)| pool);
+      }
+    }
+
+    guard.pools.insert(threads, (Arc::clone(&pool), now));
+    evicted
+  };
+
+  drop(evicted);
+  Ok(pool)
 }
 
 /// Core multi-threaded batch scanning engine.
 pub fn execute_batch_scan(
   rules: Arc<Rules>,
   file_paths: Vec<String>,
+  filtered_files: u32,
   traversal_errors: Vec<BatchFileError>,
   scan_options: TaskScanOptions,
   variables: Option<VariableMap>,
@@ -298,15 +390,7 @@ pub fn execute_batch_scan(
 
   let raw_results = if let Some(concurrency) = batch_options.concurrency {
     if concurrency > 0 {
-      let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(concurrency as usize)
-        .build()
-        .map_err(|e| {
-          Error::new(
-            Status::GenericFailure,
-            format!("Failed to build Rayon thread pool: {e}"),
-          )
-        })?;
+      let pool = thread_pool(concurrency as usize)?;
       pool.install(|| scan_all(file_paths))
     } else {
       scan_all(file_paths)
@@ -345,6 +429,7 @@ pub fn execute_batch_scan(
 
   Ok(BatchScanResultData {
     total_files,
+    filtered_files,
     scanned_files,
     matched_files,
     results,
@@ -376,6 +461,7 @@ pub fn convert_batch_result<'a>(
 
   Ok(BatchScanResult {
     total_files: output.total_files,
+    filtered_files: output.filtered_files,
     scanned_files: output.scanned_files,
     matched_files: output.matched_files,
     results: converted_results,
@@ -422,8 +508,8 @@ impl Task for BatchScanTask {
   type JsValue = BatchScanResult<'static>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    let (files, traversal_errors) = match &mut self.target {
-      BatchScanTarget::Files(paths) => (std::mem::take(paths), Vec::new()),
+    let (files, traversal_errors, filtered_files) = match &mut self.target {
+      BatchScanTarget::Files(paths) => (std::mem::take(paths), Vec::new(), 0),
       BatchScanTarget::Directory(dir_path) => {
         let filter = PathFilter::new(
           self.batch_options.include_patterns.as_deref(),
@@ -443,6 +529,7 @@ impl Task for BatchScanTask {
     execute_batch_scan(
       self.rules.clone(),
       files,
+      filtered_files,
       traversal_errors,
       self.scan_options.clone(),
       self.variables.clone(),

@@ -74,6 +74,23 @@ const asyncMatches: Promise<Array<RuleMatch>> = a.scanAsync(Buffer.from("x"));
 const binary: Promise<BinaryScanResult> = a.scanBinaryAsync(Buffer.from("x"));
 const match: MatchData | undefined = syncMatches[0]?.matches[0];
 
+// #286: the async entry points type `variables` exactly like the sync ones, so
+// an invalid value is a compile error on every path, not just `scan()`.
+// @ts-expect-error null is not an extern variable value
+const badSync: Promise<Array<RuleMatch>> = a.scanAsync(Buffer.from("x"), { x: null });
+// @ts-expect-error null is not an extern variable value
+const badFileAsync = a.scanFileAsync("/tmp/x", { x: null });
+// @ts-expect-error null is not an extern variable value
+const badBatch = a.scanDirectory("/tmp", {}, { x: null });
+// bigint is a valid extern variable value on both paths.
+const bigintOk = a.scanAsync(Buffer.from("x"), { x: 9007199254740993n });
+
+// #286: `emitWasmFileAsync()` resolves to void, not `unknown`.
+const wasmVoid: Promise<void> = a.emitWasmFileAsync("/tmp/none.wasm");
+// @ts-expect-error a void resolution is not a number
+const wasmNotUnknown: number = a.emitWasmFileAsync("/tmp/none.wasm").then((v) => v + 1);
+
 void [b, c, d, result, rawCompile, rawCreate, rawDeserialize, rawFromFile];
 void [asyncMatches, binary, match, s];
 void [ruleMeta, binaryMeta];
+void [badSync, badFileAsync, badBatch, bigintOk, wasmVoid, wasmNotUnknown];
