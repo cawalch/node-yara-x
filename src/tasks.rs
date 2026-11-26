@@ -142,7 +142,9 @@ impl BaseYaraTask {
   /// This is designed to be called from `compute()` (worker thread).
   pub fn scan_to_data(&self, data: &[u8]) -> Result<Vec<RuleMatchData>> {
     self.with_scanner(|scanner| {
-      let results = scanner.scan(data).map_err(scan_error_to_napi)?;
+      let results = scanner
+        .scan(data)
+        .map_err(|e| scan_error_to_napi(e, None))?;
       Ok(YaraX::extract_scan_data(results))
     })
   }
@@ -152,7 +154,9 @@ impl BaseYaraTask {
   /// This is designed to be called from `compute()` (worker thread).
   pub fn is_match(&self, data: &[u8]) -> Result<bool> {
     self.with_scanner(|scanner| {
-      let results = scanner.scan(data).map_err(scan_error_to_napi)?;
+      let results = scanner
+        .scan(data)
+        .map_err(|e| scan_error_to_napi(e, None))?;
       Ok(results.matching_rules().next().is_some())
     })
   }
@@ -160,7 +164,9 @@ impl BaseYaraTask {
   /// Scans a file on the current thread and returns thread-safe results.
   pub fn scan_file_to_data(&self, file_path: &str) -> Result<Vec<RuleMatchData>> {
     self.with_scanner(|scanner| {
-      let results = scanner.scan_file(file_path).map_err(scan_error_to_napi)?;
+      let results = scanner
+        .scan_file(file_path)
+        .map_err(|e| scan_error_to_napi(e, None))?;
       Ok(YaraX::extract_scan_data(results))
     })
   }
@@ -168,7 +174,9 @@ impl BaseYaraTask {
   /// Scans a file on the current thread and returns whether any rule matched.
   pub fn is_file_match(&self, file_path: &str) -> Result<bool> {
     self.with_scanner(|scanner| {
-      let results = scanner.scan_file(file_path).map_err(scan_error_to_napi)?;
+      let results = scanner
+        .scan_file(file_path)
+        .map_err(|e| scan_error_to_napi(e, None))?;
       Ok(results.matching_rules().next().is_some())
     })
   }

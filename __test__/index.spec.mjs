@@ -2106,18 +2106,59 @@ describe("yarax Tests", () => {
       }
     });
 
-    it("should leave non-compilation errors undecorated", () => {
+    it("should stamp a kind on an I/O failure without touching its other fields", () => {
       const scanner = yarax.compile("rule keep { condition: false }");
 
       try {
         scanner.scanFile("/definitely/missing");
         fail("Should have thrown an I/O error");
       } catch (error) {
+        strictEqual(error.kind, "io");
         strictEqual(error.code, "GenericFailure", "error codes are unchanged");
-        strictEqual(error.ruleCode, undefined);
+        strictEqual(error.ruleCode, undefined, "a non-compile error gets no ruleCode");
         strictEqual(error.line, undefined);
-        ok(/I\/O error/.test(error.message));
+        ok(/I\/O error/.test(error.message), "the message is unchanged");
       }
+    });
+
+    it("should stamp a kind on a compile failure next to the ruleCode", () => {
+      try {
+        yarax.compile("rule { broken");
+        fail("Should have thrown a compile error");
+      } catch (error) {
+        strictEqual(error.kind, "compile");
+        strictEqual(error.ruleCode, "E001", "kind does not replace the diagnostic code");
+        strictEqual(error.code, "GenericFailure");
+      }
+    });
+
+    it("should stamp a kind on a scan timeout", () => {
+      const scanner = yarax.compile(`rule backtracks { strings: $a = /^(a+)+$/ condition: $a }`);
+      scanner.setTimeout(1);
+
+      try {
+        scanner.scan(Buffer.from("a".repeat(1024 * 1024)));
+        fail("Should have thrown a timeout");
+      } catch (error) {
+        strictEqual(error.kind, "timeout");
+        strictEqual(error.code, "Cancelled", "the timeout code is unchanged");
+        strictEqual(error.message, "Scan timed out");
+      }
+    });
+
+    it("should not carry a kind where napi gives the failing path no Env", async () => {
+      // An AsyncTask's compute() has no Env, so an async rejection keeps the
+      // plain error: the kind stamp needs a JS object to decorate. Recorded
+      // here so the gap is visible rather than assumed away (#282).
+      const scanner = yarax.compile("rule keep { condition: false }");
+
+      await scanner
+        .scanFileAsync("/definitely/missing")
+        .then(() => fail("Should have rejected with an I/O error"))
+        .catch((error) => {
+          strictEqual(error.kind, undefined);
+          ok(/I\/O error/.test(error.message));
+        });
     });
 
     it("should expose structured locations on compiler diagnostics", () => {

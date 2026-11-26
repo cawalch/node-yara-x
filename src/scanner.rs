@@ -859,7 +859,9 @@ impl YaraX {
     variables: Option<Object>,
   ) -> Result<Vec<RuleMatch<'a>>> {
     self.with_sync_scanner(env, &variables, |scanner| {
-      let results = scanner.scan(data.as_ref()).map_err(scan_error_to_napi)?;
+      let results = scanner
+        .scan(data.as_ref())
+        .map_err(|e| scan_error_to_napi(e, Some(&env)))?;
       Self::process_scan_results(results, env)
     })
   }
@@ -877,7 +879,7 @@ impl YaraX {
     self.with_sync_scanner(env, &variables, |scanner| {
       let results = scanner
         .scan_file(Path::new(&file_path))
-        .map_err(scan_error_to_napi)?;
+        .map_err(|e| scan_error_to_napi(e, Some(&env)))?;
       Self::process_scan_results(results, env)
     })
   }
@@ -893,7 +895,9 @@ impl YaraX {
   )]
   pub fn is_match(&self, env: Env, data: Buffer, variables: Option<Object>) -> Result<bool> {
     self.with_sync_scanner(env, &variables, |scanner| {
-      let results = scanner.scan(data.as_ref()).map_err(scan_error_to_napi)?;
+      let results = scanner
+        .scan(data.as_ref())
+        .map_err(|e| scan_error_to_napi(e, Some(&env)))?;
       Ok(results.matching_rules().next().is_some())
     })
   }
@@ -916,7 +920,7 @@ impl YaraX {
     self.with_sync_scanner(env, &variables, |scanner| {
       let results = scanner
         .scan_file(Path::new(&file_path))
-        .map_err(scan_error_to_napi)?;
+        .map_err(|e| scan_error_to_napi(e, Some(&env)))?;
       Ok(results.matching_rules().next().is_some())
     })
   }
@@ -936,7 +940,9 @@ impl YaraX {
     variables: Option<Object>,
   ) -> Result<BinaryScanResult> {
     self.with_sync_scanner(env, &variables, |scanner| {
-      let results = scanner.scan(data.as_ref()).map_err(scan_error_to_napi)?;
+      let results = scanner
+        .scan(data.as_ref())
+        .map_err(|e| scan_error_to_napi(e, Some(&env)))?;
       let (bytes, match_count, catalog) = extract_binary_scan_results(results);
       Ok(BinaryScanResult {
         buffer: Buffer::from(bytes),
@@ -963,7 +969,7 @@ impl YaraX {
     self.with_sync_scanner(env, &variables, |scanner| {
       let results = scanner
         .scan_file(Path::new(&file_path))
-        .map_err(scan_error_to_napi)?;
+        .map_err(|e| scan_error_to_napi(e, Some(&env)))?;
       let (bytes, match_count, catalog) = extract_binary_scan_results(results);
       Ok(BinaryScanResult {
         buffer: Buffer::from(bytes),
@@ -1342,7 +1348,7 @@ impl YaraX {
     namespace: Option<String>,
   ) -> Result<()> {
     let file_content = std::fs::read_to_string(&file_path)
-      .map_err(|e| io_error_to_napi(e, &format!("reading file {file_path}")))?;
+      .map_err(|e| io_error_to_napi(e, &format!("reading file {file_path}"), Some(&env)))?;
     self.add_rule_sources_internal(
       env,
       vec![StoredRuleSource {

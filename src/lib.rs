@@ -146,7 +146,7 @@ pub fn from_file(
   options: Option<types::CompilerOptions>,
 ) -> Result<scanner::YaraX> {
   let file_content = std::fs::read_to_string(&rule_path)
-    .map_err(|e| io_error_to_napi(e, &format!("reading file {rule_path}")))?;
+    .map_err(|e| io_error_to_napi(e, &format!("reading file {rule_path}"), Some(&env)))?;
 
   scanner::YaraX::create_scanner_from_source(env, file_content, options, Some(&rule_path))
 }
@@ -207,7 +207,7 @@ pub fn compile_file_to_wasm(
   options: Option<types::CompilerOptions>,
 ) -> Result<()> {
   let file_content = std::fs::read_to_string(&rule_path)
-    .map_err(|e| io_error_to_napi(e, &format!("reading file {rule_path}")))?;
+    .map_err(|e| io_error_to_napi(e, &format!("reading file {rule_path}"), None))?;
   compiler::compile_source_to_wasm(
     &file_content,
     &output_path,
