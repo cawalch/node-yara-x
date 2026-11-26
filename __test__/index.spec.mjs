@@ -1,7 +1,7 @@
 import yarax from "../index.js";
 import { existsSync, mkdirSync, writeFileSync, rmSync, statSync, readFileSync } from "fs";
 import { join, dirname } from "path";
-import { strictEqual, ok, fail, throws, deepStrictEqual } from "assert";
+import { strictEqual, ok, fail, throws, deepStrictEqual, notStrictEqual } from "assert";
 import { describe, it, before, after } from "node:test";
 import { fileURLToPath } from "url";
 import { spawnSync } from "node:child_process";
@@ -1237,6 +1237,56 @@ describe("yarax Tests", () => {
       true,
       "Boolean metadata should be preserved",
     );
+  });
+
+  it("should preserve metadata strings containing invalid UTF-8", () => {
+    const rule = String.raw`
+    rule test_metadata_bytes {
+      meta:
+        author = "Alice"
+        latin1 = "Ren\xA9 "
+        with_nul = "a\x00b"
+      strings:
+        $a = "metadata bytes"
+      condition:
+        $a
+    }
+  `;
+
+    const scanner = yarax.compile(rule);
+    const matches = scanner.scan(Buffer.from("metadata bytes"));
+    const meta = matches[0].meta;
+
+    strictEqual(matches.length, 1);
+    strictEqual(meta.author, "Alice");
+    notStrictEqual(meta.latin1, "unknown", "invalid UTF-8 must not become the literal 'unknown'");
+    ok(meta.latin1.startsWith("Ren"), `lossy metadata should keep its valid prefix: ${JSON.stringify(meta.latin1)}`);
+    ok(meta.latin1.endsWith(" "));
+    strictEqual(meta.with_nul, "a\u0000b", "a NUL byte stays part of the metadata string");
+  });
+
+  it("should expose the exact matched bytes in dataBytes", async () => {
+    const scanner = yarax.compile(String.raw`
+      rule binary_bytes {
+        strings:
+          $a = "\x80\xFF\x41"
+        condition:
+          $a
+      }
+    `);
+    const data = Buffer.from([0x80, 0xff, 0x41, 0x68, 0x69, 0x74]);
+    const expected = Buffer.from([0x80, 0xff, 0x41]);
+
+    const [syncMatch] = scanner.scan(data);
+    const syncBytes = syncMatch.matches[0].dataBytes;
+    ok(Buffer.isBuffer(syncBytes), "dataBytes must be a Buffer");
+    deepStrictEqual(syncBytes, expected);
+    strictEqual(syncBytes.length, syncMatch.matches[0].length);
+
+    const [asyncMatch] = await scanner.scanAsync(data);
+    const asyncBytes = asyncMatch.matches[0].dataBytes;
+    ok(Buffer.isBuffer(asyncBytes), "async dataBytes must be a Buffer");
+    deepStrictEqual(asyncBytes, expected);
   });
 
   it("should handle rule tags", () => {

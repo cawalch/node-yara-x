@@ -277,14 +277,41 @@ describe('Flat / Binary Match ABI', () => {
       assert.strictEqual(matchesNoSource[0].matches[0].offset, 9)
       assert.strictEqual(matchesNoSource[0].matches[0].length, 17)
       assert.strictEqual(matchesNoSource[0].matches[0].data, '')
+      assert.strictEqual(matchesNoSource[0].matches[0].dataBytes, undefined)
 
       // With source buffer: data string is sliced directly from buffer
       const matchesWithSource = view.toRuleMatches(data)
       assert.strictEqual(matchesWithSource.length, 1)
       assert.strictEqual(matchesWithSource[0].matches[0].identifier, '$str1')
       assert.strictEqual(matchesWithSource[0].matches[0].data, 'malicious_payload')
+      assert.deepStrictEqual(
+        matchesWithSource[0].matches[0].dataBytes,
+        Buffer.from('malicious_payload'),
+      )
       assert.strictEqual(matchesWithSource[0].matches[1].identifier, '$str2')
       assert.strictEqual(matchesWithSource[0].matches[1].data, 'c2_server')
+      assert.deepStrictEqual(
+        matchesWithSource[0].matches[1].dataBytes,
+        Buffer.from('c2_server'),
+      )
+    })
+
+    it('should return byte-exact dataBytes for non-UTF-8 matches', () => {
+      const scanner = compile(String.raw`
+        rule BinaryBytes {
+          strings:
+            $a = "\x80\xFF\x41"
+          condition:
+            $a
+        }
+      `)
+      const data = Buffer.from([0x00, 0x80, 0xff, 0x41, 0x00])
+      const view = new BinaryMatchView(scanner.scanBinary(data))
+      const [ruleMatch] = view.toRuleMatches(data)
+      const match = ruleMatch.matches[0]
+
+      assert.deepStrictEqual(match.dataBytes, Buffer.from([0x80, 0xff, 0x41]))
+      assert.strictEqual(match.dataBytes.length, match.length)
     })
   })
 })

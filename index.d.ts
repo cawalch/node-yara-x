@@ -44,8 +44,9 @@ export declare class BinaryMatchView {
   /**
    * Lazily materializes all binary match records into the standard `RuleMatch` object graph.
    *
-   * If `source` buffer is provided, the matched data bytes are sliced as strings into `MatchData.data`.
-   * Otherwise, `MatchData.data` is an empty string.
+   * If `source` buffer is provided, the matched bytes are sliced into
+   * `MatchData.data` (lossy UTF-8) and `MatchData.dataBytes` (exact bytes).
+   * Otherwise, `MatchData.data` is an empty string and `dataBytes` is absent.
    */
   toRuleMatches(source?: Buffer): Array<RuleMatch>
 }
@@ -814,7 +815,12 @@ export interface MatchData {
   offset: number
   /** The length of the matched data. */
   length: number
-  /** The matched data as a string. */
+  /**
+   * The matched data decoded as a UTF-8 string.
+   *
+   * Invalid UTF-8 becomes replacement characters, so this is lossy. Use
+   * [`data_bytes`](MatchData::data_bytes) when the exact matched bytes matter.
+   */
   data: string
   /** The identifier of the pattern that matched. */
   identifier: string
@@ -827,6 +833,15 @@ export interface MatchData {
    * `xor` modifier. Absent for plain matches.
    */
   xorKey?: number
+  /**
+   * The exact matched bytes, byte-for-byte.
+   *
+   * Present whenever the scanner has the matched data (always for `scan`
+   * results, and for `toRuleMatches()` when a source buffer is supplied).
+   * Unlike `data`, this round-trips binary patterns that match invalid
+   * UTF-8.
+   */
+  dataBytes?: Buffer
 }
 
 /** Metadata for a rule that matched in a binary scan. */

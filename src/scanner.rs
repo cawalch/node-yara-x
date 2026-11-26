@@ -233,6 +233,7 @@ impl YaraX {
           context_data,
           context_match_offset,
           xor_key: match_item.xor_key(),
+          data_bytes: Some(Buffer::from(match_item.data())),
         });
       }
     }

@@ -4,7 +4,7 @@
 //! Node.js and the YARA-X Rust library, including match results, compiler options,
 //! and diagnostic information.
 
-use napi::bindgen_prelude::Object;
+use napi::bindgen_prelude::{Buffer, Object};
 use napi_derive::napi;
 use std::collections::HashMap;
 use yara_x::MetaValue;
@@ -53,13 +53,15 @@ pub struct RuleSource {
 ///
 /// Contains information about where the match occurred and what data was matched.
 #[napi(object)]
-#[derive(Debug, Clone, PartialEq)]
 pub struct MatchData {
   /// The offset of the match in the scanned data.
   pub offset: i64,
   /// The length of the matched data.
   pub length: i64,
-  /// The matched data as a string.
+  /// The matched data decoded as a UTF-8 string.
+  ///
+  /// Invalid UTF-8 becomes replacement characters, so this is lossy. Use
+  /// [`data_bytes`](MatchData::data_bytes) when the exact matched bytes matter.
   pub data: String,
   /// The identifier of the pattern that matched.
   pub identifier: String,
@@ -70,6 +72,63 @@ pub struct MatchData {
   /// The XOR key that produced this match, when the pattern was compiled with an
   /// `xor` modifier. Absent for plain matches.
   pub xor_key: Option<u8>,
+  /// The exact matched bytes, byte-for-byte.
+  ///
+  /// Present whenever the scanner has the matched data (always for `scan`
+  /// results, and for `toRuleMatches()` when a source buffer is supplied).
+  /// Unlike `data`, this round-trips binary patterns that match invalid
+  /// UTF-8.
+  pub data_bytes: Option<Buffer>,
+}
+
+impl Clone for MatchData {
+  fn clone(&self) -> Self {
+    Self {
+      offset: self.offset,
+      length: self.length,
+      data: self.data.clone(),
+      identifier: self.identifier.clone(),
+      context_data: self.context_data.clone(),
+      context_match_offset: self.context_match_offset,
+      xor_key: self.xor_key,
+      data_bytes: self
+        .data_bytes
+        .as_ref()
+        .map(|bytes| Buffer::from(bytes.as_ref())),
+    }
+  }
+}
+
+impl PartialEq for MatchData {
+  fn eq(&self, other: &Self) -> bool {
+    self.offset == other.offset
+      && self.length == other.length
+      && self.data == other.data
+      && self.identifier == other.identifier
+      && self.context_data == other.context_data
+      && self.context_match_offset == other.context_match_offset
+      && self.xor_key == other.xor_key
+      && match (&self.data_bytes, &other.data_bytes) {
+        (Some(a), Some(b)) => a.as_ref() == b.as_ref(),
+        (None, None) => true,
+        _ => false,
+      }
+  }
+}
+
+impl std::fmt::Debug for MatchData {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("MatchData")
+      .field("offset", &self.offset)
+      .field("length", &self.length)
+      .field("data", &self.data)
+      .field("identifier", &self.identifier)
+      .field("context_data", &self.context_data)
+      .field("context_match_offset", &self.context_match_offset)
+      .field("xor_key", &self.xor_key)
+      .field("data_bytes_len", &self.data_bytes.as_ref().map(|b| b.len()))
+      .finish()
+  }
 }
 
 /// A thread-safe metadata value that can be transferred across thread boundaries.
@@ -94,7 +153,9 @@ impl From<MetaValue<'_>> for MetaValueData {
       MetaValue::Float(f) => Self::Float(f),
       MetaValue::String(s) => Self::String(s.to_string()),
       MetaValue::Bool(b) => Self::Bool(b),
-      _ => Self::String("unknown".to_string()),
+      // Metadata strings with invalid UTF-8 arrive as raw bytes. Decode them
+      // lossily instead of replacing the whole value with a placeholder.
+      MetaValue::Bytes(b) => Self::String(String::from_utf8_lossy(b).into_owned()),
     }
   }
 }

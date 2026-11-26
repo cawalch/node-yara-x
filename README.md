@@ -525,6 +525,18 @@ for (const match of matches[0]?.matches ?? []) {
 }
 ```
 
+### Matched bytes
+
+`MatchData.data` is a UTF-8 view of the match, so invalid bytes become replacement characters. Every match also carries `dataBytes`, the exact matched slice as a `Buffer`:
+
+```javascript
+const [match] = rules.scan(Buffer.from([0x80, 0xff, 0x41]));
+match.matches[0].data;      // "\uFFFD\uFFFDA" (lossy)
+match.matches[0].dataBytes; // <Buffer 80 ff 41>
+```
+
+`dataBytes` makes binary patterns round-trippable without re-slicing the input yourself, which matters for `scanFile()` results where you hold no buffer.
+
 ### XOR key matches
 
 Patterns compiled with an `xor` modifier report which key produced the match, so an obfuscated sample can be unpacked without a second scan:
@@ -549,7 +561,7 @@ xorKey; // 0x42
 Buffer.from(data, "latin1").map((byte) => byte ^ xorKey).toString(); // "malware"
 ```
 
-The matched bytes stay as they appear in the sample, since `data` is a lossy UTF-8 view of them; XOR keys above `0x7f` can produce bytes that do not round-trip as a string. Use `scanBinary()` with `getSlice()` when you need the exact bytes.
+The matched bytes stay as they appear in the sample, since `data` is a lossy UTF-8 view of them; XOR keys above `0x7f` can produce bytes that do not round-trip as a string. Use `match.matches[0].dataBytes` (or `scanBinary()` with `getSlice()`) when you need the exact bytes.
 
 `xorKey` is absent for plain patterns, so a rule mixing plain and XOR'd strings tells the two apart without inspecting the data.
 
