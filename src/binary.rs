@@ -200,11 +200,9 @@ impl BinaryMatchView {
     rule.patterns.get(record.pattern_id as usize).cloned()
   }
 
-  /// Slices the matched byte slice directly out of the source buffer.
+  /// Slices the matched bytes out of the scanned source buffer.
   ///
-  /// Pass the same bytes that were scanned; the view does not retain the
-  /// source. Async scans copy their input, so pass the original buffer
-  /// unchanged.
+  /// The view does not retain the source, so pass the bytes that were scanned.
   #[napi]
   pub fn get_slice(&self, index: u32, source: Buffer) -> Option<Buffer> {
     let offset = self.get_offset(index)? as usize;
@@ -216,16 +214,12 @@ impl BinaryMatchView {
     }
   }
 
-  /// Lazily materializes all binary match records into the standard `RuleMatch` object graph.
+  /// Materializes the binary match records into the `RuleMatch` object graph.
   ///
-  /// If `source` buffer is provided, the matched bytes are sliced into
-  /// `MatchData.data` (lossy UTF-8) and `MatchData.dataBytes` (exact bytes).
-  /// Otherwise, `MatchData.data` is an empty string and `dataBytes` is absent.
-  ///
-  /// Pass the same bytes that were scanned; the view does not retain the
-  /// source. Async scans copy their input, so mutating the buffer between
-  /// `scanBinaryAsync()` and this call yields slices that no longer match the
-  /// scan.
+  /// With `source`, fills `MatchData.data` (lossy UTF-8) and
+  /// `MatchData.dataBytes` (exact bytes); without it, `data` is empty and
+  /// `dataBytes` is absent. The view does not retain the source, so pass the
+  /// bytes that were scanned.
   #[napi(ts_args_type = "source?: Buffer")]
   pub fn to_rule_matches<'a>(
     &self,

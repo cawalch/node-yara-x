@@ -1,35 +1,10 @@
-/*! YARA-X bindings for Node.js using napi-rs
-
-This library provides bindings for YARA-X, a powerful tool for malware research and detection.
-It allows you to compile and scan YARA rules from Node.js using the napi-rs framework.
-
-There are two main ways to use this library:
-
-1. Compile and scan synchronously using the `compile` and `scan` functions.
-2. Compile and scan asynchronously using the `scan_async` and `scan_file_async` functions.
-
-# Usage
-
-```javascript
-const { compile, scan } = require('yara-x');
-const { Buffer } = require('buffer');
-
-// Compile YARA rules
-
-const rules = compile('rule example { strings: $a = "example" condition: $a }');
-console.log('Compiled rules:', rules);
-
-// Scan data with compiled rules
-
-const data = Buffer.from('This is an example data to scan.');
-const matches = scan(rules, data);
-
-console.log('Matches:', matches);
-
-*/
+//! Node.js bindings for [YARA-X](https://github.com/VirusTotal/yara-x), exposed
+//! through napi-rs: compile rules once, then scan buffers or files either
+//! synchronously (`compile`/`scan`) or on libuv worker threads (`scan_async`).
+//!
+//! See `README.md` for usage; `index.d.ts` is the authoritative API reference.
 #![deny(clippy::all)]
 
-// Module declarations
 mod batch;
 mod binary;
 mod compiler;
@@ -39,7 +14,6 @@ mod tasks;
 mod types;
 mod variables;
 
-// Re-export public types
 pub use batch::{BatchFileError, BatchFileMatch, BatchScanOptions, BatchScanResult};
 pub use binary::{BinaryMatchView, BinaryScanCatalog, BinaryScanResult, RuleInfo};
 pub use scanner::YaraX;
@@ -48,7 +22,6 @@ pub use types::{
   MatchData, RuleMatch,
 };
 
-// Internal imports
 use compiler::{add_source_to_compiler, apply_compiler_options, ignored_module_warnings};
 use error::io_error_to_napi;
 use napi::bindgen_prelude::Buffer;
@@ -85,14 +58,11 @@ pub fn rules_format_info() -> Result<RulesFormatInfo> {
   })
 }
 
-/// Reads the format version that the linked YARA-X writes into blobs.
+/// Returns the blob format version written by the linked YARA-X.
 ///
-/// The constant is private upstream, so derive it once by serializing empty
-/// rules and reading the header. The result is cached for the process, but the
-/// derivation is lazy: the **first** `rulesFormatInfo()` call pays one empty
-/// serialization (6.9 ms on a debug build here, ~0.0006 ms for every later
-/// call), so call it once at startup rather than per scan if that first-call
-/// latency matters. Not measured on a release build.
+/// The upstream constant is private, so it is read from the header of one empty
+/// serialization and cached. Derivation is lazy: the first call costs one small
+/// serialization (~7 ms in a debug build), later calls are free.
 fn rules_format_version() -> Result<u32> {
   static FORMAT_VERSION: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
 
@@ -127,13 +97,6 @@ fn rules_format_version() -> Result<u32> {
 ///
 /// This function validates YARA rules without creating a scanner instance.
 ///
-/// # Arguments
-///
-/// * `rule_source` - The YARA rule source code
-/// * `options` - Optional compiler options
-///
-/// # Returns
-///
 /// A `CompileResult` containing any warnings and errors
 #[napi]
 pub fn validate(
@@ -157,15 +120,6 @@ pub fn validate(
 }
 
 /// Compiles a YARA rule source string and returns a `YaraX` instance with the compiled rules.
-///
-/// # Arguments
-///
-/// * `rule_source` - The YARA rule source code
-/// * `options` - Optional compiler options
-///
-/// # Returns
-///
-/// A `YaraX` instance with compiled rules
 #[napi]
 pub fn compile(
   rule_source: String,
@@ -176,25 +130,12 @@ pub fn compile(
 }
 
 /// Creates a new `YaraX` instance with empty rules and no source code.
-///
-/// # Returns
-///
-/// A new `YaraX` instance with empty rules
 #[napi]
 pub fn create() -> scanner::YaraX {
   scanner::YaraX::new_empty(Arc::new(Compiler::new().build()), Some(String::new()))
 }
 
 /// Creates a new `YaraX` instance from a file containing YARA rules.
-///
-/// # Arguments
-///
-/// * `rule_path` - Path to the file containing YARA rules
-/// * `options` - Optional compiler options
-///
-/// # Returns
-///
-/// A `YaraX` instance with compiled rules from the file
 #[napi]
 pub fn from_file(
   rule_path: String,
@@ -206,21 +147,12 @@ pub fn from_file(
   scanner::YaraX::create_scanner_from_source(file_content, options, Some(&rule_path))
 }
 
-/// Creates a new `YaraX` instance from a serialized rules blob.
+/// Restores a scanner from a blob produced by [`YaraX::serialize`].
 ///
-/// The blob must have been produced by [`YaraX::serialize`] (or
-/// `yara_x::Rules::serialize`) using the same YARA-X version. The rules are
-/// restored with full scanning capability (including WASM condition
-/// recompilation for the current platform) and can be used with `scan`,
-/// `scan_file`, `scan_async`, and `scan_file_async`.
-///
-/// # Arguments
-///
-/// * `data` - Buffer containing the serialized rules
-///
-/// # Returns
-///
-/// A `YaraX` instance with the restored rules
+/// Blobs are format-versioned per YARA-X release: compare
+/// [`rulesFormatInfo`] before loading a cached one. WASM conditions are
+/// recompiled for the current platform on load, and only trusted blobs should
+/// be deserialized.
 #[napi]
 pub fn deserialize(data: Buffer) -> Result<scanner::YaraX> {
   use yara_x::Rules;
@@ -252,14 +184,6 @@ pub fn deserialize(data: Buffer) -> Result<scanner::YaraX> {
 
 /// Compiles a YARA rule source string to a WASM file.
 ///
-/// # Arguments
-///
-/// * `rule_source` - The YARA rule source code
-/// * `output_path` - Path where the WASM file should be written
-/// * `options` - Optional compiler options
-///
-/// # Returns
-///
 /// Ok(()) on success, or an error if compilation or emission fails
 #[napi]
 pub fn compile_to_wasm(
@@ -272,15 +196,6 @@ pub fn compile_to_wasm(
 
 /// Compiles a YARA rule file to a WASM file.
 ///
-/// # Arguments
-///
-/// * `rule_path` - Path to the file containing YARA rules
-/// * `output_path` - Path where the WASM file should be written
-/// * `options` - Optional compiler options
-///
-/// # Returns
-///
-/// Ok(()) on success, or an error if reading, compilation, or emission fails
 #[napi]
 pub fn compile_file_to_wasm(
   rule_path: String,

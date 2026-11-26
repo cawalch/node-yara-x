@@ -76,16 +76,11 @@ pub struct MatchData {
   /// The XOR key that produced this match, when the pattern was compiled with an
   /// `xor` modifier. Absent for plain matches.
   pub xor_key: Option<u8>,
-  /// The exact matched bytes, byte-for-byte.
+  /// The exact matched bytes, which round-trip patterns that match invalid
+  /// UTF-8 (unlike the lossy [`data`](MatchData::data)).
   ///
-  /// Present whenever the scanner has the matched data (always for `scan`
-  /// results, and for `toRuleMatches()` when a source buffer is supplied).
-  /// Unlike `data`, this round-trips binary patterns that match invalid
-  /// UTF-8.
-  ///
-  /// Populating this field copies the matched bytes, so high-density scans
-  /// pay one allocation per match. Use `setMaxMatchesPerPattern()` or the
-  /// binary match API when the bytes are not needed.
+  /// One copy per match, so high-density scans allocate proportionally; skip
+  /// it via `setMaxMatchesPerPattern()` or the binary match API.
   pub data_bytes: Option<Buffer>,
 }
 

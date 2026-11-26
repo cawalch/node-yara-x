@@ -185,20 +185,14 @@ pub fn add_source_to_compiler(
   add_source_to_compiler_tolerant(compiler, source, namespace, origin, false)
 }
 
-/// Adds a source string to the compiler, optionally tolerating per-rule
-/// compilation errors so that the remaining rules can still be compiled.
+/// Adds a source to the compiler, optionally skipping rules that fail.
 ///
-/// When `tolerate` is `true`, a rule that fails to compile is skipped and
-/// tracked by the compiler (reportable via
-/// [`collect_ignored_rules`](Self::collect_ignored_rules)) instead of
-/// propagating the error. When `false`, the first error is returned, exactly
-/// like [`add_source_to_compiler`](Self::add_source_to_compiler).
-///
-/// Errors that cannot be attributed to a single skipped rule (syntax errors,
-/// invalid UTF-8, banned or unknown module imports, include failures) are not
-/// recorded by the compiler as ignored rules; callers surfacing them via
-/// [`uncovered_compiler_errors`](Self::uncovered_compiler_errors) or
-/// [`crate::variables::get_compiler_errors`].
+/// With `tolerate`, a failing rule is skipped and recorded by the compiler
+/// (see [`collect_ignored_rules`](Self::collect_ignored_rules)); otherwise the
+/// first error is returned. Errors that belong to no single rule — syntax,
+/// invalid UTF-8, banned/unknown module, include failures — are only visible
+/// through [`uncovered_compiler_errors`](Self::uncovered_compiler_errors), so
+/// callers that tolerate per-rule failures must still check them.
 pub fn add_source_to_compiler_tolerant(
   compiler: &mut Compiler<'_>,
   source: &str,
@@ -330,16 +324,6 @@ pub fn ensure_no_uncovered_errors(compiler: &Compiler) -> Result<()> {
 ///
 /// This function configures the compiler based on the provided options,
 /// including module handling, feature flags, and optimization settings.
-///
-/// # Arguments
-///
-/// * `compiler` - The YARA compiler to configure
-/// * `options` - Optional compiler options
-/// * `store_variables` - Whether to store variables for later use
-///
-/// # Returns
-///
-/// An optional VariableMap containing the defined variables if `store_variables` is true
 pub fn apply_compiler_options(
   compiler: &mut Compiler<'_>,
   options: Option<&CompilerOptions>,
@@ -380,14 +364,6 @@ pub fn apply_compiler_options(
 ///
 /// This function creates a compiler, applies options, compiles the source,
 /// and emits the result as a WebAssembly module.
-///
-/// # Arguments
-///
-/// * `source` - The YARA rule source code
-/// * `output_path` - Path where the WASM file should be written
-/// * `options` - Optional compiler options
-///
-/// # Returns
 ///
 /// Ok(()) on success, or an error if compilation or emission fails
 pub fn compile_source_to_wasm(
@@ -467,9 +443,8 @@ pub fn replay_sources_to_wasm(
   )
 }
 
-/// Adds all sources to the compiler and emits the WASM module, rejecting
-/// source-level errors when tolerating invalid rules (there is no report
-/// channel on the one-shot WASM path).
+/// Adds all sources and emits the WASM module, rejecting source-level errors
+/// outright when tolerating invalid rules (this path has no report channel).
 fn add_sources_and_emit(
   mut compiler: Compiler<'_>,
   sources: &[RuleSource],
@@ -487,11 +462,8 @@ fn add_sources_and_emit(
     )?;
   }
 
-  // When tolerating invalid rules, errors that cannot be attributed to a
-  // single skipped rule (syntax errors, banned or unknown module imports,
-  // include failures) would otherwise be silently dropped. There is no
-  // report channel on the one-shot WASM path, so surface them as an error
-  // instead of emitting a WASM module that silently lacks rules.
+  // Otherwise a tolerated source-level error would emit a WASM module that
+  // silently lacks rules, with nowhere to report it.
   if ignore_invalid_rules {
     ensure_no_uncovered_errors(&compiler)?;
   }

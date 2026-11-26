@@ -72,9 +72,6 @@ pub struct BatchFileMatchData {
 #[derive(Clone)]
 pub struct BatchFileError {
   /// Path of the file or directory that failed.
-  ///
-  /// Directory scans report traversal failures here, so this may name a
-  /// directory rather than a file.
   pub file_path: String,
   /// Error description.
   pub error: String,
@@ -83,11 +80,9 @@ pub struct BatchFileError {
 /// Aggregated result of a batch scan.
 #[napi(object)]
 pub struct BatchScanResult<'a> {
-  /// Total files discovered or submitted for scanning.
-  ///
-  /// For directory scans this counts files discovered after filtering. Files
-  /// under a directory that could not be traversed are not discovered, so
-  /// compare this with `errors`.
+  /// Files discovered or submitted for scanning, after filtering. Files under
+  /// a directory that could not be traversed are not counted, so compare with
+  /// `errors`.
   pub total_files: u32,
   /// Files discovered but excluded by include/exclude patterns or size filters.
   pub filtered_files: u32,
@@ -97,12 +92,9 @@ pub struct BatchScanResult<'a> {
   pub matched_files: u32,
   /// Results per file (matching files only, or all files if include_clean_files is true).
   pub results: Vec<BatchFileMatch<'a>>,
-  /// Errors encountered during the batch scan.
-  ///
-  /// Includes per-file scan failures and directory traversal failures. A
-  /// traversal error's `filePath` is the directory that could not be read.
-  /// The scan keeps going: a partial sweep plus reported errors beats losing
-  /// the results of everything that was readable.
+  /// Per-file scan failures and directory traversal failures; a traversal
+  /// error's `filePath` is the directory that could not be read. The scan
+  /// continues past both, so a partial sweep is reported rather than lost.
   pub errors: Vec<BatchFileError>,
   /// Total scan duration in milliseconds.
   pub duration_ms: f64,
@@ -159,9 +151,8 @@ impl PathFilter {
 
   /// Returns true if the path passes the include/exclude filters.
   ///
-  /// `relative` is the path relative to the scan root, if available. Both the
-  /// full path and the root-relative path are tested so patterns written
-  /// either way (`sub/**` or `**/sub/**`) work.
+  /// Both the full path and the `relative` path (from the scan root) are
+  /// tested, so `sub/**` and `**/sub/**` behave alike.
   pub fn is_match(&self, path: &Path, relative: Option<&Path>) -> bool {
     let matches = |set: &GlobSet| {
       set.is_match_candidate(&Candidate::new(path))
@@ -184,11 +175,10 @@ impl PathFilter {
   }
 }
 
-/// Recursively collects matching file paths from a root directory.
+/// Collects matching file paths under a root directory.
 ///
-/// Traversal failures do not abort the walk. They are returned alongside the
-/// files that were discovered so the caller can report them in
-/// [`BatchScanResult::errors`].
+/// Traversal failures do not abort the walk; they are returned alongside the
+/// discovered files for [`BatchScanResult::errors`].
 pub fn collect_directory_files(
   dir_path: &str,
   max_depth: Option<u32>,
@@ -274,15 +264,10 @@ pub fn collect_directory_files(
 /// Number of distinct `concurrency` sizes kept warm at once.
 const POOL_CACHE_SIZE: usize = 4;
 
-/// Returns a pooled Rayon pool for `threads`, least-recently-used up to
-/// [`POOL_CACHE_SIZE`] distinct sizes.
+/// Returns the Rayon pool for `threads`, caching [`POOL_CACHE_SIZE`] sizes LRU.
 ///
-/// Rebuilding a pool per call used to spawn fresh threads, which also threw
-/// away the worker-side thread-local scanner cache, so `concurrency` cost more
-/// than omitting it. The cache is bounded so callers that vary `concurrency`
-/// cannot grow threads without limit; it is LRU rather than first-N-wins so a
-/// size that arrives late (or after the cache filled) is still reused, and an
-/// evicted pool stays alive while a call holds its `Arc`.
+/// Pools are cached because a fresh pool starts empty threads, which discards
+/// the worker thread-local scanner cache; the bound caps total thread count.
 fn thread_pool(threads: usize) -> Result<Arc<rayon::ThreadPool>> {
   #[derive(Default)]
   struct PoolCache {
@@ -294,7 +279,6 @@ fn thread_pool(threads: usize) -> Result<Arc<rayon::ThreadPool>> {
   static POOLS: OnceLock<Mutex<PoolCache>> = OnceLock::new();
   let cache = POOLS.get_or_init(|| Mutex::new(PoolCache::default()));
 
-  // Fast path: a warm pool of this size already exists.
   {
     let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     guard.clock = guard.clock.wrapping_add(1);
@@ -305,8 +289,7 @@ fn thread_pool(threads: usize) -> Result<Arc<rayon::ThreadPool>> {
     }
   }
 
-  // Built with no lock held: spawning `threads` OS threads while another
-  // caller waits on the cache mutex would serialise two independent scans.
+  // Built outside the lock so thread spawn never blocks another caller.
   let pool = Arc::new(
     rayon::ThreadPoolBuilder::new()
       .num_threads(threads)
@@ -324,14 +307,12 @@ fn thread_pool(threads: usize) -> Result<Arc<rayon::ThreadPool>> {
     guard.clock = guard.clock.wrapping_add(1);
     let now = guard.clock;
 
-    // Another caller built the same size meanwhile; keep its warm pool and let
-    // ours drop on its own.
+    // Lost a same-size race; keep the winner's pool.
     if let Some(existing) = guard.pools.get(&threads) {
       return Ok(Arc::clone(&existing.0));
     }
 
-    // Evict the least recently used size. Only the map entry leaves here; an
-    // in-flight call keeps that pool alive through its own Arc clone.
+    // An in-flight call keeps an evicted pool alive through its Arc clone.
     let mut evicted = None;
     if guard.pools.len() >= POOL_CACHE_SIZE {
       let lru = guard
@@ -348,7 +329,6 @@ fn thread_pool(threads: usize) -> Result<Arc<rayon::ThreadPool>> {
     evicted
   };
 
-  // Joining an evicted pool's threads must not happen under the cache lock.
   drop(evicted);
   Ok(pool)
 }

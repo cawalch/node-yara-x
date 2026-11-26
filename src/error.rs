@@ -6,15 +6,7 @@
 use napi::{Error, Status};
 use yara_x::errors::CompileError;
 
-/// Converts a YARA compilation error to a N-API error.
-///
-/// # Arguments
-///
-/// * `error` - The compilation error from YARA-X
-///
-/// # Returns
-///
-/// A N-API error with appropriate status and message
+/// Converts a YARA compilation error into a N-API error, prefixing the code.
 pub fn compile_error_to_napi(error: &CompileError) -> Error {
   Error::new(
     Status::GenericFailure,
@@ -22,17 +14,8 @@ pub fn compile_error_to_napi(error: &CompileError) -> Error {
   )
 }
 
-/// Converts a YARA scan error to a N-API error.
+/// Converts a YARA scan error into a N-API error.
 ///
-/// Maps different scan error types to appropriate error messages.
-///
-/// # Arguments
-///
-/// * `error` - The scan error from YARA-X
-///
-/// # Returns
-///
-/// A N-API error with appropriate status and message
 pub fn scan_error_to_napi(error: yara_x::ScanError) -> Error {
   match error {
     yara_x::ScanError::Timeout => Error::new(Status::Cancelled, "Scan timed out"),
@@ -59,16 +42,7 @@ pub fn scan_error_to_napi(error: yara_x::ScanError) -> Error {
   }
 }
 
-/// Converts an I/O error to a N-API error with context.
-///
-/// # Arguments
-///
-/// * `error` - The I/O error
-/// * `context` - A description of what operation failed
-///
-/// # Returns
-///
-/// A N-API error with appropriate status and message
+/// Wraps an I/O error with a description of the failed operation.
 pub fn io_error_to_napi(error: std::io::Error, context: &str) -> Error {
   Error::new(
     Status::GenericFailure,
@@ -76,15 +50,7 @@ pub fn io_error_to_napi(error: std::io::Error, context: &str) -> Error {
   )
 }
 
-/// Converts a generic error to a N-API error.
-///
-/// This is a catch-all converter for any error type that implements Display.
-///
-/// # Arguments
-///
-/// * `err` - Any error that implements Display
-///
-/// # Returns
+/// Wraps any `Display` error as a N-API error.
 ///
 /// A N-API error with the error's display representation
 pub fn to_napi_err<E: std::fmt::Display>(err: E) -> Error {

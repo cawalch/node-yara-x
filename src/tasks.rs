@@ -41,10 +41,8 @@ impl WorkerScannerOptions {
 }
 
 struct CachedWorkerScanner {
-  // NOTE: `scanner` MUST be declared BEFORE `rules`.
-  // In Rust, struct fields are dropped in declaration order.
-  // By declaring `scanner` first, `scanner`'s destructor is run before
-  // `rules` is dropped, guaranteeing that `Rules` outlives `Scanner`.
+  // `scanner` must be declared before `rules`: fields drop in declaration
+  // order, and the scanner borrows the rules allocation.
   scanner: Scanner<'static>,
   rules: Arc<Rules>,
   options: WorkerScannerOptions,
@@ -93,12 +91,8 @@ impl BaseYaraTask {
 
       if !is_match {
         let rules_clone = Arc::clone(&self.rules);
-        // SAFETY: The transmute extends the borrow lifetime of `rules_clone` to `'static`.
-        // This is sound because `CachedWorkerScanner` holds `rules_clone` (an `Arc<Rules>`),
-        // which guarantees the `Rules` allocation remains alive on the heap for at least as
-        // long as `CachedWorkerScanner`. In `CachedWorkerScanner`, `scanner` is declared before
-        // `rules`, ensuring that when `CachedWorkerScanner` is dropped or replaced, `scanner`
-        // is dropped before `rules`.
+        // SAFETY: `CachedWorkerScanner` owns `rules_clone` and declares
+        // `scanner` first, so the `Arc` outlives the borrow it backs.
         let rules_ref: &'static Rules =
           unsafe { std::mem::transmute::<&Rules, &'static Rules>(&*rules_clone) };
 
