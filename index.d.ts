@@ -82,7 +82,12 @@ export declare class BinaryMatchView {
  * data and files. It includes performance optimizations like scanner caching.
  */
 export declare class YaraX {
-  /** Returns the compiler warnings generated during the compilation process. */
+  /**
+   * Returns the compiler warnings generated during the compilation process.
+   *
+   * Includes a rule source added since the last read: the rule set is
+   * materialized here rather than the report being one addition behind.
+   */
   getWarnings(): Array<CompilerWarning>
   /**
    * Gets the rules that were skipped during compilation, if any.
@@ -182,7 +187,13 @@ export declare class YaraX {
   get ruleCount(): number
   /** Returns the names of all modules imported by the compiled rules (e.g. "pe", "elf", "hash"). */
   getImports(): Array<string>
-  /** Returns metadata for all compiled rules including identifier, namespace, tags, and patterns. */
+  /**
+   * Returns metadata for all compiled rules including identifier, namespace, tags, and patterns.
+   *
+   * Materializes a pending addition first, so this is also where a rule that is
+   * only wrong in combination with the rest of the set reports — put it in the
+   * same `try` as the additions to have every rejection land there.
+   */
   getRules(): Array<RuleInfo>
   /** Scans the provided data using the compiled YARA rules. */
   scan(data: Buffer, variables?: Record<string, string | number | boolean | bigint>): Array<RuleMatch>
@@ -280,32 +291,52 @@ export declare class YaraX {
    *
    * # Performance
    *
-   * This method recompiles all rules (existing + new) on each call, resulting
-   * in O(n) time per call and O(n²) total for n incremental additions.
-   * For better performance with many rules, use `compile()` with all sources
-   * at once, or use `add_rule_sources()` for batch addition.
+   * The source is checked on its own and the rule set is rebuilt once, when it
+   * is next read or scanned, so n additions cost one compilation rather than n
+   * — adding 120 rule files costs one rebuild instead of 120.
+   *
+   * A rule that is only wrong in combination with the rest of the set — it
+   * references a rule or global the other sources do not define, reuses one of
+   * their names, or clashes with an identifier one of them brings in — is
+   * checked by that rebuild, so it throws from the next
+   * `getRules()`/`serialize()`/`scan()` instead of here. Call `getRules()`
+   * after the additions to keep the strict timing; use `ignoreInvalidRules` to
+   * skip and report such a rule instead, since a strict scanner has nothing
+   * that can skip it and will report it on every read.
    */
   addRuleSource(ruleSource: string, namespace?: string | undefined | null): void
   /**
-   * Adds multiple rule sources to the YARA compiler in a single compilation pass.
+   * Adds multiple rule sources to the YARA compiler.
    *
-   * This is more efficient than calling `add_rule_source()` multiple times,
-   * as it compiles all sources in a single pass instead of recompiling
-   * existing rules for each addition.
-   *
-   * # Performance
-   *
-   * O(n + m) where n = existing rules, m = new rules (single compilation pass).
-   * Compared to calling `add_rule_source()` m times: O(n × m + m²).
+   * The batch is checked as a unit, so a source in it may reference a rule or
+   * tag defined by another source in the same batch. It costs the same single
+   * deferred rebuild as the same number of `addRuleSource()` calls; prefer it
+   * when the sources are already at hand.
    */
   addRuleSources(ruleSources: Array<RuleSource>): void
   /**
    * Adds a rule file to the YARA compiler.
    *
+   * `include` statements resolve next to this file, and diagnostics name it.
+   * Like `addRuleSource()`, the addition is cheap: the rebuild happens when the
+   * rule set is next read or scanned.
+   *
    * Ok(()) on success, or an error if reading or compilation fails
    */
   addRuleFile(filePath: string, namespace?: string | undefined | null): void
-  /** Defines a variable for the YARA compiler. */
+  /**
+   * Defines a variable for the YARA compiler.
+   *
+   * The definition is checked here — the name must be one YARA-X accepts —
+   * rather than by the deferred rebuild: a global cannot be removed or renamed
+   * afterwards, so recording a name the compiler rejects would leave every
+   * later read meeting `invalid identifier` with nothing left to undo. A
+   * rejected call leaves the globals as they were, like a rejected addition.
+   *
+   * What is left to the rebuild is how the existing rules read the value, and
+   * that is recoverable: a type conflict reports `E003` on the next read, and
+   * redefining the same name with a matching type fixes the rule set.
+   */
   defineVariable(name: string, value: string | number | boolean | bigint): void
   /** Scans multiple files concurrently across a Rayon worker thread pool. */
   scanFiles(filePaths: Array<string>, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null): Promise<BatchScanResult>

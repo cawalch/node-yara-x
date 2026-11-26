@@ -231,7 +231,9 @@ const matches = scanner.scan(Buffer.from("test data with first pattern"));
 console.log(`Found ${matches.length} matching rule(s).`);
 ```
 
-Each `addRuleSource()` recompiles the accumulated rule set. When adding more than a couple of sources, prefer `addRuleSources()`, which compiles them in one pass.
+An addition does not recompile the accumulated rule set: the new source is checked on its own, and the set is rebuilt once, when it is next read or scanned. Adding 120 one-rule files therefore costs one compilation instead of 120 — measured ≈100 ms (100–110 ms across runs) against the 5.67 s the same loop took with per-call recompilation (release build, macOS/arm64). A single `compile()` of those 120 rules costs ≈10 ms, so what remains per call is under 1 ms of checking the new source. `addRuleSources()` does the same work in one call, so prefer it when the sources are already in hand.
+
+What the addition can reject on its own still throws there: syntax errors, invalid patterns, unknown or banned modules, failed `include`s, and every other error that names something inside the source. Anything whose cause sits in a source that is not part of the batch is decided by the rebuild instead, so it throws from the next `getRules()`, `serialize()` or `scan()` with the same message and `ruleCode` — the classes measured on this binding are a condition that references a rule or global no source defines (`E009`), a rule name an already-added source uses (`E012` across sources), and a rule identifier that clashes with one another source brings in, such as naming a rule `pe` after a source that does `import "pe"` (`E013` across sources). The async entry points have no report channel of their own and throw these from the call rather than rejecting the promise. If you want every error at add time, end the additions with `getRules()` in the same `try`; if you load rules you did not write, compile with `ignoreInvalidRules` so such a rule is skipped and listed by `getIgnoredRules()` instead of blocking the set. Without that option nothing can skip the offending source, so a strict scanner that meets one meets it again on every read until the rules are fixed — build a new scanner rather than nurse that one along.
 
 ## Batch and directory scanning
 
@@ -417,7 +419,7 @@ if (result.errors.length > 0) {
 }
 ```
 
-A rejected rule set also throws, and the thrown error carries the same facts as fields, so branching does not mean parsing prose. `compile()`, `fromFile()`, `addRuleSource()`, `addRuleSources()`, `addRuleFile()` and `defineVariable()` set `ruleCode` to the E-code and, when the diagnostic has one, `source` / `line` / `column` (`source` is the rule file for the file-based entry points). `code` and `message` are unchanged, so handling written against the message keeps working:
+A rejected rule set also throws, and the thrown error carries the same facts as fields, so branching does not mean parsing prose. `compile()`, `fromFile()`, `addRuleSource()`, `addRuleSources()` and `addRuleFile()` set `ruleCode` to the E-code and, when the diagnostic has one, `source` / `line` / `column` (`source` is the rule file for the file-based entry points) — as do the reads that materialize a pending addition (`getRules()`, `serialize()`, a scan). `code` and `message` are unchanged, so handling written against the message keeps working:
 
 ```javascript
 try {
@@ -792,9 +794,9 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 | `scanDirectorySync(dirPath, options?, variables?)` | Recursively scans a directory synchronously with native traversal and Rayon. |
 | `serialize()` | Serializes compiled rules into a portable `Buffer`. |
 | `addRuleSource(ruleSource, namespace?)` | Adds one rule source to an incremental scanner. |
-| `addRuleSources(ruleSources)` | Adds several rule sources in a single compilation pass. |
+| `addRuleSources(ruleSources)` | Adds several rule sources as one batch; a source may reference a rule defined by an earlier source in the same batch. |
 | `addRuleFile(filePath, namespace?)` | Adds rules from a file to an incremental scanner. |
-| `defineVariable(name, value)` | Defines a global variable on an incremental scanner (`string`, `number`, `boolean`, or `bigint`). |
+| `defineVariable(name, value)` | Defines a global variable on an incremental scanner (`string`, `number`, `boolean`, or `bigint`). A name YARA-X rejects throws here; how the rules read the value is checked on the next read. |
 | `getWarnings()` | Returns compiler warnings from the last compilation. |
 | `getIgnoredRules()` | Returns rules skipped by tolerant compilation or ignored modules. |
 | `getCompilationErrors()` | Returns source-level errors collected when `ignoreInvalidRules` is set. |

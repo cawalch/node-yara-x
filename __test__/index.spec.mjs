@@ -864,6 +864,220 @@ describe("yarax Tests", () => {
       );
     });
 
+    it("should rebuild once for a batch of additions, not once per addition", () => {
+      const mk = (i) => `rule lazy_${i} { strings: $a = "payload${i}" condition: $a }`;
+      const scanner = yarax.create();
+      strictEqual(scanner.recompilations(), 0, "an empty scanner has compiled nothing");
+
+      for (let i = 0; i < 25; i++) {
+        scanner.addRuleSource(mk(i));
+      }
+      strictEqual(scanner.recompilations(), 0, "an addition must not compile the rule set");
+
+      strictEqual(scanner.ruleCount, 25, "the first read must see every added source");
+      strictEqual(scanner.recompilations(), 1, "25 additions must cost exactly one rebuild");
+
+      scanner.scan(Buffer.from("payload7"));
+      scanner.getRules();
+      scanner.getWarnings();
+      scanner.serialize();
+      strictEqual(scanner.recompilations(), 1, "reading a clean rule set must not rebuild");
+
+      scanner.addRuleSources([{ source: mk(25) }, { source: mk(26) }]);
+      strictEqual(scanner.recompilations(), 1, "a second batch must not rebuild yet");
+      ok(
+        scanner
+          .scan(Buffer.from("payload26"))
+          .some((match) => match.ruleIdentifier === "lazy_26"),
+        "the scan must see the second batch",
+      );
+      strictEqual(scanner.recompilations(), 2, "one more batch, one more rebuild");
+
+      // Non-vacuity: coalescing must not change which rules exist.
+      deepStrictEqual(
+        scanner.getRules().map((rule) => rule.identifier),
+        yarax
+          .compile(Array.from({ length: 27 }, (_, i) => mk(i)).join("\n"))
+          .getRules()
+          .map((rule) => rule.identifier),
+        "the coalesced set must be the set a one-shot compile builds",
+      );
+    });
+
+    it("should still reject at add time a source that is invalid on its own", () => {
+      // Deferring the rebuild must not defer these: each one names something
+      // inside the added source, so no other rule can change the verdict.
+      const cases = [
+        ['rule bad { strings: $a = /(/ condition: $a }', "E014"],
+        ["rule dup { condition: false }\nrule dup { condition: true }", "E012"],
+        ['rule bad { strings: $a = "x" condition: $b }', "E025"],
+      ];
+
+      for (const [source, code] of cases) {
+        const scanner = yarax.compile("rule ok { condition: true }");
+        throws(
+          () => scanner.addRuleSource(source),
+          new RegExp(`Compilation error \\[?\\(?${code}`),
+          `adding ${code} must throw from addRuleSource()`,
+        );
+        strictEqual(scanner.recompilations(), 0, "a rejected addition must not rebuild");
+        deepStrictEqual(
+          scanner.getRules().map((rule) => rule.identifier),
+          ["ok"],
+          `${code} must leave the rule set and the scanner usable`,
+        );
+      }
+
+      // An opt-in error stays opt-in, not silently deferred to the first scan.
+      const strict = yarax.compile("rule ok { condition: false }", {
+        errorOnSlowPattern: true,
+      });
+      throws(
+        () => strict.addRuleSource("rule slow { strings: $a = /a+b/ condition: $a }"),
+        /slow pattern/,
+        "errorOnSlowPattern must reject at addRuleSource()",
+      );
+    });
+
+    it("should report a rule that only the whole set can judge on the next read", () => {
+      const sources = [
+        "rule ok { condition: true }",
+        "rule dangling { condition: nowhere_defined }",
+      ];
+      const scanner = yarax.create();
+
+      for (const source of sources) {
+        scanner.addRuleSource(source);
+      }
+      strictEqual(scanner.recompilations(), 0, "neither addition may compile the set");
+
+      throws(
+        () => scanner.ruleCount,
+        /unknown identifier `nowhere_defined`/,
+        "a read must materialize the rule set and report the error",
+      );
+
+      try {
+        scanner.getRules();
+        fail("a dangling reference must not be reported as a usable rule set");
+      } catch (error) {
+        strictEqual(error.ruleCode, "E009", "the deferred error keeps its ruleCode");
+        strictEqual(typeof error.line, "number", "and its location");
+      }
+
+      throws(() => scanner.scan(Buffer.from("x")), /unknown identifier/);
+      throws(
+        () => yarax.compile(sources.join("\n")),
+        /unknown identifier `nowhere_defined`/,
+        "deferring must not invent or lose an error a one-shot compile reports",
+      );
+    });
+
+    it("should report a rule skipped by a pending addition without a scan", () => {
+      const scanner = yarax.compile("rule ok { condition: true }", {
+        ignoreInvalidRules: true,
+      });
+
+      scanner.addRuleSource("rule dangling { condition: nowhere_defined }");
+
+      deepStrictEqual(
+        scanner.getIgnoredRules().map((rule) => rule.name),
+        ["dangling"],
+        "the ignored-rules report must reflect the pending addition",
+      );
+      strictEqual(scanner.ruleCount, 1, "the skipped rule must not be in the set");
+      strictEqual(scanner.scan(Buffer.from("x")).length, 1, "and the scanner stays usable");
+    });
+
+    it("should reject a source-level failure at add time in both modes", () => {
+      // `ignoreInvalidRules` skips rules; it has never meant "accept a broken
+      // source", and the deferred rebuild must not move that guard either.
+      const cases = [
+        ["rule { broken", /not attributable to a skipped rule/],
+        ['import "nope"\nrule m { condition: true }', /not attributable to a skipped rule/],
+        [
+          'include "definitely-missing.yar"\nrule i { condition: true }',
+          /not attributable to a skipped rule/,
+        ],
+      ];
+
+      for (const [source, expected] of cases) {
+        const tolerant = yarax.compile("rule ok { condition: true }", {
+          ignoreInvalidRules: true,
+        });
+        throws(
+          () => tolerant.addRuleSource(source),
+          expected,
+          `tolerant mode must reject ${source.slice(0, 24)}`,
+        );
+
+        const strict = yarax.compile("rule ok { condition: true }");
+        throws(
+          () => strict.addRuleSource(source),
+          /Compilation error/,
+          `strict mode must reject ${source.slice(0, 24)}`,
+        );
+      }
+
+      const tolerant = yarax.compile("rule ok { condition: true }", {
+        ignoreInvalidRules: true,
+      });
+      throws(() => tolerant.addRuleSource("rule { broken"), /Compilation error/);
+      tolerant.addRuleSource("rule later_ok { condition: true }");
+      deepStrictEqual(
+        tolerant.getRules().map((rule) => rule.identifier),
+        ["ok", "later_ok"],
+        "a rejected source must leave the tolerant scanner usable",
+      );
+    });
+
+    it("should leave the scanner usable when defineVariable() is rejected", () => {
+      // A global cannot be removed or renamed afterwards, so a name YARA-X
+      // refuses must not be recorded: every later read would meet `invalid
+      // identifier` with nothing left to undo.
+      for (const name of ["1bad", "a b", "x.y", ""]) {
+        const scanner = yarax.compile("rule ok { condition: true }");
+        throws(
+          () => scanner.defineVariable(name, 1),
+          /invalid identifier/,
+          `defineVariable(${JSON.stringify(name)}, 1) must throw`,
+        );
+        strictEqual(scanner.recompilations(), 0, "a rejected global must not rebuild");
+        deepStrictEqual(
+          scanner.getRules().map((rule) => rule.identifier),
+          ["ok"],
+          `defineVariable(${JSON.stringify(name)}) must leave the rule set readable`,
+        );
+        scanner.defineVariable("usable_after", 1);
+        strictEqual(
+          scanner.ruleCount,
+          1,
+          "a later valid global must still be accepted after a rejected one",
+        );
+      }
+    });
+
+    it("should defer a global's type conflict to the next read, recoverably", () => {
+      // Judging the value means compiling the rules that read it, so it stays
+      // deferred — and unlike a rejected name, it can be undone.
+      const scanner = yarax.compile("rule r { condition: x_int > 3 }", {
+        defineVariables: { x_int: 1 },
+      });
+      scanner.defineVariable("x_int", "a string");
+      strictEqual(scanner.recompilations(), 0, "a value change must not rebuild");
+      throws(
+        () => scanner.ruleCount,
+        /mismatching types/,
+        "the conflict reports on the read that needs the rules",
+      );
+      scanner.defineVariable("x_int", 7);
+      strictEqual(
+        scanner.isMatch(Buffer.from("")),
+        true,
+        "redefining with a matching type must recover the scanner",
+      );
+    });
+
     it("should keep sources out of previously-set namespaces", () => {
       const scanner = yarax.compile("rule in_x { condition: true }", {
         namespace: "x",

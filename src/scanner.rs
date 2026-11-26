@@ -11,7 +11,7 @@ use crate::binary::{extract_binary_scan_results, BinaryScanResult, BinaryScanTas
 use crate::compiler::{
   add_source_to_compiler_tolerant, apply_compiler_options, apply_stored_compiler_options,
   collect_ignored_rules, ensure_no_uncovered_errors, ignored_module_warnings,
-  replay_sources_to_wasm, stored_options_from, StoredCompilerOptions,
+  replay_sources_to_wasm, stored_options_from, validate_sources_standalone, StoredCompilerOptions,
 };
 use crate::error::{io_error_to_napi, scan_error_to_napi};
 use crate::types::{
@@ -44,6 +44,24 @@ pub(crate) struct CachedScanner {
   rules: Arc<Rules>,
 }
 
+/// The rule set and everything derived from compiling it.
+///
+/// All of it is a function of [`YaraX::rule_sources`] plus the stored options
+/// and globals, so instead of being rebuilt on every mutation it is rebuilt on
+/// demand by [`YaraX::ensure_compiled`] and held behind a `RefCell` so the
+/// readers (`getRules()`, `serialize()`, a scan) can refresh it through
+/// `&self`.
+struct CompiledState {
+  rules: Arc<Rules>,
+  /// The concatenated sources, kept for WASM emission. `None` while no source
+  /// is known (a scanner restored by `deserialize()`), which is what makes
+  /// emission report that no source is available.
+  source_code: Option<String>,
+  warnings: Vec<CompilerWarning>,
+  ignored_rules: Vec<IgnoredRule>,
+  compilation_errors: Vec<CompilerError>,
+}
+
 /// A rule source together with the file it was read from, when there was one.
 ///
 /// The origin is replayed on every incremental recompilation so diagnostics
@@ -60,33 +78,32 @@ pub(crate) struct StoredRuleSource {
 /// data and files. It includes performance optimizations like scanner caching.
 #[napi]
 pub struct YaraX {
-  /// The compiled YARA rules.
-  pub(crate) rules: Arc<Rules>,
-  /// The source code used to compile the YARA rules.
-  pub(crate) source_code: Option<String>,
+  /// The compiled rule set and its reports; see [`CompiledState`].
+  compiled: RefCell<CompiledState>,
+  /// Whether `compiled` is behind `rule_sources`/`variables` and has to be
+  /// rebuilt before it is read.
+  ///
+  /// Set by the incremental mutators (`addRuleSource()`, `addRuleFile()`,
+  /// `defineVariable()`) instead of recompiling on the spot: a rebuild reads
+  /// every source, so doing it per call costs O(n²) over n additions (see
+  /// [`Self::ensure_compiled`]). A failed rebuild leaves this set, so the
+  /// error is reported again by the next read rather than being lost.
+  needs_rebuild: Cell<bool>,
+  /// Full rule-set compilations performed since construction.
+  ///
+  /// Instrumentation for the test that pins the coalescing above; see
+  /// [`Self::recompilations`].
+  recompiles: Cell<u32>,
   /// The source code segments and namespaces used to compile the YARA rules.
+  ///
+  /// This is the committed truth the rebuild replays; an invalid source is
+  /// rejected before it gets here, so a rejected addition leaves it untouched.
   pub(crate) rule_sources: Vec<StoredRuleSource>,
-  /// Any warnings generated during the compilation process.
-  pub(crate) warnings: Vec<CompilerWarning>,
   /// The variables defined for the YARA rules.
   pub(crate) variables: Option<HashMap<String, VariableValue>>,
-  /// Rules that were skipped during compilation, with the reason for each.
-  ///
-  /// Populated when rules were skipped: either because `ignore_invalid_rules`
-  /// was enabled and some rules failed to compile, or because rules depend on
-  /// ignored modules.
-  pub(crate) ignored_rules: Vec<IgnoredRule>,
   /// Whether rule compilation errors are tolerated (rules skipped and
   /// reported via `ignored_rules`) instead of aborting compilation.
   pub(crate) ignore_invalid_rules: bool,
-  /// Errors generated while compiling the rules that could not be attributed
-  /// to a single skipped rule (syntax errors, invalid UTF-8, banned or
-  /// unknown module imports, include failures).
-  ///
-  /// Populated when compilation ran with `ignore_invalid_rules`; the errors
-  /// are otherwise surfaced by aborting compilation. Mirrors the upstream
-  /// Python binding's `Compiler.errors()`.
-  pub(crate) compilation_errors: Vec<CompilerError>,
   /// The compiler options the rules were compiled with, minus the fields
   /// tracked separately (`namespace`, `define_variables`, and
   /// `ignore_invalid_rules`).
@@ -129,14 +146,18 @@ impl YaraX {
   /// Creates a new, unconfigured YaraX instance with the given rules and optional source code.
   pub(crate) fn new_empty(rules: Arc<Rules>, source_code: Option<String>) -> Self {
     Self {
-      rules,
-      source_code,
+      compiled: RefCell::new(CompiledState {
+        rules,
+        source_code,
+        warnings: Vec::new(),
+        ignored_rules: Vec::new(),
+        compilation_errors: Vec::new(),
+      }),
+      needs_rebuild: Cell::new(false),
+      recompiles: Cell::new(0),
       rule_sources: Vec::new(),
-      warnings: Vec::new(),
       variables: None,
-      ignored_rules: Vec::new(),
       ignore_invalid_rules: false,
-      compilation_errors: Vec::new(),
       stored_options: StoredCompilerOptions::default(),
       cached_scanner: RefCell::new(None),
       max_matches_per_pattern: Cell::new(None),
@@ -201,14 +222,18 @@ impl YaraX {
     }];
 
     Ok(YaraX {
-      rules: Arc::new(rules),
-      source_code: Some(source),
+      compiled: RefCell::new(CompiledState {
+        rules: Arc::new(rules),
+        source_code: Some(source),
+        warnings,
+        ignored_rules,
+        compilation_errors,
+      }),
+      needs_rebuild: Cell::new(false),
+      recompiles: Cell::new(0),
       rule_sources,
-      warnings,
       variables: stored_variables,
-      ignored_rules,
       ignore_invalid_rules,
-      compilation_errors,
       stored_options,
       cached_scanner: RefCell::new(None),
       max_matches_per_pattern: Cell::new(None),
@@ -280,19 +305,19 @@ impl YaraX {
     &self,
     compiler: &mut Compiler<'_>,
     variables: Option<&HashMap<String, VariableValue>>,
-    env: Env,
+    env: Option<&Env>,
   ) -> Result<()> {
     self.compile_sources_with_vars(&self.rule_sources, compiler, variables, env)
   }
 
-  /// Compiles an explicit source list, used both for the scanner's committed
-  /// sources and for staging a pending incremental addition.
+  /// Compiles an explicit source list with this scanner's stored options and
+  /// globals — the rebuild behind [`Self::ensure_compiled`].
   fn compile_sources_with_vars(
     &self,
     sources: &[StoredRuleSource],
     compiler: &mut Compiler<'_>,
     variables: Option<&HashMap<String, VariableValue>>,
-    env: Env,
+    env: Option<&Env>,
   ) -> Result<()> {
     apply_stored_compiler_options(compiler, &self.stored_options)?;
 
@@ -309,20 +334,20 @@ impl YaraX {
         source.source.namespace.as_deref(),
         source.origin.as_deref(),
         self.ignore_invalid_rules,
-        Some(&env),
+        env,
       )?;
     }
 
     if sources.is_empty() {
-      let source = self.source_code.as_deref().unwrap_or_default();
-      if !source.is_empty() {
+      let source_code = self.compiled.borrow().source_code.clone();
+      if let Some(source) = source_code.filter(|source| !source.is_empty()) {
         add_source_to_compiler_tolerant(
           compiler,
-          source,
+          &source,
           None,
           None,
           self.ignore_invalid_rules,
-          Some(&env),
+          env,
         )?;
       }
     }
@@ -334,37 +359,89 @@ impl YaraX {
     Ok(())
   }
 
-  /// Consumes the compiler produced by a recompilation, refreshing the
-  /// warnings, ignored-rules report and compilation errors, and publishing
-  /// the rebuilt rules.
-  fn refresh_compilation_state(&mut self, compiler: Compiler<'_>) {
-    self.warnings = get_compiler_warnings(&compiler);
-    self
-      .warnings
-      .extend(ignored_module_warnings(&self.stored_options));
-    self.ignored_rules = collect_ignored_rules(&compiler);
-    self.compilation_errors = get_compiler_errors(&compiler);
-    self.rules = Arc::new(compiler.build());
-    self.invalidate_scanner_cache();
+  /// Materializes the rule set if a recorded change has not been compiled yet.
+  ///
+  /// Every incremental mutator only records its change, so a batch of n
+  /// additions costs one compilation instead of n (and O(total) work instead of
+  /// O(total²)). The rebuild runs here, on the first read or scan that needs the
+  /// compiled rules; `env` decorates a rejected rebuild the way
+  /// `compile()` does (see
+  /// [`compile_error_to_napi`](crate::error::compile_error_to_napi)).
+  ///
+  /// A rejected rebuild leaves the previous rule set in place and the pending
+  /// flag set, so the caller meets the same error on every attempt until the
+  /// rules are fixed — nothing is silently dropped.
+  fn ensure_compiled(&self, env: Option<&Env>) -> Result<()> {
+    if !self.needs_rebuild.get() {
+      return Ok(());
+    }
+
+    let mut compiler = Compiler::new();
+    self.compile_all_sources_with_vars(&mut compiler, self.variables.as_ref(), env)?;
+    self.refresh_compilation_state(compiler);
+
+    Ok(())
   }
 
-  /// Rebuilds `source_code` from the current rule sources (used by WASM
-  /// emission when replaying a concatenated source).
-  fn rebuild_source_code(&mut self) {
-    let mut combined = String::new();
-    for (i, s) in self.rule_sources.iter().enumerate() {
-      if i > 0 {
-        combined.push('\n');
+  /// The compiled rules, rebuilding them first if anything is pending.
+  ///
+  /// Hands back the `Arc` rather than a borrow into `compiled`, so callers can
+  /// keep it across a scan or hand it to a background task without holding the
+  /// `RefCell` open.
+  fn current_rules(&self, env: Option<&Env>) -> Result<Arc<Rules>> {
+    self.ensure_compiled(env)?;
+    Ok(self.compiled.borrow().rules.clone())
+  }
+
+  /// Consumes the compiler produced by a rebuild, publishing the rules and the
+  /// reports derived from them, and clearing the pending flag.
+  fn refresh_compilation_state(&self, compiler: Compiler<'_>) {
+    let mut warnings = get_compiler_warnings(&compiler);
+    warnings.extend(ignored_module_warnings(&self.stored_options));
+    let ignored_rules = collect_ignored_rules(&compiler);
+    let compilation_errors = get_compiler_errors(&compiler);
+    let rules = Arc::new(compiler.build());
+
+    let mut compiled = self.compiled.borrow_mut();
+    compiled.rules = rules;
+    compiled.warnings = warnings;
+    compiled.ignored_rules = ignored_rules;
+    compiled.compilation_errors = compilation_errors;
+
+    // Keep the concatenated source in sync for WASM emission. A scanner that
+    // has never been given a source (restored by `deserialize()`) keeps
+    // `None`, so emission still says no source is available.
+    if !self.rule_sources.is_empty() {
+      let mut combined = String::new();
+      for (i, stored) in self.rule_sources.iter().enumerate() {
+        if i > 0 {
+          combined.push('\n');
+        }
+        combined.push_str(&stored.source.source);
       }
-      combined.push_str(&s.source.source);
+      compiled.source_code = Some(combined);
     }
-    self.source_code = Some(combined);
+    drop(compiled);
+
+    self.needs_rebuild.set(false);
+    self.recompiles.set(self.recompiles.get() + 1);
+    self.invalidate_scanner_cache();
   }
 
   /// Gets or creates a cached scanner for reuse.
   ///
-  /// This is a performance optimization that reuses scanner instances.
-  fn get_or_create_scanner(&self) -> Result<std::cell::RefMut<'_, Scanner<'static>>> {
+  /// This is a performance optimization that reuses scanner instances. Any
+  /// pending rule change is materialized first, which is what makes
+  /// `addRuleSource()` followed by `scan()` see the new rules.
+  fn get_or_create_scanner(
+    &self,
+    env: Option<&Env>,
+  ) -> Result<std::cell::RefMut<'_, Scanner<'static>>> {
+    // Kept outside the `cached_scanner` borrow: a rejected rebuild must not
+    // leave that borrow open, and the successful one closes it via
+    // `invalidate_scanner_cache`.
+    self.ensure_compiled(env)?;
+
     let mut cached = self.cached_scanner.borrow_mut();
 
     let needs_new_scanner = cached.is_none();
@@ -372,7 +449,7 @@ impl YaraX {
     if needs_new_scanner {
       // SAFETY: `rules` (below) is cloned into the cache beside the scanner, so
       // the borrow outlives every use of the `'static` reference.
-      let rules = Arc::clone(&self.rules);
+      let rules = self.compiled.borrow().rules.clone();
       let mut scanner = Scanner::new(unsafe {
         std::mem::transmute::<&yara_x::Rules, &'static yara_x::Rules>(&*rules)
       });
@@ -525,9 +602,13 @@ impl YaraX {
 #[napi]
 impl YaraX {
   /// Returns the compiler warnings generated during the compilation process.
+  ///
+  /// Includes a rule source added since the last read: the rule set is
+  /// materialized here rather than the report being one addition behind.
   #[napi]
-  pub fn get_warnings(&self) -> Vec<CompilerWarning> {
-    self.warnings.clone()
+  pub fn get_warnings(&self, env: Env) -> Result<Vec<CompilerWarning>> {
+    self.ensure_compiled(Some(&env))?;
+    Ok(self.compiled.borrow().warnings.clone())
   }
 
   /// Gets the rules that were skipped during compilation, if any.
@@ -540,8 +621,9 @@ impl YaraX {
   ///
   /// A vector of `IgnoredRule` objects (empty when nothing was skipped)
   #[napi]
-  pub fn get_ignored_rules(&self) -> Vec<IgnoredRule> {
-    self.ignored_rules.clone()
+  pub fn get_ignored_rules(&self, env: Env) -> Result<Vec<IgnoredRule>> {
+    self.ensure_compiled(Some(&env))?;
+    Ok(self.compiled.borrow().ignored_rules.clone())
   }
 
   /// Gets the errors generated while compiling the rules, when compilation
@@ -558,8 +640,9 @@ impl YaraX {
   ///
   /// A vector of `CompilerError` objects (empty when no errors occurred)
   #[napi]
-  pub fn get_compilation_errors(&self) -> Vec<CompilerError> {
-    self.compilation_errors.clone()
+  pub fn get_compilation_errors(&self, env: Env) -> Result<Vec<CompilerError>> {
+    self.ensure_compiled(Some(&env))?;
+    Ok(self.compiled.borrow().compilation_errors.clone())
   }
 
   /// Sets the maximum number of matches per pattern.
@@ -619,8 +702,8 @@ impl YaraX {
   /// excluded: only rules that accumulated more than 100 ms are reported, and
   /// timings cover synchronous scans since the last `clearProfilingData()`.
   #[napi]
-  pub fn get_slowest_rules(&self, n: u32) -> Result<Vec<crate::types::RuleProfile>> {
-    let scanner = self.get_or_create_scanner()?;
+  pub fn get_slowest_rules(&self, env: Env, n: u32) -> Result<Vec<crate::types::RuleProfile>> {
+    let scanner = self.get_or_create_scanner(Some(&env))?;
 
     Ok(
       scanner
@@ -638,8 +721,10 @@ impl YaraX {
 
   /// Discards the timing data behind `getSlowestRules()`.
   #[napi]
-  pub fn clear_profiling_data(&self) -> Result<()> {
-    self.get_or_create_scanner()?.clear_profiling_data();
+  pub fn clear_profiling_data(&self, env: Env) -> Result<()> {
+    self
+      .get_or_create_scanner(Some(&env))?
+      .clear_profiling_data();
     Ok(())
   }
 
@@ -687,43 +772,72 @@ impl YaraX {
     crate::batch::pool_build_count()
   }
 
+  /// Number of full rule-set compilations this scanner has performed.
+  ///
+  /// `0` for a scanner built by `compile()`/`fromFile()`/`deserialize()`, whose
+  /// rules arrive ready; `+1` per rebuild that a recorded change forced. One
+  /// batch of additions therefore reads as exactly one rebuild, which is what
+  /// the coalescing test asserts instead of timing. Instrumentation, not
+  /// consumer API, so it stays out of `index.d.ts` while remaining reachable on
+  /// the exported class.
+  #[napi(skip_typescript)]
+  pub fn recompilations(&self) -> u32 {
+    self.recompiles.get()
+  }
+
   /// Total number of compiled rules.
   #[napi(getter)]
-  pub fn rule_count(&self) -> u32 {
-    self.rules.iter().len() as u32
+  pub fn rule_count(&self, env: Env) -> Result<u32> {
+    self.ensure_compiled(Some(&env))?;
+    Ok(self.compiled.borrow().rules.iter().len() as u32)
   }
 
   /// Returns the names of all modules imported by the compiled rules (e.g. "pe", "elf", "hash").
   #[napi]
-  pub fn get_imports(&self) -> Vec<String> {
-    self.rules.imports().map(str::to_string).collect()
+  pub fn get_imports(&self, env: Env) -> Result<Vec<String>> {
+    self.ensure_compiled(Some(&env))?;
+    Ok(
+      self
+        .compiled
+        .borrow()
+        .rules
+        .imports()
+        .map(str::to_string)
+        .collect(),
+    )
   }
 
   /// Returns metadata for all compiled rules including identifier, namespace, tags, and patterns.
+  ///
+  /// Materializes a pending addition first, so this is also where a rule that is
+  /// only wrong in combination with the rest of the set reports — put it in the
+  /// same `try` as the additions to have every rejection land there.
   #[napi]
-  pub fn get_rules(&self) -> Vec<RuleInfo> {
-    self
-      .rules
-      .iter()
-      .map(|rule| RuleInfo {
-        identifier: rule.identifier().to_string(),
-        namespace: rule.namespace().to_string(),
-        tags: rule.tags().map(|t| t.identifier().to_string()).collect(),
-        patterns: rule
-          .patterns()
-          .map(|p| p.identifier().to_string())
-          .collect(),
-        meta: RuleMetadata::from_rule(&rule),
-      })
-      .collect()
+  pub fn get_rules(&self, env: Env) -> Result<Vec<RuleInfo>> {
+    let rules = self.current_rules(Some(&env))?;
+    Ok(
+      rules
+        .iter()
+        .map(|rule| RuleInfo {
+          identifier: rule.identifier().to_string(),
+          namespace: rule.namespace().to_string(),
+          tags: rule.tags().map(|t| t.identifier().to_string()).collect(),
+          patterns: rule
+            .patterns()
+            .map(|p| p.identifier().to_string())
+            .collect(),
+          meta: RuleMetadata::from_rule(&rule),
+        })
+        .collect(),
+    )
   }
 
   /// Helper to execute a synchronous scan closure with scanner caching and variable application.
-  fn with_sync_scanner<F, R>(&self, variables: &Option<Object>, op: F) -> Result<R>
+  fn with_sync_scanner<F, R>(&self, env: Env, variables: &Option<Object>, op: F) -> Result<R>
   where
     F: FnOnce(&mut Scanner<'_>) -> Result<R>,
   {
-    let mut scanner = self.get_or_create_scanner()?;
+    let mut scanner = self.get_or_create_scanner(Some(&env))?;
     scanner.apply_variables_from_map(&self.variables)?;
     scanner.apply_variables_from_object(variables)?;
     let res = op(&mut scanner);
@@ -744,7 +858,7 @@ impl YaraX {
     data: Buffer,
     variables: Option<Object>,
   ) -> Result<Vec<RuleMatch<'a>>> {
-    self.with_sync_scanner(&variables, |scanner| {
+    self.with_sync_scanner(env, &variables, |scanner| {
       let results = scanner.scan(data.as_ref()).map_err(scan_error_to_napi)?;
       Self::process_scan_results(results, env)
     })
@@ -760,7 +874,7 @@ impl YaraX {
     file_path: String,
     variables: Option<Object>,
   ) -> Result<Vec<RuleMatch<'a>>> {
-    self.with_sync_scanner(&variables, |scanner| {
+    self.with_sync_scanner(env, &variables, |scanner| {
       let results = scanner
         .scan_file(Path::new(&file_path))
         .map_err(scan_error_to_napi)?;
@@ -777,8 +891,8 @@ impl YaraX {
   #[napi(
     ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>"
   )]
-  pub fn is_match(&self, data: Buffer, variables: Option<Object>) -> Result<bool> {
-    self.with_sync_scanner(&variables, |scanner| {
+  pub fn is_match(&self, env: Env, data: Buffer, variables: Option<Object>) -> Result<bool> {
+    self.with_sync_scanner(env, &variables, |scanner| {
       let results = scanner.scan(data.as_ref()).map_err(scan_error_to_napi)?;
       Ok(results.matching_rules().next().is_some())
     })
@@ -793,8 +907,13 @@ impl YaraX {
   #[napi(
     ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean | bigint>"
   )]
-  pub fn is_file_match(&self, file_path: String, variables: Option<Object>) -> Result<bool> {
-    self.with_sync_scanner(&variables, |scanner| {
+  pub fn is_file_match(
+    &self,
+    env: Env,
+    file_path: String,
+    variables: Option<Object>,
+  ) -> Result<bool> {
+    self.with_sync_scanner(env, &variables, |scanner| {
       let results = scanner
         .scan_file(Path::new(&file_path))
         .map_err(scan_error_to_napi)?;
@@ -810,8 +929,13 @@ impl YaraX {
   #[napi(
     ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>"
   )]
-  pub fn scan_binary(&self, data: Buffer, variables: Option<Object>) -> Result<BinaryScanResult> {
-    self.with_sync_scanner(&variables, |scanner| {
+  pub fn scan_binary(
+    &self,
+    env: Env,
+    data: Buffer,
+    variables: Option<Object>,
+  ) -> Result<BinaryScanResult> {
+    self.with_sync_scanner(env, &variables, |scanner| {
       let results = scanner.scan(data.as_ref()).map_err(scan_error_to_napi)?;
       let (bytes, match_count, catalog) = extract_binary_scan_results(results);
       Ok(BinaryScanResult {
@@ -832,10 +956,11 @@ impl YaraX {
   )]
   pub fn scan_file_binary(
     &self,
+    env: Env,
     file_path: String,
     variables: Option<Object>,
   ) -> Result<BinaryScanResult> {
-    self.with_sync_scanner(&variables, |scanner| {
+    self.with_sync_scanner(env, &variables, |scanner| {
       let results = scanner
         .scan_file(Path::new(&file_path))
         .map_err(scan_error_to_napi)?;
@@ -852,8 +977,12 @@ impl YaraX {
   ///
   /// Ok(()) on success, or an error if emission fails
   #[napi]
-  pub fn emit_wasm_file(&self, output_path: String) -> Result<()> {
-    let source = self.source_code.as_ref().ok_or_else(|| {
+  pub fn emit_wasm_file(&self, env: Env, output_path: String) -> Result<()> {
+    // Materialize first: emission replays the sources, so a pending change has
+    // to be in them, and a rejected rule set must not emit a module.
+    self.ensure_compiled(Some(&env))?;
+
+    let source = self.compiled.borrow().source_code.clone().ok_or_else(|| {
       Error::new(
         Status::InvalidArg,
         "Cannot emit WASM file: source code not available",
@@ -904,8 +1033,9 @@ impl YaraX {
   /// the [`deserialize`](crate::deserialize) function, provided the same
   /// YARA-X version is used on both sides.
   #[napi]
-  pub fn serialize(&self) -> Result<Buffer> {
-    let bytes = self.rules.serialize().map_err(|e| {
+  pub fn serialize(&self, env: Env) -> Result<Buffer> {
+    let rules = self.current_rules(Some(&env))?;
+    let bytes = rules.serialize().map_err(|e| {
       Error::new(
         Status::GenericFailure,
         format!("Failed to serialize rules: {e}"),
@@ -926,13 +1056,15 @@ impl YaraX {
   )]
   pub fn scan_async(
     &self,
+    env: Env,
     data: Buffer,
     variables: Option<Object>,
   ) -> Result<AsyncTask<crate::tasks::ScanTask>> {
     let vars_map = self.combine_variables(variables)?;
+    let rules = self.current_rules(Some(&env))?;
 
     Ok(AsyncTask::new(crate::tasks::ScanTask::new(
-      self.rules.clone(),
+      rules,
       crate::tasks::ScanTarget::Buffer(data.to_vec()),
       vars_map,
       self.task_scan_options(false),
@@ -946,13 +1078,15 @@ impl YaraX {
   )]
   pub fn scan_file_async(
     &self,
+    env: Env,
     file_path: String,
     variables: Option<Object>,
   ) -> Result<AsyncTask<crate::tasks::ScanTask>> {
     let vars_map = self.combine_variables(variables)?;
+    let rules = self.current_rules(Some(&env))?;
 
     Ok(AsyncTask::new(crate::tasks::ScanTask::new(
-      self.rules.clone(),
+      rules,
       crate::tasks::ScanTarget::File(file_path),
       vars_map,
       self.task_scan_options(true),
@@ -972,13 +1106,15 @@ impl YaraX {
   )]
   pub fn is_match_async(
     &self,
+    env: Env,
     data: Buffer,
     variables: Option<Object>,
   ) -> Result<AsyncTask<crate::tasks::IsMatchTask>> {
     let vars_map = self.combine_variables(variables)?;
+    let rules = self.current_rules(Some(&env))?;
 
     Ok(AsyncTask::new(crate::tasks::IsMatchTask::new(
-      self.rules.clone(),
+      rules,
       crate::tasks::ScanTarget::Buffer(data.to_vec()),
       vars_map,
       self.task_scan_options(false),
@@ -995,13 +1131,15 @@ impl YaraX {
   )]
   pub fn is_file_match_async(
     &self,
+    env: Env,
     file_path: String,
     variables: Option<Object>,
   ) -> Result<AsyncTask<crate::tasks::IsMatchTask>> {
     let vars_map = self.combine_variables(variables)?;
+    let rules = self.current_rules(Some(&env))?;
 
     Ok(AsyncTask::new(crate::tasks::IsMatchTask::new(
-      self.rules.clone(),
+      rules,
       crate::tasks::ScanTarget::File(file_path),
       vars_map,
       self.task_scan_options(true),
@@ -1018,13 +1156,15 @@ impl YaraX {
   )]
   pub fn scan_binary_async(
     &self,
+    env: Env,
     data: Buffer,
     variables: Option<Object>,
   ) -> Result<AsyncTask<BinaryScanTask>> {
     let vars_map = self.combine_variables(variables)?;
+    let rules = self.current_rules(Some(&env))?;
 
     Ok(AsyncTask::new(BinaryScanTask::new(
-      self.rules.clone(),
+      rules,
       crate::tasks::ScanTarget::Buffer(data.to_vec()),
       vars_map,
       self.task_scan_options(false),
@@ -1038,13 +1178,15 @@ impl YaraX {
   )]
   pub fn scan_file_binary_async(
     &self,
+    env: Env,
     file_path: String,
     variables: Option<Object>,
   ) -> Result<AsyncTask<BinaryScanTask>> {
     let vars_map = self.combine_variables(variables)?;
+    let rules = self.current_rules(Some(&env))?;
 
     Ok(AsyncTask::new(BinaryScanTask::new(
-      self.rules.clone(),
+      rules,
       crate::tasks::ScanTarget::File(file_path),
       vars_map,
       self.task_scan_options(true),
@@ -1071,10 +1213,15 @@ impl YaraX {
   #[napi(ts_return_type = "Promise<void>")]
   pub fn emit_wasm_file_async(
     &self,
+    env: Env,
     output_path: String,
   ) -> Result<AsyncTask<crate::tasks::EmitWasmFileTask>> {
+    // Same reason as `emit_wasm_file`: the snapshot handed to the task has to
+    // include a pending change, and a rejected rule set must not emit.
+    self.ensure_compiled(Some(&env))?;
+
     Ok(AsyncTask::new(crate::tasks::EmitWasmFileTask {
-      source_code: self.source_code.clone(),
+      source_code: self.compiled.borrow().source_code.clone(),
       rule_sources: self
         .rule_sources
         .iter()
@@ -1096,10 +1243,18 @@ impl YaraX {
   ///
   /// # Performance
   ///
-  /// This method recompiles all rules (existing + new) on each call, resulting
-  /// in O(n) time per call and O(n²) total for n incremental additions.
-  /// For better performance with many rules, use `compile()` with all sources
-  /// at once, or use `add_rule_sources()` for batch addition.
+  /// The source is checked on its own and the rule set is rebuilt once, when it
+  /// is next read or scanned, so n additions cost one compilation rather than n
+  /// — adding 120 rule files costs one rebuild instead of 120.
+  ///
+  /// A rule that is only wrong in combination with the rest of the set — it
+  /// references a rule or global the other sources do not define, reuses one of
+  /// their names, or clashes with an identifier one of them brings in — is
+  /// checked by that rebuild, so it throws from the next
+  /// `getRules()`/`serialize()`/`scan()` instead of here. Call `getRules()`
+  /// after the additions to keep the strict timing; use `ignoreInvalidRules` to
+  /// skip and report such a rule instead, since a strict scanner has nothing
+  /// that can skip it and will report it on every read.
   #[napi]
   pub fn add_rule_source(
     &mut self,
@@ -1116,16 +1271,12 @@ impl YaraX {
     )
   }
 
-  /// Adds multiple rule sources to the YARA compiler in a single compilation pass.
+  /// Adds multiple rule sources to the YARA compiler.
   ///
-  /// This is more efficient than calling `add_rule_source()` multiple times,
-  /// as it compiles all sources in a single pass instead of recompiling
-  /// existing rules for each addition.
-  ///
-  /// # Performance
-  ///
-  /// O(n + m) where n = existing rules, m = new rules (single compilation pass).
-  /// Compared to calling `add_rule_source()` m times: O(n × m + m²).
+  /// The batch is checked as a unit, so a source in it may reference a rule or
+  /// tag defined by another source in the same batch. It costs the same single
+  /// deferred rebuild as the same number of `addRuleSource()` calls; prefer it
+  /// when the sources are already at hand.
   #[napi]
   pub fn add_rule_sources(&mut self, env: Env, rule_sources: Vec<RuleSource>) -> Result<()> {
     let entries = rule_sources
@@ -1138,7 +1289,7 @@ impl YaraX {
     self.add_rule_sources_internal(env, entries)
   }
 
-  /// Adds sources that may carry a file origin, recompiling all of them.
+  /// Adds sources that may carry a file origin, deferring the rebuild.
   fn add_rule_sources_internal(
     &mut self,
     env: Env,
@@ -1148,26 +1299,39 @@ impl YaraX {
       return Ok(());
     }
 
-    // Stage the new list and compile it before committing, so a rejected
-    // source cannot poison later recompilations.
-    let mut candidate = self.rule_sources.clone();
-    candidate.extend(rule_sources);
+    // Reject a broken source before recording it: the caller still meets it in
+    // this call, and a rejected source cannot poison later additions. The check
+    // reads only the new sources, which is what keeps a loop of additions
+    // linear; see `ensure_compiled` for the deferred rebuild.
+    let sources = rule_sources
+      .iter()
+      .map(|entry| entry.source.clone())
+      .collect::<Vec<_>>();
+    let origins = rule_sources
+      .iter()
+      .map(|entry| entry.origin.clone())
+      .collect::<Vec<_>>();
 
-    let mut compiler = Compiler::new();
-    // Replay the stored options and variables and recompile all sources in a
-    // single pass.
-    self.compile_sources_with_vars(&candidate, &mut compiler, self.variables.as_ref(), env)?;
+    validate_sources_standalone(
+      &self.stored_options,
+      self.variables.as_ref(),
+      self.ignore_invalid_rules,
+      &sources,
+      &origins,
+      Some(&env),
+    )?;
 
-    self.rule_sources = candidate;
-    self.refresh_compilation_state(compiler);
-
-    // Keep source_code in sync for WASM emission
-    self.rebuild_source_code();
+    self.rule_sources.extend(rule_sources);
+    self.needs_rebuild.set(true);
 
     Ok(())
   }
 
   /// Adds a rule file to the YARA compiler.
+  ///
+  /// `include` statements resolve next to this file, and diagnostics name it.
+  /// Like `addRuleSource()`, the addition is cheap: the rebuild happens when the
+  /// rule set is next read or scanned.
   ///
   /// Ok(()) on success, or an error if reading or compilation fails
   #[napi]
@@ -1193,21 +1357,37 @@ impl YaraX {
 
   /// Defines a variable for the YARA compiler.
   ///
+  /// The definition is checked here — the name must be one YARA-X accepts —
+  /// rather than by the deferred rebuild: a global cannot be removed or renamed
+  /// afterwards, so recording a name the compiler rejects would leave every
+  /// later read meeting `invalid identifier` with nothing left to undo. A
+  /// rejected call leaves the globals as they were, like a rejected addition.
+  ///
+  /// What is left to the rebuild is how the existing rules read the value, and
+  /// that is recoverable: a type conflict reports `E003` on the next read, and
+  /// redefining the same name with a matching type fixes the rule set.
   #[napi(ts_args_type = "name: string, value: string | number | boolean | bigint")]
   pub fn define_variable(&mut self, env: Env, name: String, value: Unknown) -> Result<()> {
     let value = variable_value_from_unknown(value, &name)?;
 
-    // Stage the variable in a local copy so `self.variables` is only updated
-    // once the recompilation succeeds (the rules that reference the variable
-    // must be compiled with it defined).
+    // Staged so a rejected definition commits nothing. With no sources to add,
+    // `validate_sources_standalone` applies the stored options and this
+    // candidate global set and nothing else, which is where YARA-X rejects an
+    // invalid identifier.
     let mut variables = self.variables.clone().unwrap_or_default();
     variables.insert(name, value);
 
-    let mut compiler = Compiler::new();
-    self.compile_all_sources_with_vars(&mut compiler, Some(&variables), env)?;
+    validate_sources_standalone(
+      &self.stored_options,
+      Some(&variables),
+      self.ignore_invalid_rules,
+      &[],
+      &[],
+      Some(&env),
+    )?;
 
-    self.refresh_compilation_state(compiler);
     self.variables = Some(variables);
+    self.needs_rebuild.set(true);
 
     Ok(())
   }
@@ -1219,16 +1399,18 @@ impl YaraX {
   )]
   pub fn scan_files(
     &self,
+    env: Env,
     file_paths: Vec<String>,
     options: Option<BatchScanOptions>,
     variables: Option<Object>,
   ) -> Result<AsyncTask<BatchScanTask>> {
     let combined_vars = self.combine_variables(variables)?;
+    let rules = self.current_rules(Some(&env))?;
     let scan_opts = self.task_scan_options(true);
     let batch_opts = options.unwrap_or_default();
 
     Ok(AsyncTask::new(BatchScanTask::new(
-      self.rules.clone(),
+      rules,
       BatchScanTarget::Files(file_paths),
       scan_opts,
       combined_vars,
@@ -1250,9 +1432,10 @@ impl YaraX {
     let combined_vars = self.combine_variables(variables)?;
     let scan_opts = self.task_scan_options(true);
     let batch_opts = options.unwrap_or_default();
+    let rules = self.current_rules(Some(&env))?;
 
     let output = execute_batch_scan(
-      self.rules.clone(),
+      rules,
       file_paths,
       0,
       Vec::new(),
@@ -1271,16 +1454,18 @@ impl YaraX {
   )]
   pub fn scan_directory(
     &self,
+    env: Env,
     dir_path: String,
     options: Option<BatchScanOptions>,
     variables: Option<Object>,
   ) -> Result<AsyncTask<BatchScanTask>> {
     let combined_vars = self.combine_variables(variables)?;
+    let rules = self.current_rules(Some(&env))?;
     let scan_opts = self.task_scan_options(true);
     let batch_opts = options.unwrap_or_default();
 
     Ok(AsyncTask::new(BatchScanTask::new(
-      self.rules.clone(),
+      rules,
       BatchScanTarget::Directory(dir_path),
       scan_opts,
       combined_vars,
@@ -1317,8 +1502,10 @@ impl YaraX {
       &filter,
     )?;
 
+    let rules = self.current_rules(Some(&env))?;
+
     let output = execute_batch_scan(
-      self.rules.clone(),
+      rules,
       files,
       filtered_files,
       traversal_errors,
