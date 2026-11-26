@@ -6,9 +6,10 @@
 
 use crate::tasks::{BaseYaraTask, ScanTarget, TaskScanOptions};
 use crate::types::{MatchData, RuleMatch, RuleMetadata, VariableMap};
-use napi::bindgen_prelude::Buffer;
-use napi::{Env, Result, Task};
+use napi::bindgen_prelude::{Buffer, Object, ObjectFinalize, ObjectRef, ToNapiValue};
+use napi::{Env, JsValue, Result, Task};
 use napi_derive::napi;
+use std::cell::RefCell;
 use std::sync::Arc;
 use yara_x::Rules;
 
@@ -30,6 +31,15 @@ pub struct BinaryMatchRecord {
 }
 
 const _: () = assert!(std::mem::size_of::<BinaryMatchRecord>() == 24);
+
+/// Re-handles a resolved object for the duration of the calling callback.
+///
+/// `ObjectRef::get_value` ties the handle it returns to the borrow of its `Env`
+/// argument, while a `#[napi]` method returns a handle valid for the callback.
+/// The underlying value is the same object, created in this environment.
+fn rehandle<'env>(env: &Env, object: Object<'_>) -> Object<'env> {
+  Object::from_raw(env.raw(), object.raw())
+}
 
 /// Set in [`BinaryMatchRecord::flags`] when the match was produced through an
 /// XOR key, that is when the pattern was compiled with an `xor` modifier.
@@ -92,12 +102,35 @@ pub struct BinaryScanResult {
   pub catalog: BinaryScanCatalog,
 }
 
-/// A zero-copy accessor view wrapping binary scan results.
-#[napi]
+/// An accessor view over binary scan results.
+///
+/// The record buffer stays in one Rust allocation and `getOffset()` and friends
+/// read 24 bytes of it per call, so no match data is copied. The `catalog`
+/// object is built on first access and reused; `buffer` hands back a copy of
+/// the record bytes.
+#[napi(custom_finalize)]
 pub struct BinaryMatchView {
   buffer: Buffer,
   match_count: u32,
   catalog: BinaryScanCatalog,
+  /// JavaScript object for [`BinaryMatchView::catalog`], built on first access.
+  ///
+  /// Held as a reference rather than an `Object` because a handle may not
+  /// outlive the `Env` it was read with; the reference is what keeps the built
+  /// object alive between reads. `finalize` releases it, so the catalog is
+  /// collectable with the view, and napi's leak check stays on to report a
+  /// reference that outlives that path.
+  catalog_js: RefCell<Option<ObjectRef>>,
+}
+
+impl ObjectFinalize for BinaryMatchView {
+  /// Releases the catalog reference when the JavaScript object is collected.
+  fn finalize(self, env: Env) -> Result<()> {
+    if let Some(catalog) = self.catalog_js.borrow_mut().take() {
+      catalog.unref(&env)?;
+    }
+    Ok(())
+  }
 }
 
 #[napi]
@@ -109,6 +142,7 @@ impl BinaryMatchView {
       buffer: result.buffer,
       match_count: result.match_count,
       catalog: result.catalog,
+      catalog_js: RefCell::new(None),
     }
   }
 
@@ -119,12 +153,35 @@ impl BinaryMatchView {
   }
 
   /// Metadata catalog of rules and patterns.
-  #[napi(getter)]
-  pub fn catalog(&self) -> BinaryScanCatalog {
-    self.catalog.clone()
+  ///
+  /// Built on first read and handed back by reference, so repeated reads cost
+  /// one dereference and `view.catalog === view.catalog`. The object is shared
+  /// with every later read: treat it as read-only, and copy the parts you need
+  /// to change.
+  #[napi(getter, ts_return_type = "BinaryScanCatalog")]
+  pub fn catalog<'env>(&self, env: Env) -> Result<Object<'env>> {
+    if let Some(cached) = self.catalog_js.borrow().as_ref() {
+      return Ok(rehandle(&env, cached.get_value(&env)?));
+    }
+
+    let mut slot = self.catalog_js.borrow_mut();
+    // Raced with itself only if a getter reentered this callback; rebuilding
+    // then would leak a reference, so re-check under the write borrow.
+    if let Some(cached) = slot.as_ref() {
+      return Ok(rehandle(&env, cached.get_value(&env)?));
+    }
+
+    let raw = unsafe { ToNapiValue::to_napi_value(env.raw(), self.catalog.clone()) }?;
+    let created = Object::from_raw(env.raw(), raw).create_ref::<true>()?;
+    let value = rehandle(&env, created.get_value(&env)?);
+    *slot = Some(created);
+    Ok(value)
   }
 
-  /// Returns the underlying flat binary match records buffer.
+  /// Returns a copy of the flat binary match records buffer.
+  ///
+  /// Copies the records on every read; keep the returned buffer, or read the
+  /// fields through `getOffset()` and friends, when the record set is large.
   #[napi(getter)]
   pub fn buffer(&self) -> Buffer {
     Buffer::from(self.buffer.as_ref())

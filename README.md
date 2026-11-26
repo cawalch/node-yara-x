@@ -306,10 +306,12 @@ for (let i = 0; i < view.matchCount; i++) {
 
 // The buffer is the flat record array itself: 24 bytes per match, little-endian
 // (ruleId u32, patternId u32, offset u64, length u32, flags u32).
-for (let offset = 0; offset < view.buffer.length; offset += 24) {
-  const ruleId = view.buffer.readUInt32LE(offset);
-  const matchOffset = Number(view.buffer.readBigUInt64LE(offset + 8));
-  const flags = view.buffer.readUInt32LE(offset + 20);
+// `view.buffer` copies the records on every read, so take it once.
+const records = view.buffer;
+for (let offset = 0; offset < records.length; offset += 24) {
+  const ruleId = records.readUInt32LE(offset);
+  const matchOffset = Number(records.readBigUInt64LE(offset + 8));
+  const flags = records.readUInt32LE(offset + 20);
 }
 
 // Lazy materialization back to standard RuleMatch[] objects when needed
@@ -318,7 +320,7 @@ const ruleMatches = view.toRuleMatches(sampleBuffer);
 
 The `flags` word carries the XOR key of a match: bits 0-7 hold the key and bit 8 is set when the pattern was compiled with an `xor` modifier. `getXorKey(index)` decodes it for you, and `toRuleMatches()` fills `MatchData.xorKey`, so parsing the flags by hand is only necessary if you consume the raw buffer.
 
-The catalog carries each matching rule's `meta`, `tags`, and pattern identifiers, and `toRuleMatches()` materializes the same `meta` object as `scan()`. `getRules()` exposes the same metadata for every compiled rule.
+The catalog carries each matching rule's `meta`, `tags`, and pattern identifiers, and `toRuleMatches()` materializes the same `meta` object as `scan()`. `getRules()` exposes the same metadata for every compiled rule. `view.catalog` is built on its first read and shared with every later one, so it is cheap to re-read and `view.catalog === view.catalog` holds; treat it as read-only, since a change made through one read is visible in the next.
 
 ## Inspect compiled rules
 

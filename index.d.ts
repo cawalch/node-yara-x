@@ -9,15 +9,34 @@
  */
 export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-wasip1'
 
-/** A zero-copy accessor view wrapping binary scan results. */
+/**
+ * An accessor view over binary scan results.
+ *
+ * The record buffer stays in one Rust allocation and `getOffset()` and friends
+ * read 24 bytes of it per call, so no match data is copied. The `catalog`
+ * object is built on first access and reused; `buffer` hands back a copy of
+ * the record bytes.
+ */
 export declare class BinaryMatchView {
   /** Creates a new `BinaryMatchView` from a `BinaryScanResult`. */
   constructor(result: BinaryScanResult)
   /** Total number of matches in the view. */
   get matchCount(): number
-  /** Metadata catalog of rules and patterns. */
+  /**
+   * Metadata catalog of rules and patterns.
+   *
+   * Built on first read and handed back by reference, so repeated reads cost
+   * one dereference and `view.catalog === view.catalog`. The object is shared
+   * with every later read: treat it as read-only, and copy the parts you need
+   * to change.
+   */
   get catalog(): BinaryScanCatalog
-  /** Returns the underlying flat binary match records buffer. */
+  /**
+   * Returns a copy of the flat binary match records buffer.
+   *
+   * Copies the records on every read; keep the returned buffer, or read the
+   * fields through `getOffset()` and friends, when the record set is large.
+   */
   get buffer(): Buffer
   /** Gets the rule index for the match record at `index`. */
   getRuleId(index: number): number | null
