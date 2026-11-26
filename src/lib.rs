@@ -88,7 +88,11 @@ pub fn rules_format_info() -> Result<RulesFormatInfo> {
 /// Reads the format version that the linked YARA-X writes into blobs.
 ///
 /// The constant is private upstream, so derive it once by serializing empty
-/// rules and reading the header.
+/// rules and reading the header. The result is cached for the process, but the
+/// derivation is lazy: the **first** `rulesFormatInfo()` call pays one empty
+/// serialization (6.9 ms on a debug build here, ~0.0006 ms for every later
+/// call), so call it once at startup rather than per scan if that first-call
+/// latency matters. Not measured on a release build.
 fn rules_format_version() -> Result<u32> {
   static FORMAT_VERSION: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
 

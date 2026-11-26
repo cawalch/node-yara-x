@@ -293,15 +293,20 @@ fn thread_pool(threads: usize) -> Result<Arc<rayon::ThreadPool>> {
 
   static POOLS: OnceLock<Mutex<PoolCache>> = OnceLock::new();
   let cache = POOLS.get_or_init(|| Mutex::new(PoolCache::default()));
-  let mut cache = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-  cache.clock = cache.clock.wrapping_add(1);
-  let now = cache.clock;
 
-  if let Some(entry) = cache.pools.get_mut(&threads) {
-    entry.1 = now;
-    return Ok(Arc::clone(&entry.0));
+  // Fast path: a warm pool of this size already exists.
+  {
+    let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.clock = guard.clock.wrapping_add(1);
+    let now = guard.clock;
+    if let Some(entry) = guard.pools.get_mut(&threads) {
+      entry.1 = now;
+      return Ok(Arc::clone(&entry.0));
+    }
   }
 
+  // Built with no lock held: spawning `threads` OS threads while another
+  // caller waits on the cache mutex would serialise two independent scans.
   let pool = Arc::new(
     rayon::ThreadPoolBuilder::new()
       .num_threads(threads)
@@ -314,20 +319,37 @@ fn thread_pool(threads: usize) -> Result<Arc<rayon::ThreadPool>> {
       })?,
   );
 
-  if cache.pools.len() >= POOL_CACHE_SIZE {
-    // Evict the least recently used size. Only the map entry is dropped; any
-    // in-flight call keeps the pool alive through its own Arc clone.
-    let lru = cache
-      .pools
-      .iter()
-      .min_by_key(|entry| entry.1 .1)
-      .map(|(threads, _)| *threads);
-    if let Some(threads) = lru {
-      cache.pools.remove(&threads);
-    }
-  }
+  let evicted = {
+    let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.clock = guard.clock.wrapping_add(1);
+    let now = guard.clock;
 
-  cache.pools.insert(threads, (Arc::clone(&pool), now));
+    // Another caller built the same size meanwhile; keep its warm pool and let
+    // ours drop on its own.
+    if let Some(existing) = guard.pools.get(&threads) {
+      return Ok(Arc::clone(&existing.0));
+    }
+
+    // Evict the least recently used size. Only the map entry leaves here; an
+    // in-flight call keeps that pool alive through its own Arc clone.
+    let mut evicted = None;
+    if guard.pools.len() >= POOL_CACHE_SIZE {
+      let lru = guard
+        .pools
+        .iter()
+        .min_by_key(|entry| entry.1 .1)
+        .map(|(size, _)| *size);
+      if let Some(size) = lru {
+        evicted = guard.pools.remove(&size).map(|(pool, _)| pool);
+      }
+    }
+
+    guard.pools.insert(threads, (Arc::clone(&pool), now));
+    evicted
+  };
+
+  // Joining an evicted pool's threads must not happen under the cache lock.
+  drop(evicted);
   Ok(pool)
 }
 
