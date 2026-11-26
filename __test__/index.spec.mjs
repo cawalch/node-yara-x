@@ -4,6 +4,7 @@ import { join, dirname } from "path";
 import { strictEqual, ok, fail, throws, deepStrictEqual } from "assert";
 import { describe, it, before, after } from "node:test";
 import { fileURLToPath } from "url";
+import { spawnSync } from "node:child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -2964,6 +2965,26 @@ describe("Rule logging and profiling", () => {
     scanner.scan(Buffer.from("x"));
     await sleep(20);
     strictEqual(messages.length, 1, "clearing the callback stops delivery");
+  });
+
+  it("should not keep the process alive while a console log callback is set", () => {
+    const indexPath = new URL("../index.js", import.meta.url).href;
+    const script = `
+      import { compile } from ${JSON.stringify(indexPath)};
+      const scanner = compile('import "console" rule ExitCheck { condition: console.log("bye") and true }');
+      scanner.setConsoleLog(() => {});
+      scanner.scan(Buffer.from("x"));
+      console.log("scan finished");
+    `;
+
+    const child = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
+      encoding: "utf8",
+      timeout: 20_000,
+    });
+
+    strictEqual(child.signal, null, `child was killed: ${child.stderr}`);
+    strictEqual(child.status, 0, child.stderr);
+    ok(child.stdout.includes("scan finished"), child.stdout);
   });
 
   it("should report slow rules above the throttling threshold", () => {

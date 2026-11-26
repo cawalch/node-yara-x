@@ -132,6 +132,11 @@ export declare class YaraX {
    *
    * Messages arrive on the Node.js event loop, so a synchronous scan returns
    * before the callback runs. Pass nothing to discard rule output again.
+   *
+   * The callback handle is un-referenced, so setting one does not keep the
+   * Node.js process alive: a script that finishes scanning exits normally.
+   * A consequence is that rule-log messages still queued when the process
+   * exits may not be delivered.
    */
   setConsoleLog(callback?: (((arg: string) => unknown)) | undefined | null): void
   /**

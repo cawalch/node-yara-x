@@ -568,6 +568,8 @@ rules.scan(buffer); // logs on the next tick
 rules.setConsoleLog(); // stop receiving messages
 ```
 
+Setting a callback does not keep the Node.js process alive, so a script that finishes scanning exits normally. Rule-log messages still queued when the process exits may not be delivered.
+
 ### Rule profiling
 
 `getSlowestRules()` reports which rules dominate scan time, which is usually what you need when a rule set is slower than expected:
