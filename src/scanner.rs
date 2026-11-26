@@ -1432,9 +1432,11 @@ impl YaraX {
   ///
   /// `signal` cancels the sweep: files not started yet are skipped and
   /// the promise resolves with the partial sweep, `cancelled` true and
-  /// `cancelledFiles` counting what was skipped. Cancelling before the first
-  /// file starts rejects with `name` `AbortError` instead, like the other async
-  /// entry points.
+  /// `cancelledFiles` counting what was skipped. Cancelling while the sweep
+  /// is still queued rejects with `name` `AbortError` instead, like the other
+  /// async entry points; once the sweep has started a cancellation always
+  /// resolves, so one that lands before the first file is scanned reports a
+  /// cancelled result with nothing scanned rather than a rejection.
   #[napi(
     ts_args_type = "filePaths: Array<string>, options?: BatchScanOptions | undefined | null, variables?: Record<string, string | number | boolean | bigint> | undefined | null, signal?: AbortSignal",
     ts_return_type = "Promise<BatchScanResult>"

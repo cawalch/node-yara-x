@@ -103,8 +103,8 @@ const result = await sweep;
 if (result.cancelled) console.log(`Stopped after ${result.scannedFiles} files; ${result.cancelledFiles} never started.`);
 ```
 
-- Fired **before the call or while it is queued** — the promise rejects (it never throws from the call) with `name: "AbortError"` and `code: "Cancelled"`, and nothing is scanned.
-- Fired **part-way through a batch** — the promise resolves with the partial sweep, `cancelled: true`, and `cancelledFiles` counting the files that never started; directory traversal stops too.
+- Fired **before the call or while it is queued** — the promise rejects (it never throws from the call) with `name: "AbortError"`, `kind: "cancelled"`, and `code: "Cancelled"`, and nothing is scanned.
+- Fired **part-way through a batch** — the promise resolves with the partial sweep, `cancelled: true`, and `cancelledFiles` counting the files that never started; directory traversal stops too. Once a batch has started, cancellation resolves rather than rejects — so branch on `cancelled`, not on `scannedFiles`, which can be 0 if the abort lands before the first file.
 - Fired **while a single scan is already running** — nothing: a scan in flight cannot be interrupted, so `setTimeout()` and `setMaxScanSize()` are the bounds for that, and the synchronous methods take no `signal` at all because they block the thread that would deliver it.
 
 While a scan is in flight the binding hangs one `abort` listener on your signal and takes it off the moment the promise settles, so `signal.onabort` and your own listeners stay untouched.

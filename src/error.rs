@@ -42,6 +42,8 @@ pub const KIND_MMAP: &str = "mmap";
 pub const KIND_PROTOBUF: &str = "protobuf";
 /// A rule referenced a module this build does not include.
 pub const KIND_UNKNOWN_MODULE: &str = "unknown-module";
+/// A scan cancelled through an `AbortSignal` (#285).
+pub const KIND_CANCELLED: &str = "cancelled";
 /// A failure the wrapper does not classify yet.
 pub const KIND_UNKNOWN: &str = "unknown";
 
@@ -52,17 +54,16 @@ pub const KIND_UNKNOWN: &str = "unknown";
 /// or the `code` it already had: any failure to build or stamp the object
 /// throws the plain error instead.
 fn stamped(env: Option<&Env>, status: Status, message: String, kind: &'static str) -> Error {
-  stamped_prop(env, status, message, "kind", kind)
+  stamped_props(env, status, message, &[("kind", kind)])
 }
 
-/// Builds the error to throw with one own string property `key`; the abort rejection
-/// uses this for `name`, which an `Error` built in Rust cannot carry.
-fn stamped_prop(
+/// Builds the error to throw with each `(key, value)` as an own string property; the
+/// abort rejection uses this for `name`, which an `Error` built in Rust cannot carry.
+fn stamped_props(
   env: Option<&Env>,
   status: Status,
   message: String,
-  key: &str,
-  value: &str,
+  props: &[(&str, &str)],
 ) -> Error {
   let Some(env) = env else {
     return Error::new(status, message);
@@ -70,8 +71,10 @@ fn stamped_prop(
 
   match env.create_error(Error::new(status, message.clone())) {
     Ok(mut object) => {
-      if object.set_named_property(key, value).is_err() {
-        return Error::new(status, message);
+      for &(key, value) in props {
+        if object.set_named_property(key, value).is_err() {
+          return Error::new(status, message);
+        }
       }
       // The object built here is the object that is thrown; see the note in
       // [`decorated`].
@@ -88,19 +91,19 @@ const ABORT_MESSAGE: &str = "AbortError";
 
 /// Builds the rejection for work cancelled through an `AbortSignal`: `code` `Cancelled`,
 /// `name` and `message` `AbortError`, so one check catches a scan cancelled here and one
-/// N-API cancelled itself. Off-thread the `name` cannot be stamped: [`stamped_abort`].
+/// N-API cancelled itself, and `kind` `cancelled` to keep the rejection inside the `kind`
+/// contract of the other failures. Off-thread neither stamp applies: [`stamped_abort`].
 pub fn abort_error(env: Option<&Env>) -> Error {
-  stamped_prop(
+  stamped_props(
     env,
     Status::Cancelled,
     ABORT_MESSAGE.to_owned(),
-    "name",
-    ABORT_MESSAGE,
+    &[("name", ABORT_MESSAGE), ("kind", KIND_CANCELLED)],
   )
 }
 
-/// Adds the abort `name` to a rejection built on a worker thread; `Task::reject` is the
-/// only later place with an environment. Anything else is returned untouched.
+/// Adds the abort `name` and `kind` to a rejection built on a worker thread; `Task::reject`
+/// is the only later place with an environment. Anything else is returned untouched.
 pub fn stamped_abort(env: &Env, error: Error) -> Error {
   if error.status == Status::Cancelled && error.reason == ABORT_MESSAGE {
     abort_error(Some(env))

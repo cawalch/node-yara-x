@@ -3713,11 +3713,13 @@ describe("AbortSignal cancellation", () => {
     return dir;
   };
 
-  // One branch for every way a cancellation can land: the platform `name` plus the
-  // N-API status the adapter gives cancelled async work.
+  // One branch for every way a cancellation can land: the platform `name`, the
+  // N-API status the adapter gives cancelled async work, and the `kind` the
+  // timeout rejection carries too - only `kind` separates a cancel from a timeout.
   const asAbort = (name) => (error) => {
     strictEqual(error.name, "AbortError", `${name}: ${error.message}`);
     strictEqual(error.code, "Cancelled", `${name}: code`);
+    strictEqual(error.kind, "cancelled", `${name}: kind`);
     return true;
   };
 

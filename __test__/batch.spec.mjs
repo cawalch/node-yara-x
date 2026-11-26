@@ -411,6 +411,7 @@ test("Native Multi-Threaded Batch and Directory Scanning", async (t) => {
     if (outcome.error) {
       assert.strictEqual(outcome.error.name, "AbortError", "cancelling queued work rejects as an abort");
       assert.strictEqual(outcome.error.code, "Cancelled");
+      assert.strictEqual(outcome.error.kind, "cancelled");
     } else {
       const { result } = outcome;
       assert.strictEqual(result.cancelled, true, "a sweep cut short must report the cancellation");
