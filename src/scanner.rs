@@ -27,7 +27,7 @@ use napi::bindgen_prelude::{AsyncTask, Buffer, JsObjectValue, Object};
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::{Env, Error, Result, Status};
 use napi_derive::napi;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -98,18 +98,25 @@ pub struct YaraX {
   pub(crate) stored_options: StoredCompilerOptions,
   /// Cached scanner for reuse (thread-local, not Send/Sync safe)
   pub(crate) cached_scanner: RefCell<Option<CachedScanner>>,
+  // The scan options below are `Cell`s rather than plain fields so their
+  // setters can take `&self`. N-API registers a native borrow for the receiver
+  // of every generated method, and an `AsyncTask` keeps that borrow alive
+  // until the task finalizes; an exclusive (`&mut self`) receiver requested
+  // during an in-flight async scan is therefore rejected with `InvalidArg`.
+  // Shared borrows do not conflict, so with `Cell` storage the setters keep
+  // working while a scan runs.
   /// Maximum number of matches per pattern
-  pub(crate) max_matches_per_pattern: Option<usize>,
+  pub(crate) max_matches_per_pattern: Cell<Option<usize>>,
   /// Whether to use memory-mapped files for scanning
-  pub(crate) use_mmap: Option<bool>,
+  pub(crate) use_mmap: Cell<Option<bool>>,
   /// Whether fast scan mode is enabled (stops pattern search at first match)
-  pub(crate) fast_scan: Option<bool>,
+  pub(crate) fast_scan: Cell<Option<bool>>,
   /// Scan timeout in milliseconds
-  pub(crate) timeout_ms: Option<u32>,
+  pub(crate) timeout_ms: Cell<Option<u32>>,
   /// Match context size
-  pub(crate) match_context_size: Option<usize>,
+  pub(crate) match_context_size: Cell<Option<usize>>,
   /// Maximum number of bytes to scan
-  pub(crate) max_scan_size: Option<usize>,
+  pub(crate) max_scan_size: Cell<Option<usize>>,
   /// Sink for messages emitted by rules through the `console` module. Held
   /// behind `Arc` because `ThreadsafeFunction` is not `Clone` and the scanner
   /// closure must own its handle for the `'static` scanner.
@@ -132,12 +139,12 @@ impl YaraX {
       compilation_errors: Vec::new(),
       stored_options: StoredCompilerOptions::default(),
       cached_scanner: RefCell::new(None),
-      max_matches_per_pattern: None,
-      use_mmap: None,
-      fast_scan: None,
-      timeout_ms: None,
-      match_context_size: None,
-      max_scan_size: None,
+      max_matches_per_pattern: Cell::new(None),
+      use_mmap: Cell::new(None),
+      fast_scan: Cell::new(None),
+      timeout_ms: Cell::new(None),
+      match_context_size: Cell::new(None),
+      max_scan_size: Cell::new(None),
       console_log: None,
     }
   }
@@ -199,12 +206,12 @@ impl YaraX {
       compilation_errors,
       stored_options,
       cached_scanner: RefCell::new(None),
-      max_matches_per_pattern: None,
-      use_mmap: None,
-      fast_scan: None,
-      timeout_ms: None,
-      match_context_size: None,
-      max_scan_size: None,
+      max_matches_per_pattern: Cell::new(None),
+      use_mmap: Cell::new(None),
+      fast_scan: Cell::new(None),
+      timeout_ms: Cell::new(None),
+      match_context_size: Cell::new(None),
+      max_scan_size: Cell::new(None),
       console_log: None,
     })
   }
@@ -356,27 +363,27 @@ impl YaraX {
       });
 
       // Apply scan options
-      if let Some(max_matches) = self.max_matches_per_pattern {
+      if let Some(max_matches) = self.max_matches_per_pattern.get() {
         scanner.max_matches_per_pattern(max_matches);
       }
 
-      if let Some(use_mmap) = self.use_mmap {
+      if let Some(use_mmap) = self.use_mmap.get() {
         scanner.use_mmap(use_mmap);
       }
 
-      if let Some(fast_scan) = self.fast_scan {
+      if let Some(fast_scan) = self.fast_scan.get() {
         scanner.fast_scan(fast_scan);
       }
 
-      if let Some(timeout_ms) = self.timeout_ms {
+      if let Some(timeout_ms) = self.timeout_ms.get() {
         scanner.set_timeout(Duration::from_millis(timeout_ms as u64));
       }
 
-      if let Some(match_context_size) = self.match_context_size {
+      if let Some(match_context_size) = self.match_context_size.get() {
         scanner.match_context_size(match_context_size);
       }
 
-      if let Some(max_scan_size) = self.max_scan_size {
+      if let Some(max_scan_size) = self.max_scan_size.get() {
         scanner.max_scan_size(max_scan_size);
       }
 
@@ -541,23 +548,32 @@ impl YaraX {
   }
 
   /// Sets the maximum number of matches per pattern.
+  ///
+  /// Applies to scans started after the call, and is safe to call while a
+  /// scan is in flight.
   #[napi]
-  pub fn set_max_matches_per_pattern(&mut self, max_matches: u32) {
-    self.max_matches_per_pattern = Some(max_matches as usize);
+  pub fn set_max_matches_per_pattern(&self, max_matches: u32) {
+    self.max_matches_per_pattern.set(Some(max_matches as usize));
     self.invalidate_scanner_cache();
   }
 
   /// Sets whether to use memory-mapped files for scanning.
+  ///
+  /// Applies to scans started after the call, and is safe to call while a
+  /// scan is in flight.
   #[napi]
-  pub fn set_use_mmap(&mut self, use_mmap: bool) {
-    self.use_mmap = Some(use_mmap);
+  pub fn set_use_mmap(&self, use_mmap: bool) {
+    self.use_mmap.set(Some(use_mmap));
     self.invalidate_scanner_cache();
   }
 
   /// Sets whether to use fast scan mode (stops searching for a pattern as soon as the first match is found).
+  ///
+  /// Applies to scans started after the call, and is safe to call while a
+  /// scan is in flight.
   #[napi]
-  pub fn set_fast_scan(&mut self, fast_scan: bool) {
-    self.fast_scan = Some(fast_scan);
+  pub fn set_fast_scan(&self, fast_scan: bool) {
+    self.fast_scan.set(Some(fast_scan));
     self.invalidate_scanner_cache();
   }
 
@@ -565,16 +581,22 @@ impl YaraX {
   ///
   /// Best-effort: YARA-X checks the deadline between work units, so a scan can
   /// overrun it. Use `setMaxScanSize()` for a hard bound.
+  ///
+  /// Applies to scans started after the call, and is safe to call while a
+  /// scan is in flight.
   #[napi]
-  pub fn set_timeout(&mut self, timeout_ms: u32) {
-    self.timeout_ms = (timeout_ms > 0).then_some(timeout_ms);
+  pub fn set_timeout(&self, timeout_ms: u32) {
+    self.timeout_ms.set((timeout_ms > 0).then_some(timeout_ms));
     self.invalidate_scanner_cache();
   }
 
   /// Sets the match context size.
+  ///
+  /// Applies to scans started after the call, and is safe to call while a
+  /// scan is in flight.
   #[napi]
-  pub fn set_match_context_size(&mut self, size: u32) {
-    self.match_context_size = Some(size as usize);
+  pub fn set_match_context_size(&self, size: u32) {
+    self.match_context_size.set(Some(size as usize));
     self.invalidate_scanner_cache();
   }
 
@@ -626,13 +648,16 @@ impl YaraX {
   ///
   /// Any data or file exceeding this size will only have its initial
   /// bytes scanned up to this limit. Passing 0 or a negative number clears the limit.
+  ///
+  /// Applies to scans started after the call, and is safe to call while a
+  /// scan is in flight.
   #[napi]
-  pub fn set_max_scan_size(&mut self, max_bytes: i64) {
-    self.max_scan_size = if max_bytes > 0 {
+  pub fn set_max_scan_size(&self, max_bytes: i64) {
+    self.max_scan_size.set(if max_bytes > 0 {
       Some(max_bytes as usize)
     } else {
       None
-    };
+    });
     self.invalidate_scanner_cache();
   }
 
@@ -1003,12 +1028,16 @@ impl YaraX {
   /// Helper to build TaskScanOptions for background tasks.
   fn task_scan_options(&self, include_mmap: bool) -> crate::tasks::TaskScanOptions {
     crate::tasks::TaskScanOptions {
-      max_matches_per_pattern: self.max_matches_per_pattern,
-      fast_scan: self.fast_scan,
-      use_mmap: if include_mmap { self.use_mmap } else { None },
-      timeout_ms: self.timeout_ms,
-      match_context_size: self.match_context_size,
-      max_scan_size: self.max_scan_size,
+      max_matches_per_pattern: self.max_matches_per_pattern.get(),
+      fast_scan: self.fast_scan.get(),
+      use_mmap: if include_mmap {
+        self.use_mmap.get()
+      } else {
+        None
+      },
+      timeout_ms: self.timeout_ms.get(),
+      match_context_size: self.match_context_size.get(),
+      max_scan_size: self.max_scan_size.get(),
     }
   }
 
