@@ -37,6 +37,8 @@ Root `optionalDependencies` are discovered from the `npm/` directories during th
 
 When adding a Linux target, note that `--use-napi-cross` only provides glibc toolchains; a musl target needs `cargo-zigbuild` with zig installed on the runner, and a glibc Node.js cannot load a musl addon, so the musl artifact can only be exercised inside an Alpine container.
 
+Two published artifacts are never executed in CI: `aarch64-unknown-linux-gnu` and `aarch64-pc-windows-msvc` are built on the push and release path, while the test matrix runs ARM only on `macos-latest`. They therefore ship untested. A change that touches one of those lanes produces no automated signal, so exercise it on matching hardware or a self-hosted runner before releasing.
+
 ## Bootstrapping a new platform package
 
 Adding a platform target adds a package name, and a name that has never been published cannot be created by this pipeline. This is verified against the registry, not assumed: an OIDC publish of a new name authenticates successfully — the run signs a provenance statement and publishes it to the transparency log — and then fails with

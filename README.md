@@ -22,7 +22,7 @@ Node.js bindings for [YARA-X](https://github.com/VirusTotal/yara-x), the Rust re
 npm install @litko/yara-x    # or: pnpm add @litko/yara-x | yarn add @litko/yara-x
 ```
 
-Requires Node.js 20 or newer. The installer picks the matching prebuilt binary from an optional platform package; if no binary exists for your platform, see [Troubleshooting](#troubleshooting). Type definitions ship with the package, and both module systems are supported.
+Requires Node.js 20 or newer. CI runs the full suite on Node 20, 22, 24 and 26 on Linux, macOS and Windows; the floor is tested even though Node 20 is end-of-life upstream, because supporting it is a promise rather than an accident. The installer picks the matching prebuilt binary from an optional platform package; if no binary exists for your platform, see [Troubleshooting](#troubleshooting). Type definitions ship with the package, and both module systems are supported.
 
 ES modules:
 
@@ -578,7 +578,7 @@ Node.js (>= 20) is the primary target. Bun and Deno load the same prebuilt binar
 
 | Runtime | Status | Notes |
 | :--- | :--- | :--- |
-| Node.js | primary | tested on every platform |
+| Node.js | primary | 20, 22, 24, 26 — tested on every platform |
 | Bun | works | same API; more Node-API call overhead per scan |
 | Deno | works | needs `--allow-ffi` (plus `--allow-read` for rule files) |
 
