@@ -5,8 +5,8 @@
 //! into a flat, contiguous 24-byte record buffer and an indexed metadata catalog.
 
 use crate::tasks::{BaseYaraTask, ScanTarget, TaskScanOptions};
-use crate::types::{MatchData, RuleMatch, VariableMap};
-use napi::bindgen_prelude::{Buffer, Object};
+use crate::types::{MatchData, RuleMatch, RuleMetadata, VariableMap};
+use napi::bindgen_prelude::Buffer;
 use napi::{Env, Result, Task};
 use napi_derive::napi;
 use std::sync::Arc;
@@ -55,7 +55,7 @@ fn decode_xor_key(flags: u32) -> Option<u8> {
   }
 }
 
-/// Metadata for a rule that matched in a binary scan.
+/// Catalog entry for a compiled rule.
 #[napi(object)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuleInfo {
@@ -65,8 +65,12 @@ pub struct RuleInfo {
   pub namespace: String,
   /// Rule tags.
   pub tags: Vec<String>,
-  /// Rule pattern identifiers that matched.
+  /// Pattern identifiers: the ones that matched in a binary scan, or all
+  /// declared patterns when obtained from `getRules()`.
   pub patterns: Vec<String>,
+  /// Rule metadata as key-value pairs, matching `RuleMatch.meta`.
+  #[napi(ts_type = "Record<string, string | number | boolean>")]
+  pub meta: RuleMetadata,
 }
 
 /// Catalog indexing the rules and patterns present in a binary scan result.
@@ -281,7 +285,7 @@ impl BinaryMatchView {
         continue;
       }
       let rule_info = &self.catalog.rules[rule_idx];
-      let meta = Object::new(&env)?;
+      let meta = rule_info.meta.to_object(&env)?;
 
       results.push(RuleMatch {
         rule_identifier: rule_info.identifier.clone(),
@@ -328,6 +332,7 @@ pub fn extract_binary_scan_results(
       namespace: rule.namespace().to_string(),
       tags,
       patterns,
+      meta: RuleMetadata::from_rule(&rule),
     });
   }
 

@@ -283,6 +283,8 @@ impl Task for IsMatchTask {
 pub struct EmitWasmFileTask {
   pub source_code: Option<String>,
   pub rule_sources: Vec<RuleSource>,
+  /// Origin paths matching `rule_sources`, used for diagnostics and includes.
+  pub source_origins: Vec<Option<String>>,
   pub output_path: String,
   /// The scanner's stored compiler options, replayed so the emitted module
   /// matches the scanner's compilation semantics.
@@ -306,18 +308,21 @@ impl Task for EmitWasmFileTask {
     })?;
 
     let fallback_source;
-    let sources = if self.rule_sources.is_empty() {
+    let fallback_origin;
+    let (sources, origins): (&[RuleSource], &[Option<String>]) = if self.rule_sources.is_empty() {
       fallback_source = [RuleSource {
         source: source.clone(),
         namespace: None,
       }];
-      &fallback_source[..]
+      fallback_origin = [None];
+      (&fallback_source[..], &fallback_origin[..])
     } else {
-      &self.rule_sources[..]
+      (&self.rule_sources[..], &self.source_origins[..])
     };
 
     replay_sources_to_wasm(
       sources,
+      origins,
       &self.output_path,
       &self.stored_options,
       self.variables.as_ref(),

@@ -93,6 +93,9 @@ class YaraXProfiler {
 		// Clear previous results and establish baseline
 		this.results = [];
 		this.forceGC();
+		// GC events recorded before this point (including the forced baseline
+		// collection) do not belong to this test.
+		const gcBaseline = this.results.length;
 
 		const memoryBaseline = this.getMemoryUsage();
 		const cpuBaseline = this.getCPUUsage();
@@ -201,7 +204,7 @@ class YaraXProfiler {
 					stats.total,
 				)
 			: null;
-		const gcStats = this.calculateGCStatistics();
+		const gcStats = this.calculateGCStatistics(gcBaseline);
 
 		const result = {
 			name,
@@ -538,8 +541,13 @@ class YaraXProfiler {
 		};
 	}
 
-	calculateGCStatistics() {
-		const gcEvents = this.results.filter((r) => r.type === "gc");
+	calculateGCStatistics(fromIndex = 0) {
+		// Only events recorded since `fromIndex` belong to the operation being
+		// profiled; `this.results` is reset per operation but late observer
+		// callbacks from the baseline collection can still land here.
+		const gcEvents = this.results
+			.slice(fromIndex)
+			.filter((r) => r.type === "gc");
 		if (gcEvents.length === 0) return null;
 
 		const durations = gcEvents.map((e) => e.duration);

@@ -5,15 +5,65 @@
 
 use crate::error::compile_error_to_napi;
 use crate::types::{
-  BannedModule, CompilerError, CompilerOptions, IgnoredRule, RuleSource, VariableMap,
+  BannedModule, CompilerError, CompilerOptions, CompilerWarning, IgnoredRule, RuleSource,
+  VariableMap,
 };
-use crate::variables::{get_variable_value, VariableHandler};
+use crate::variables::{diagnostic_location, get_variable_value, VariableHandler};
 use napi::bindgen_prelude::Object;
 use napi::{Error, Result, Status};
 use std::collections::HashMap;
 use std::path::Path;
 use yara_x::errors::CompileError;
-use yara_x::{Compiler, IgnoredRuleReason};
+use yara_x::{Compiler, IgnoredRuleReason, SourceCode};
+
+/// Modules compiled into this build, mirroring the `yara-x` features enabled in
+/// `Cargo.toml`. YARA-X accepts any string in `ignore_module`/`ban_module` and
+/// silently matches nothing when the name is misspelled, so validate names
+/// here before handing them over.
+const KNOWN_MODULES: &[&str] = &[
+  "console", "pe", "elf", "macho", "math", "hash", "string", "time", "dotnet", "zip", "lnk", "dex",
+  "crx", "cuckoo",
+];
+
+/// Rejects a module name that is not compiled into this build.
+fn validate_module_name(name: &str, option: &str) -> Result<()> {
+  if KNOWN_MODULES.contains(&name) {
+    return Ok(());
+  }
+
+  Err(Error::new(
+    Status::InvalidArg,
+    format!(
+      "Unknown module `{name}` in `{option}`. Known modules: {}",
+      KNOWN_MODULES.join(", ")
+    ),
+  ))
+}
+
+/// Returns a warning for every `ignoreModules` entry that is not compiled into
+/// this build.
+///
+/// Unknown names are allowed there — ignoring a module that is not compiled in
+/// (for example `vt` on a build without `vt-module`) is how callers tolerate
+/// rule sets that import it. The warning makes a typo visible without turning
+/// that use case into a hard error. `bannedModules` uses a hard error instead
+/// because an unknown name means the ban is not enforced.
+pub fn ignored_module_warnings(stored: &StoredCompilerOptions) -> Vec<CompilerWarning> {
+  stored
+    .ignore_modules
+    .iter()
+    .filter(|module| !KNOWN_MODULES.contains(&module.as_str()))
+    .map(|module| CompilerWarning {
+      code: "unknown_ignored_module".to_string(),
+      message: format!(
+        "Ignored module `{module}` is not compiled into this build, so this entry matches nothing"
+      ),
+      source: None,
+      line: None,
+      column: None,
+    })
+    .collect()
+}
 
 /// The compiler options that affect how rule sources are compiled, excluding
 /// the fields handled separately by [`crate::scanner::YaraX`] (namespace,
@@ -74,6 +124,10 @@ pub fn apply_stored_compiler_options(
   compiler: &mut Compiler<'_>,
   stored: &StoredCompilerOptions,
 ) -> Result<()> {
+  for banned in &stored.banned_modules {
+    validate_module_name(&banned.name, "bannedModules[].name")?;
+  }
+
   for module in &stored.ignore_modules {
     let _ = compiler.ignore_module(module);
   }
@@ -126,8 +180,9 @@ pub fn add_source_to_compiler(
   compiler: &mut Compiler<'_>,
   source: &str,
   namespace: Option<&str>,
+  origin: Option<&str>,
 ) -> Result<()> {
-  add_source_to_compiler_tolerant(compiler, source, namespace, false)
+  add_source_to_compiler_tolerant(compiler, source, namespace, origin, false)
 }
 
 /// Adds a source string to the compiler, optionally tolerating per-rule
@@ -148,18 +203,35 @@ pub fn add_source_to_compiler_tolerant(
   compiler: &mut Compiler<'_>,
   source: &str,
   namespace: Option<&str>,
+  origin: Option<&str>,
   tolerate: bool,
 ) -> Result<()> {
   // A `None` namespace means the default namespace; switch to it explicitly
   // so a source without a namespace never inherits a previously set one.
   compiler.new_namespace(namespace.unwrap_or("default"));
 
+  if let Some(origin) = origin {
+    // Resolve `include` statements relative to the rule file, in addition to
+    // the explicit `includeDirectories`. Those were applied first, so an
+    // explicitly configured directory still wins over a sibling file.
+    if let Some(parent) = Path::new(origin).parent() {
+      if !parent.as_os_str().is_empty() {
+        compiler.add_include_dir(parent);
+      }
+    }
+  }
+
+  let mut source_code = SourceCode::from(source);
+  if let Some(origin) = origin {
+    source_code = source_code.with_origin(origin);
+  }
+
   if tolerate {
-    let _ = compiler.add_source(source);
+    let _ = compiler.add_source(source_code);
     Ok(())
   } else {
     compiler
-      .add_source(source)
+      .add_source(source_code)
       .map(|_| ())
       .map_err(|e| compile_error_to_napi(&e))
   }
@@ -217,14 +289,41 @@ pub fn uncovered_compiler_errors(compiler: &Compiler) -> Vec<CompilerError> {
     .errors()
     .iter()
     .filter(|err| !covered.contains(&std::ptr::from_ref(*err)))
-    .map(|err| CompilerError {
-      code: err.code().to_string(),
-      message: err.to_string(),
-      source: None,
-      line: None,
-      column: None,
+    .map(|err| {
+      let (source, line, column) = diagnostic_location(err);
+      CompilerError {
+        code: err.code().to_string(),
+        message: err.to_string(),
+        source,
+        line,
+        column,
+      }
     })
     .collect()
+}
+
+/// Rejects compilation errors that cannot be attributed to a skipped rule.
+///
+/// In tolerant mode yara-x records per-rule failures as ignored rules, but
+/// source-level failures (syntax errors, invalid UTF-8, banned or unknown
+/// module imports, include failures) are only placed in the error list. A
+/// scanner built on top of those would silently lack rules, so surface them
+/// instead.
+pub fn ensure_no_uncovered_errors(compiler: &Compiler) -> Result<()> {
+  let uncovered = uncovered_compiler_errors(compiler);
+  if uncovered.is_empty() {
+    return Ok(());
+  }
+
+  let details = uncovered
+    .iter()
+    .map(|e| format!("{}: {}", e.code, e.message))
+    .collect::<Vec<_>>()
+    .join("\n");
+  Err(Error::new(
+    Status::GenericFailure,
+    format!("Compilation error(s) not attributable to a skipped rule: {details}"),
+  ))
 }
 
 /// Applies compiler options to a YARA compiler instance.
@@ -295,6 +394,7 @@ pub fn compile_source_to_wasm(
   source: &str,
   output_path: &str,
   options: Option<&CompilerOptions>,
+  origin: Option<&str>,
 ) -> Result<()> {
   let namespace = options.and_then(|opts| opts.namespace.as_deref());
   compile_sources_to_wasm(
@@ -302,6 +402,7 @@ pub fn compile_source_to_wasm(
       source: source.to_string(),
       namespace: namespace.map(str::to_string),
     }],
+    &[origin.map(str::to_string)],
     output_path,
     options,
   )
@@ -310,6 +411,7 @@ pub fn compile_source_to_wasm(
 /// Compiles YARA rule sources to a WASM file.
 pub fn compile_sources_to_wasm(
   sources: &[RuleSource],
+  origins: &[Option<String>],
   output_path: &str,
   options: Option<&CompilerOptions>,
 ) -> Result<()> {
@@ -322,7 +424,13 @@ pub fn compile_sources_to_wasm(
     .and_then(|opts| opts.ignore_invalid_rules)
     .unwrap_or(false);
 
-  add_sources_and_emit(compiler, sources, ignore_invalid_rules, output_path)
+  add_sources_and_emit(
+    compiler,
+    sources,
+    origins,
+    ignore_invalid_rules,
+    output_path,
+  )
 }
 
 /// Replays a scanner's persisted compilation state (stored options and
@@ -334,6 +442,7 @@ pub fn compile_sources_to_wasm(
 /// matches the scanner's semantics — including `ignore_invalid_rules`.
 pub fn replay_sources_to_wasm(
   sources: &[RuleSource],
+  origins: &[Option<String>],
   output_path: &str,
   stored: &StoredCompilerOptions,
   variables: Option<&VariableMap>,
@@ -349,7 +458,13 @@ pub fn replay_sources_to_wasm(
     }
   }
 
-  add_sources_and_emit(compiler, sources, ignore_invalid_rules, output_path)
+  add_sources_and_emit(
+    compiler,
+    sources,
+    origins,
+    ignore_invalid_rules,
+    output_path,
+  )
 }
 
 /// Adds all sources to the compiler and emits the WASM module, rejecting
@@ -358,14 +473,16 @@ pub fn replay_sources_to_wasm(
 fn add_sources_and_emit(
   mut compiler: Compiler<'_>,
   sources: &[RuleSource],
+  origins: &[Option<String>],
   ignore_invalid_rules: bool,
   output_path: &str,
 ) -> Result<()> {
-  for rule_source in sources {
+  for (index, rule_source) in sources.iter().enumerate() {
     add_source_to_compiler_tolerant(
       &mut compiler,
       &rule_source.source,
       rule_source.namespace.as_deref(),
+      origins.get(index).and_then(Option::as_deref),
       ignore_invalid_rules,
     )?;
   }
@@ -376,18 +493,7 @@ fn add_sources_and_emit(
   // report channel on the one-shot WASM path, so surface them as an error
   // instead of emitting a WASM module that silently lacks rules.
   if ignore_invalid_rules {
-    let uncovered = uncovered_compiler_errors(&compiler);
-    if !uncovered.is_empty() {
-      let details = uncovered
-        .iter()
-        .map(|e| format!("{}: {}", e.code, e.message))
-        .collect::<Vec<_>>()
-        .join("\n");
-      return Err(Error::new(
-        Status::GenericFailure,
-        format!("Compilation error(s) not attributable to a skipped rule: {details}"),
-      ));
-    }
+    ensure_no_uncovered_errors(&compiler)?;
   }
 
   compiler

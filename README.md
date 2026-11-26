@@ -164,11 +164,15 @@ console.log(
 );
 ```
 
-Incremental scanners use `defineVariable()` instead:
+Values keep their JavaScript type: `"42"` is a string global, while `42` is an integer. Use `bigint` for exact values outside the safe-integer range (it must fit in a signed 64-bit integer).
+
+Incremental scanners use `defineVariable()`, which accepts the same types:
 
 ```javascript
 const scanner = create();
 scanner.defineVariable("threshold", 42);
+scanner.defineVariable("family", "42"); // string, not an integer
+scanner.defineVariable("huge", 9007199254740993n);
 ```
 
 ## Namespaces
@@ -311,6 +315,8 @@ const ruleMatches = view.toRuleMatches(sampleBuffer);
 
 The `flags` word carries the XOR key of a match: bits 0-7 hold the key and bit 8 is set when the pattern was compiled with an `xor` modifier. `getXorKey(index)` decodes it for you, and `toRuleMatches()` fills `MatchData.xorKey`, so parsing the flags by hand is only necessary if you consume the raw buffer.
 
+The catalog carries each matching rule's `meta`, `tags`, and pattern identifiers, and `toRuleMatches()` materializes the same `meta` object as `scan()`. `getRules()` exposes the same metadata for every compiled rule.
+
 ## Inspect compiled rules
 
 Inspect compiled rule counts, imported modules, rule names, namespaces, tags, and pattern identifiers without scanning or re-parsing:
@@ -425,7 +431,7 @@ const quietRules = compile(sourceText, {
 
 ## Tolerating invalid rules
 
-`ignoreInvalidRules` keeps a large corpus compiling when a few rules are broken:
+`ignoreInvalidRules` keeps a large corpus compiling when a few rules are broken. Per-rule failures are skipped and reported; source-level failures that cannot be attributed to a single rule — syntax errors, invalid UTF-8, banned or unknown module imports, and missing includes — still throw, because a scanner silently missing rules is worse than a failed load:
 
 ```javascript
 import { compile } from "@litko/yara-x";
@@ -437,15 +443,15 @@ for (const rule of rules.getIgnoredRules()) {
   console.log(`Skipped "${rule.name}" (${rule.reason}): ${rule.detail}`);
 }
 
-// Errors that could not be attributed to a single rule.
+// Errors attributed to a skipped rule (also summarized in its `detail`).
 for (const error of rules.getCompilationErrors()) {
-  console.log(`[${error.code}] ${error.message}`);
+  console.log(`[${error.code}] ${error.source ?? "line:"}:${error.line ?? "?"}`);
 }
 ```
 
 ## Include directives
 
-`include` statements are resolved against `includeDirectories`:
+`include` statements are resolved against `includeDirectories`, and — for `fromFile()`, `addRuleFile()`, and `compileFileToWasm()` — against the directory of the rule file itself. Explicit `includeDirectories` are searched first, so a configured directory wins if both contain the same file:
 
 ```javascript
 import { compile } from "@litko/yara-x";
@@ -755,7 +761,7 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 | `addRuleSource(ruleSource, namespace?)` | Adds one rule source to an incremental scanner. |
 | `addRuleSources(ruleSources)` | Adds several rule sources in a single compilation pass. |
 | `addRuleFile(filePath, namespace?)` | Adds rules from a file to an incremental scanner. |
-| `defineVariable(name, value)` | Defines a global variable on an incremental scanner. |
+| `defineVariable(name, value)` | Defines a global variable on an incremental scanner (`string`, `number`, `boolean`, or `bigint`). |
 | `getWarnings()` | Returns compiler warnings from the last compilation. |
 | `getIgnoredRules()` | Returns rules skipped by tolerant compilation or ignored modules. |
 | `getCompilationErrors()` | Returns source-level errors collected when `ignoreInvalidRules` is set. |
@@ -788,11 +794,11 @@ The generated type definitions in [`index.d.ts`](./index.d.ts) are the authorita
 | Option | Type | Description |
 | :--- | :--- | :--- |
 | `namespace` | `string` | Target namespace for the compiled rules. |
-| `defineVariables` | `Record<string, string \| number \| boolean>` | Global variables defined on the compiler. |
+| `defineVariables` | `Record<string, string \| number \| boolean \| bigint>` | Global variables defined on the compiler. Values keep their JavaScript type. |
 | `ignoreInvalidRules` | `boolean` | Skips invalid rules instead of failing compilation. |
-| `ignoreModules` | `string[]` | Module names to ignore during compilation. |
-| `bannedModules` | `BannedModule[]` | Modules that raise a compilation error when imported. |
-| `features` | `string[]` | Feature flags to enable. |
+| `ignoreModules` | `string[]` | Module names to ignore during compilation. Unknown names are accepted (useful for modules not compiled into this build) and reported as an `unknown_ignored_module` warning. |
+| `bannedModules` | `BannedModule[]` | Modules that raise a compilation error when imported. Names must be compiled into this build; an unknown name throws instead of silently not enforcing the ban. |
+| `features` | `string[]` | Module-defined feature flags. YARA-X accepts unknown names and they have no effect. |
 | `relaxedReSyntax` | `boolean` | Enables relaxed regular expression syntax. |
 | `conditionOptimization` | `boolean` | Enables rule condition optimization. |
 | `errorOnSlowPattern` | `boolean` | Promotes slow pattern warnings to errors. |

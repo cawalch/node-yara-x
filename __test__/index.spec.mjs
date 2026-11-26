@@ -451,7 +451,7 @@ describe("yarax Tests", () => {
 
     const options = {
       defineVariables: {
-        test_var: "100",
+        test_var: 100,
       },
     };
 
@@ -478,14 +478,14 @@ describe("yarax Tests", () => {
 
     const options = {
       defineVariables: {
-        scan_var: "10",
+        scan_var: 10,
       },
     };
 
     const scanner = yarax.compile(rule, options);
 
     const buffer = Buffer.from("");
-    const matches = scanner.scan(buffer, { scan_var: "100" });
+    const matches = scanner.scan(buffer, { scan_var: 100 });
 
     strictEqual(matches.length, 1, "Should have one matching rule");
     strictEqual(
@@ -670,24 +670,52 @@ describe("yarax Tests", () => {
       );
     });
 
-    it("should report syntax errors via getCompilationErrors instead of silently dropping them", () => {
-      const scanner = yarax.compile('rule bad { condition: true', {
-        ignoreInvalidRules: true,
-      });
+    it("should throw on source-level errors in tolerant compilation", () => {
+      const bannedPe = {
+        name: "pe",
+        errorTitle: "NoPE",
+        errorMessage: "pe is banned",
+      };
+      const cases = [
+        ["syntax error", "rule bad { condition: true", {}],
+        ['unknown module', 'import "nosuchmod"\nrule q { condition: true }', {}],
+        [
+          "banned module",
+          'import "pe"\nrule p { condition: pe.is_pe }',
+          { bannedModules: [bannedPe] },
+        ],
+        [
+          "missing include",
+          'include "nope.yar"\nrule z { condition: true }',
+          {},
+        ],
+      ];
 
-      strictEqual(
-        scanner.getIgnoredRules().length,
-        0,
-        "A syntax error is not a per-rule failure",
+      for (const [label, source, extra] of cases) {
+        throws(
+          () => yarax.compile(source, { ignoreInvalidRules: true, ...extra }),
+          /Compilation error/,
+          `${label} must not produce a scanner in tolerant mode`,
+        );
+      }
+    });
+
+    it("should keep per-rule failures tolerant in tolerant compilation", () => {
+      const scanner = yarax.compile(
+        "rule good_rule { condition: true }\nrule bad_rule { condition: nope == 1 }",
+        { ignoreInvalidRules: true },
       );
-      const errors = scanner.getCompilationErrors();
-      ok(
-        errors.length > 0,
-        "Syntax errors should be surfaced, not silently dropped",
+
+      deepStrictEqual(
+        scanner.getRules().map((rule) => rule.identifier),
+        ["good_rule"],
+        "Per-rule failures stay skipped",
       );
       ok(
-        scanner.scan(Buffer.from("x")).length === 0,
-        "Scanner should have no compiled rules",
+        scanner
+          .getIgnoredRules()
+          .some((rule) => rule.name === "bad_rule" && rule.reason === "compile_error"),
+        "The skipped rule is still reported",
       );
     });
 
@@ -699,19 +727,6 @@ describe("yarax Tests", () => {
         scanner.getCompilationErrors(),
         [],
         "No errors should be reported for a clean compile",
-      );
-    });
-
-    it("should surface banned-module import errors via getCompilationErrors", () => {
-      const scanner = yarax.compile('import "pe"\nrule test_pe { condition: pe.is_pe }', {
-        ignoreInvalidRules: true,
-        bannedModules: [{ name: "pe", errorTitle: "no pe", errorMessage: "pe is banned" }],
-      });
-
-      const errors = scanner.getCompilationErrors();
-      ok(
-        errors.some((e) => e.message.includes("no pe")),
-        "Banned-module errors should be surfaced",
       );
     });
 
@@ -758,7 +773,7 @@ describe("yarax Tests", () => {
       });
       strictEqual(scanner.scan(Buffer.from("x")).length, 1, "Initial value should match");
 
-      scanner.defineVariable("x", "6");
+      scanner.defineVariable("x", 6);
       strictEqual(
         scanner.scan(Buffer.from("x")).length,
         0,
@@ -768,7 +783,7 @@ describe("yarax Tests", () => {
 
     it("should support create + defineVariable + addRuleSource", async () => {
       const scanner = yarax.create();
-      scanner.defineVariable("x", "5");
+      scanner.defineVariable("x", 5);
       scanner.addRuleSource("rule r { condition: x == 5 }");
 
       strictEqual(scanner.scan(Buffer.from("x")).length, 1, "Sync scan should match");
@@ -829,6 +844,23 @@ describe("yarax Tests", () => {
       ok(
         statSync(asyncWasmFile).size > 0,
         "Tolerant scanner should emit WASM with the surviving rules",
+      );
+    });
+
+    it("should not retain a source that fails to compile", () => {
+      const scanner = yarax.create();
+      scanner.addRuleSource("rule first_ok { condition: true }");
+
+      throws(
+        () => scanner.addRuleSource("rule { broken"),
+        /Compilation error/,
+      );
+
+      scanner.addRuleSource("rule second_ok { condition: true }");
+      deepStrictEqual(
+        scanner.getRules().map((rule) => rule.identifier),
+        ["first_ok", "second_ok"],
+        "a rejected source must not poison later additions",
       );
     });
 
@@ -946,6 +978,42 @@ describe("yarax Tests", () => {
     }
   });
 
+  it("should reject unknown names in bannedModules", () => {
+    throws(
+      () =>
+        yarax.compile("rule r { condition: true }", {
+          bannedModules: [
+            { name: "pee", errorTitle: "typo", errorMessage: "typo" },
+          ],
+        }),
+      /Unknown module `pee`.*bannedModules/,
+    );
+  });
+
+  it("should warn about ignored modules that are not compiled in", () => {
+    const scanner = yarax.compile("rule r { condition: true }", {
+      ignoreModules: ["strn"],
+    });
+    const warning = scanner
+      .getWarnings()
+      .find((entry) => entry.code === "unknown_ignored_module");
+
+    ok(warning, "A typo in ignoreModules should produce a warning");
+    ok(warning.message.includes("strn"));
+  });
+
+  it("should not warn about known modules in ignoreModules", () => {
+    const scanner = yarax.compile("rule r { condition: true }", {
+      ignoreModules: ["pe"],
+    });
+    strictEqual(
+      scanner
+        .getWarnings()
+        .filter((entry) => entry.code === "unknown_ignored_module").length,
+      0,
+    );
+  });
+
   it("should handle banned modules", () => {
     const rule = `
       import "pe"
@@ -1047,7 +1115,7 @@ describe("yarax Tests", () => {
 
     const options = {
       defineVariables: {
-        test_var: "20",
+        test_var: 20,
       },
       relaxedReSyntax: true,
       conditionOptimization: true,
@@ -1078,8 +1146,8 @@ describe("yarax Tests", () => {
     const options = {
       defineVariables: {
         string_var: "this is a test string",
-        int_var: "20",
-        bool_var: "true",
+        int_var: 20,
+        bool_var: true,
       },
     };
 
@@ -1117,6 +1185,60 @@ describe("yarax Tests", () => {
     });
 
     strictEqual(matches.length, 1, "Should match with typed JS variables");
+  });
+
+  it("should keep string variables as strings even when they look numeric", () => {
+    const scanner = yarax.compile(
+      'rule string_globals { condition: family == "42" and flag == "true" }',
+      {
+        defineVariables: { family: "42", flag: "true" },
+      },
+    );
+    strictEqual(scanner.scan(Buffer.from(""))[0].ruleIdentifier, "string_globals");
+
+    throws(
+      () =>
+        yarax.compile("rule numeric_global { condition: family == 42 }", {
+          defineVariables: { family: "42" },
+        }),
+      /mismatching types/,
+      "A string variable is not usable as an integer",
+    );
+  });
+
+  it("should accept numbers and booleans in defineVariable", () => {
+    const scanner = yarax.create();
+    scanner.defineVariable("threshold", 42);
+    scanner.defineVariable("flag", true);
+    scanner.addRuleSource(
+      "rule typed_incremental { condition: threshold == 42 and flag }",
+    );
+
+    strictEqual(
+      scanner.scan(Buffer.from(""))[0].ruleIdentifier,
+      "typed_incremental",
+    );
+  });
+
+  it("should accept exact BigInt variables and reject out-of-range ones", () => {
+    const exact = 9007199254740993n; // 2^53 + 1, not representable as a number
+    const scanner = yarax.create();
+    scanner.defineVariable("big", exact);
+    scanner.addRuleSource(`rule bigint_rule { condition: big == ${exact} }`);
+
+    strictEqual(scanner.scan(Buffer.from(""))[0].ruleIdentifier, "bigint_rule");
+
+    throws(
+      () => scanner.defineVariable("too_big", 123456789012345678901234n),
+      /signed 64-bit range/,
+    );
+    throws(
+      () =>
+        yarax.compile("rule bad_type { condition: false }", {
+          defineVariables: { bad: {} },
+        }),
+      /Unsupported variable type for `bad`: object/,
+    );
   });
 
   it("should validate YARA rules without executing them", () => {
@@ -1168,7 +1290,7 @@ describe("yarax Tests", () => {
   it("should handle defining variables for rules", () => {
     const options = {
       defineVariables: {
-        test_var: "100",
+        test_var: 100,
       },
     };
 
@@ -1192,7 +1314,7 @@ describe("yarax Tests", () => {
       "Rule should match",
     );
 
-    const matches2 = scanner.scan(buffer, { test_var: "40" });
+    const matches2 = scanner.scan(buffer, { test_var: 40 });
     strictEqual(
       matches2.length,
       0,
@@ -1734,6 +1856,61 @@ describe("yarax Tests", () => {
       });
     });
 
+    it("should expose structured locations on compiler diagnostics", () => {
+      const result = yarax.validate(
+        "rule first { condition: false }\nrule { broken",
+      );
+      const error = result.errors[0];
+
+      strictEqual(error.code, "E001");
+      strictEqual(error.line, 2);
+      strictEqual(error.column, 6);
+      strictEqual(error.source, undefined, "in-memory sources have no path");
+    });
+
+    it("should name the rule file and resolve includes relative to it", () => {
+      const rulesDir = join(__tempDir, `file-origin-${Date.now()}`);
+      const includeDir = join(rulesDir, "sub");
+      mkdirSync(includeDir, { recursive: true });
+      writeFileSync(
+        join(includeDir, "common.yar"),
+        'rule common { strings: $a = "shared" condition: $a }',
+      );
+      writeFileSync(
+        join(rulesDir, "main.yar"),
+        'include "sub/common.yar"\nrule main { condition: common }',
+      );
+      writeFileSync(
+        join(rulesDir, "broken.yar"),
+        "rule ok_file { condition: true }\nrule bad_file { condition: nope == 1 }",
+      );
+
+      const scanner = yarax.fromFile(join(rulesDir, "main.yar"));
+      deepStrictEqual(
+        scanner
+          .getRules()
+          .map((rule) => rule.identifier)
+          .sort(),
+        ["common", "main"],
+        "includes resolve relative to the rule file",
+      );
+
+      const tolerant = yarax.compile("rule seed { condition: false }", {
+        ignoreInvalidRules: true,
+      });
+      tolerant.addRuleFile(join(rulesDir, "broken.yar"));
+      const error = tolerant
+        .getCompilationErrors()
+        .find((entry) => entry.code === "E009");
+
+      ok(error, "per-rule errors from addRuleFile are reported");
+      ok(
+        error.source.endsWith("broken.yar"),
+        `diagnostic source should be the rule file, got ${error.source}`,
+      );
+      strictEqual(error.line, 2);
+    });
+
     const warningTestCases = [
       {
         name: "Invariant Boolean Expression",
@@ -2185,7 +2362,7 @@ rule test_1 {
 
     it("should preserve compile-time variables in the serialized blob", () => {
       const rule = `rule var_rule { condition: test_var == 100 }`;
-      const rules = yarax.compile(rule, { defineVariables: { test_var: "100" } });
+      const rules = yarax.compile(rule, { defineVariables: { test_var: 100 } });
       const restored = yarax.deserialize(rules.serialize());
       const matches = restored.scan(Buffer.from("x"));
       strictEqual(matches.length, 1, "variable should survive serialization");
@@ -2389,14 +2566,14 @@ rule test_1 {
         }
       `;
       const scanner = yarax.compile(rule, {
-        defineVariables: { val: "0" },
+        defineVariables: { val: 0 },
       });
 
       const buf = Buffer.from("dummy");
       const tasks = [];
       for (let i = 0; i < 60; i++) {
         const shouldMatch = i % 2 === 0;
-        const vars = { val: shouldMatch ? "100" : "10" };
+        const vars = { val: shouldMatch ? 100 : 10 };
         tasks.push(
           scanner.scanAsync(buf, vars).then((matches) => {
             if (shouldMatch) {

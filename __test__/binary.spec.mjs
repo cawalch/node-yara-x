@@ -313,6 +313,29 @@ describe('Flat / Binary Match ABI', () => {
       assert.deepStrictEqual(match.dataBytes, Buffer.from([0x80, 0xff, 0x41]))
       assert.strictEqual(match.dataBytes.length, match.length)
     })
+
+    it('should carry rule metadata through the catalog and toRuleMatches', () => {
+      const scanner = compile(sampleRule)
+      const data = Buffer.from('prefix---malicious_payload---suffix')
+      const result = scanner.scanBinary(data)
+      const expected = { author: 'Security Team' }
+
+      assert.deepStrictEqual(result.catalog.rules[0].meta, expected)
+
+      const view = new BinaryMatchView(result)
+      const [ruleMatch] = view.toRuleMatches(data)
+      assert.deepStrictEqual(ruleMatch.meta, expected)
+
+      const info = scanner
+        .getRules()
+        .find((rule) => rule.identifier === 'DetectMalware')
+      assert.deepStrictEqual(info.meta, expected)
+      assert.deepStrictEqual(
+        scanner.getRules().find((rule) => rule.identifier === 'DetectSecondary')
+          .meta,
+        {},
+      )
+    })
   })
 })
 

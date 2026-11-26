@@ -457,7 +457,7 @@ export declare class YaraX {
    *
    * Ok(()) on success, or an error if compilation fails
    */
-  defineVariable(name: string, value: string): void
+  defineVariable(name: string, value: string | number | boolean | bigint): void
   /**
    * Scans multiple files concurrently across a Rayon worker thread pool.
    *
@@ -864,7 +864,7 @@ export interface MatchData {
   dataBytes?: Buffer
 }
 
-/** Metadata for a rule that matched in a binary scan. */
+/** Catalog entry for a compiled rule. */
 export interface RuleInfo {
   /** Rule identifier name. */
   identifier: string
@@ -872,8 +872,13 @@ export interface RuleInfo {
   namespace: string
   /** Rule tags. */
   tags: Array<string>
-  /** Rule pattern identifiers that matched. */
+  /**
+   * Pattern identifiers: the ones that matched in a binary scan, or all
+   * declared patterns when obtained from `getRules()`.
+   */
   patterns: Array<string>
+  /** Rule metadata as key-value pairs, matching `RuleMatch.meta`. */
+  meta: Record<string, string | number | boolean>
 }
 
 /**
