@@ -273,6 +273,10 @@ export declare class YaraX {
   /**
    * Scans the provided data asynchronously using the compiled YARA rules.
    *
+   * The input buffer is copied when this method is called, so mutating the
+   * buffer afterwards does not change the scan result. The synchronous
+   * [`scan`](Self::scan) reads the buffer directly and stays zero-copy.
+   *
    * # Arguments
    *
    * * `data` - The data to scan
@@ -302,6 +306,9 @@ export declare class YaraX {
    * This method is a fast-path boolean check that returns true as soon as any rule matches,
    * without allocating or constructing match objects, tags, or metadata.
    *
+   * The input buffer is copied when this method is called, so mutating the
+   * buffer afterwards does not change the result.
+   *
    * # Arguments
    *
    * * `data` - The data to scan
@@ -330,6 +337,9 @@ export declare class YaraX {
   isFileMatchAsync(filePath: string, variables?: Record<string, string | number | boolean>): Promise<boolean>
   /**
    * Scans the provided data asynchronously returning a flat binary match buffer and catalog.
+   *
+   * The input buffer is copied when this method is called, so mutating the
+   * buffer afterwards does not change the result.
    *
    * # Arguments
    *

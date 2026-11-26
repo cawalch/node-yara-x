@@ -2699,7 +2699,7 @@ rule test_1 {
       strictEqual(isMatch, true);
     });
 
-    it("should scan large 20MB buffers zero-copy asynchronously without memory corruption", async () => {
+    it("should scan large 20MB buffers asynchronously without memory corruption", async () => {
       const rule = `
         rule large_buffer_test {
           strings:
@@ -2717,14 +2717,12 @@ rule test_1 {
       const targetOffset = 18 * 1024 * 1024;
       needle.copy(largeBuffer, targetOffset);
 
-      // Zero-copy async scan
       const matches = await scanner.scanAsync(largeBuffer);
       strictEqual(matches.length, 1);
       strictEqual(matches[0].ruleIdentifier, "large_buffer_test");
       strictEqual(matches[0].matches.length, 1);
       strictEqual(matches[0].matches[0].offset, targetOffset);
 
-      // Zero-copy async boolean check
       const hasMatch = await scanner.isMatchAsync(largeBuffer);
       strictEqual(hasMatch, true);
 
@@ -2732,6 +2730,44 @@ rule test_1 {
       const cleanBuffer = Buffer.alloc(1024 * 1024 * 5);
       const noMatch = await scanner.isMatchAsync(cleanBuffer);
       strictEqual(noMatch, false);
+    });
+
+    it("should snapshot async scan input at dispatch time", async () => {
+      const scanner = yarax.compile(`
+        rule snapshot_check {
+          strings:
+            $a = "SNAPSHOT_MARKER"
+          condition:
+            $a
+        }
+      `);
+
+      const makeBuffer = () =>
+        Buffer.concat([
+          Buffer.alloc(256 * 1024, 0x78),
+          Buffer.from("SNAPSHOT_MARKER"),
+          Buffer.alloc(256 * 1024, 0x79),
+        ]);
+
+      for (let i = 0; i < 5; i++) {
+        const scanBuffer = makeBuffer();
+        const scanPromise = scanner.scanAsync(scanBuffer);
+        scanBuffer.fill(0);
+        const matches = await scanPromise;
+        strictEqual(matches.length, 1, "scanAsync must scan the dispatch-time bytes");
+        strictEqual(matches[0].matches[0].length, "SNAPSHOT_MARKER".length);
+
+        const isMatchBuffer = makeBuffer();
+        const isMatchPromise = scanner.isMatchAsync(isMatchBuffer);
+        isMatchBuffer.fill(0);
+        strictEqual(await isMatchPromise, true, "isMatchAsync must scan the dispatch-time bytes");
+
+        const binaryBuffer = makeBuffer();
+        const binaryPromise = scanner.scanBinaryAsync(binaryBuffer);
+        binaryBuffer.fill(0);
+        const binaryResult = await binaryPromise;
+        strictEqual(binaryResult.matchCount, 1, "scanBinaryAsync must scan the dispatch-time bytes");
+      }
     });
   });
 

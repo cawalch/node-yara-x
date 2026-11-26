@@ -101,6 +101,8 @@ const matches = await rules.scanFileAsync("./samples/large_file.bin");
 console.log(`Found ${matches.length} matching rule(s).`);
 ```
 
+The buffer-based async methods (`scanAsync()`, `isMatchAsync()`, and `scanBinaryAsync()`) copy their input when the call is made. Mutating the `Buffer` after the call therefore does not change the scan result. The synchronous `scan()` / `isMatch()` / `scanBinary()` variants read the buffer directly and remain zero-copy.
+
 ## Fast boolean matching
 
 When you only need to know whether any rule matched (e.g. filtering clean files in a high-throughput pipeline), `isMatch()` and `isFileMatch()` avoid allocating `RuleMatch`, `MatchData`, string buffers, and metadata objects:
