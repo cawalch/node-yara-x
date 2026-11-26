@@ -156,9 +156,7 @@ impl PathFilter {
   pub fn is_match(&self, path: &Path, relative: Option<&Path>) -> bool {
     let matches = |set: &GlobSet| {
       set.is_match_candidate(&Candidate::new(path))
-        || relative.is_some_and(|relative| {
-          set.is_match_candidate(&Candidate::new(relative))
-        })
+        || relative.is_some_and(|relative| set.is_match_candidate(&Candidate::new(relative)))
     };
 
     if let Some(ref excludes) = self.exclude_set {
@@ -280,7 +278,9 @@ fn thread_pool(threads: usize) -> Result<Arc<rayon::ThreadPool>> {
   let cache = POOLS.get_or_init(|| Mutex::new(PoolCache::default()));
 
   {
-    let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = cache
+      .lock()
+      .unwrap_or_else(|poisoned| poisoned.into_inner());
     guard.clock = guard.clock.wrapping_add(1);
     let now = guard.clock;
     if let Some(entry) = guard.pools.get_mut(&threads) {
@@ -303,7 +303,9 @@ fn thread_pool(threads: usize) -> Result<Arc<rayon::ThreadPool>> {
   );
 
   let evicted = {
-    let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = cache
+      .lock()
+      .unwrap_or_else(|poisoned| poisoned.into_inner());
     guard.clock = guard.clock.wrapping_add(1);
     let now = guard.clock;
 

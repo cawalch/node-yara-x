@@ -684,7 +684,9 @@ impl YaraX {
   }
 
   /// Scans the provided data using the compiled YARA rules.
-  #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>")]
+  #[napi(
+    ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>"
+  )]
   pub fn scan<'a>(
     &self,
     env: Env,
@@ -698,7 +700,9 @@ impl YaraX {
   }
 
   /// Scans a file using the compiled YARA rules.
-  #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean | bigint>")]
+  #[napi(
+    ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean | bigint>"
+  )]
   pub fn scan_file<'a>(
     &self,
     env: Env,
@@ -719,7 +723,9 @@ impl YaraX {
   /// without allocating or constructing match objects, tags, or metadata.
   ///
   /// `true` if any rule matches, `false` otherwise
-  #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>")]
+  #[napi(
+    ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>"
+  )]
   pub fn is_match(&self, data: Buffer, variables: Option<Object>) -> Result<bool> {
     self.with_sync_scanner(&variables, |scanner| {
       let results = scanner.scan(data.as_ref()).map_err(scan_error_to_napi)?;
@@ -733,7 +739,9 @@ impl YaraX {
   /// without allocating or constructing match objects, tags, or metadata.
   ///
   /// `true` if any rule matches, `false` otherwise
-  #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean | bigint>")]
+  #[napi(
+    ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean | bigint>"
+  )]
   pub fn is_file_match(&self, file_path: String, variables: Option<Object>) -> Result<bool> {
     self.with_sync_scanner(&variables, |scanner| {
       let results = scanner
@@ -748,7 +756,9 @@ impl YaraX {
   /// This method is an ultra-fast path for high-density match reporting.
   /// It packs matches into a contiguous 24-byte record buffer, avoiding per-match
   /// V8 object and string allocations.
-  #[napi(ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>")]
+  #[napi(
+    ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>"
+  )]
   pub fn scan_binary(&self, data: Buffer, variables: Option<Object>) -> Result<BinaryScanResult> {
     self.with_sync_scanner(&variables, |scanner| {
       let results = scanner.scan(data.as_ref()).map_err(scan_error_to_napi)?;
@@ -766,7 +776,9 @@ impl YaraX {
   /// This method is an ultra-fast path for high-density match reporting.
   /// It packs matches into a contiguous 24-byte record buffer, avoiding per-match
   /// V8 object and string allocations.
-  #[napi(ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean | bigint>")]
+  #[napi(
+    ts_args_type = "filePath: string, variables?: Record<string, string | number | boolean | bigint>"
+  )]
   pub fn scan_file_binary(
     &self,
     file_path: String,
