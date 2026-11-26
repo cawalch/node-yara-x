@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Concurrency pools are reused** across batch calls instead of being rebuilt each time, so `concurrency` no longer discards the worker scanner cache.
 - **Async typings match the sync API**: `variables` is `Record<string, string | number | boolean | bigint>` everywhere, and `emitWasmFileAsync()` resolves to `Promise<void>`.
 
+### Fixed
+- **Scan options can be changed while a scan is running**: `setTimeout()`, `setMaxScanSize()`, `setMaxMatchesPerPattern()`, `setUseMmap()`, `setFastScan()` and `setMatchContextSize()` threw `InvalidArg` ("the same native value cannot be borrowed mutably while another borrow is active") for as long as a task started with `scanAsync()`, `scanFileAsync()`, `isMatchAsync()`, `scanBinaryAsync()`, `scanFiles()` or `scanDirectory()` was still in flight. They now apply to the next scan without disturbing the running one. `addRuleSource()`, `addRuleFile()`, `defineVariable()` and `setConsoleLog()` still require the scanner to be idle (#292).
+
 ---
 
 ## [0.13.0] - 2026-11-14

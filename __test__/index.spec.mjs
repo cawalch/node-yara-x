@@ -2519,6 +2519,45 @@ rule test_1 {
       await Promise.all(tasks);
     });
 
+    it("should allow changing scan options while an async scan is in flight", async () => {
+      const scanner = yarax.compile(`
+        rule mutate_during_scan {
+          strings:
+            $a = "test"
+          condition:
+            $a
+        }
+      `);
+
+      // Dispatching an async scan pins a shared N-API borrow on the scanner
+      // until the task finalizes, so the calls below run inside the window in
+      // which an exclusive receiver would be rejected.
+      const inFlight = scanner.scanAsync(Buffer.from("hay test stack"));
+
+      for (const [name, apply] of [
+        ["setTimeout", () => scanner.setTimeout(5000)],
+        ["setMaxScanSize", () => scanner.setMaxScanSize(1024)],
+        ["setMaxMatchesPerPattern", () => scanner.setMaxMatchesPerPattern(2)],
+        ["setUseMmap", () => scanner.setUseMmap(false)],
+        ["setFastScan", () => scanner.setFastScan(false)],
+        ["setMatchContextSize", () => scanner.setMatchContextSize(8)],
+      ]) {
+        try {
+          apply();
+        } catch (err) {
+          fail(`${name}() threw while a scan was in flight: ${err.message}`);
+        }
+      }
+
+      const matches = await inFlight;
+      strictEqual(matches.length, 1);
+
+      // The option written during the flight must reach the next scan: the
+      // ten-occurrence buffer yields the two matches configured above.
+      const limited = scanner.scan(Buffer.from("test ".repeat(10)));
+      strictEqual(limited[0].matches.length, 2);
+    });
+
     it("should handle concurrent async scans across different rule sets without collision", async () => {
       const scannerA = yarax.compile(`rule rule_a { strings: $a = "alpha" condition: $a }`);
       const scannerB = yarax.compile(`rule rule_b { strings: $b = "beta" condition: $b }`);
