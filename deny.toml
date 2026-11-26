@@ -1,0 +1,52 @@
+# Supply-chain gate for the shipped addon (#287): advisories, licences, sources.
+# CI: .github/workflows/supply-chain.yml runs `cargo deny check advisories licenses sources`.
+# Written against cargo-deny 0.22; keep the CI pin in that file in sync.
+# `bans` is deliberately not checked: the graph legitimately holds digest 0.10+0.11,
+# syn 2+3 and similar coexisting majors, and duplicate bans would only buy ignore churn.
+
+[graph]
+# No target pruning and no feature widening: check every crate the release matrix
+# can link, as configured in Cargo.toml. Stricter than per-target checking.
+
+[advisories]
+yanked = "deny"
+ignore = [
+  # rsa 0.10.0-rc.19 (pinned by yara-x 1.23). The advisory's patched set is
+  # ">= 0.10.0", which semver-excludes prereleases, but its own text names the
+  # fix: "The rsa v0.10 series includes a migration to crypto-bigint and
+  # constant-time mitigations... Upgrading to this release should resolve all
+  # known constant-time issues." rc.19 is that series - it depends on
+  # crypto-bigint and carries post-Marvin hardening (its key.rs tests a
+  # CVE-2026-21895 regression). Drop when yara-x moves to rsa >=0.10.0 stable.
+  # Revisit 2027-05-26.
+  "RUSTSEC-2023-0071",
+]
+
+[licenses]
+# An expression must be satisfied by an allowed licence to pass, so crates whose
+# only licence is copyleft fail here. LGPL-2.1-or-later is deliberately absent:
+# it appears solely inside r-efi's "MIT OR Apache-2.0 OR LGPL-2.1-or-later"
+# choice (a permissively satisfiable expression); a dependency that ever ships
+# LGPL alone must stop at this gate.
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-1-Clause",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "MIT",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+# 0.22 removed the `unlicensed`/`copyleft` lints (EmbarkStudios/cargo-deny#611):
+# everything is the allow list now, which is stricter - an expression nothing
+# in `allow` satisfies fails, copyleft or otherwise.
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

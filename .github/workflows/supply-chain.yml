@@ -1,0 +1,29 @@
+name: Supply chain
+permissions:
+  contents: read
+"on":
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Weekly: the advisory database moves before Dependabot opens its bump PR,
+    # and licence drift in the 303-crate graph needs no PR to appear.
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  cargo-deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
+        with:
+          # Keep in sync with the `cargo-deny 0.22` config note in deny.toml.
+          tool: cargo-deny@0.22.1
+      - name: Check advisories, licences, sources
+        # deny.toml gates the graph the shipped addon links. Advisory-db clone
+        # takes ~1 min; add a cache here if that ever stings.
+        run: cargo deny check advisories licenses sources
