@@ -527,7 +527,13 @@ export interface BatchScanOptions {
 
 /** Aggregated result of a batch scan. */
 export interface BatchScanResult {
-  /** Total files discovered or submitted for scanning. */
+  /**
+   * Total files discovered or submitted for scanning.
+   *
+   * For directory scans this counts files discovered after include/exclude
+   * and size filtering. Files under a directory that could not be traversed
+   * are not discovered, so compare this with `errors`.
+   */
   totalFiles: number
   /** Total files successfully scanned. */
   scannedFiles: number
@@ -535,7 +541,14 @@ export interface BatchScanResult {
   matchedFiles: number
   /** Results per file (matching files only, or all files if include_clean_files is true). */
   results: Array<BatchFileMatch>
-  /** Errors encountered during the batch scan. */
+  /**
+   * Errors encountered during the batch scan.
+   *
+   * Includes per-file scan failures and directory traversal failures. A
+   * traversal error's `filePath` is the directory that could not be read.
+   * The scan keeps going: a partial sweep plus reported errors beats losing
+   * the results of everything that was readable.
+   */
   errors: Array<BatchFileError>
   /** Total scan duration in milliseconds. */
   durationMs: number

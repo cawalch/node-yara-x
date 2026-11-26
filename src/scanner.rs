@@ -1281,6 +1281,7 @@ impl YaraX {
     let output = execute_batch_scan(
       self.rules.clone(),
       file_paths,
+      Vec::new(),
       scan_opts,
       combined_vars,
       batch_opts,
@@ -1333,7 +1334,7 @@ impl YaraX {
       batch_opts.exclude_patterns.as_deref(),
     )?;
 
-    let files = collect_directory_files(
+    let (files, traversal_errors) = collect_directory_files(
       &dir_path,
       batch_opts.max_depth,
       batch_opts.follow_symlinks,
@@ -1345,6 +1346,7 @@ impl YaraX {
     let output = execute_batch_scan(
       self.rules.clone(),
       files,
+      traversal_errors,
       scan_opts,
       combined_vars,
       batch_opts,
