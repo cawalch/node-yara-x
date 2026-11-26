@@ -519,6 +519,21 @@ export interface CompilerOptions {
   /** Whether to raise an error on slow loops. */
   errorOnSlowLoop?: boolean
   /**
+   * Fail-closed defaults for a rule set you do not trust.
+   *
+   * `true` turns on `errorOnSlowPattern` so a pathological regex is rejected
+   * at compile time (`E018`) instead of surviving as a `slow_pattern`
+   * warning, forces `ignoreInvalidRules` off so no rule from a hostile corpus
+   * is silently skipped, and disables `include` so a rule set cannot make the
+   * compiler read files off disk.
+   *
+   * Explicit `false` values for those options do not override the preset: an
+   * option object assembled from a merge can silently defeat a preset that
+   * only fills in defaults. It does not bound a scan already running - use
+   * `setTimeout()` and `setMaxScanSize()` for that.
+   */
+  safeRules?: boolean
+  /**
    * Whether to skip rules that fail to compile instead of failing the whole
    * compilation.
    *

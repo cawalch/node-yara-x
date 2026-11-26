@@ -2557,6 +2557,103 @@ rule test_1 {
         strictEqual(matchesMain[0].ruleIdentifier, "main_rule");
       });
 
+      describe("safeRules preset", () => {
+        const blowup = `rule blowup { strings: $a = /a+b/ condition: any of them }`;
+
+        it("should reject a slow pattern that the default settings accept", () => {
+          const loose = yarax.compile(blowup);
+          deepStrictEqual(
+            loose.getWarnings().map((w) => w.code),
+            ["slow_pattern"],
+            "by default the guard survives only as a pull-only warning",
+          );
+
+          try {
+            yarax.compile(blowup, { safeRules: true });
+            fail("safeRules must reject the pattern");
+          } catch (error) {
+            strictEqual(error.ruleCode, "E018");
+            strictEqual(error.kind, "compile", "the preset reports through the usual error shape");
+          }
+
+          const off = yarax.compile(blowup, { safeRules: false });
+          strictEqual(off.ruleCount, 1, "the preset is opt-in");
+          deepStrictEqual(
+            off.getWarnings().map((w) => w.code),
+            ["slow_pattern"],
+            "safeRules: false is exactly the default",
+          );
+
+          strictEqual(
+            yarax.compile(blowup, { errorOnSlowLoop: true }).ruleCount,
+            1,
+            "errorOnSlowLoop does not catch this class, so the preset does not rely on it",
+          );
+        });
+
+        it("should not let another option undo the preset", () => {
+          const defeats = [
+            { errorOnSlowPattern: false },
+            { disableWarnings: ["slow_pattern"] },
+            { enableAllWarnings: false },
+            { maxWarnings: 0 },
+          ];
+
+          for (const options of defeats) {
+            throws(
+              () => yarax.compile(blowup, { safeRules: true, ...options }),
+              /E018/,
+              `safeRules must win over ${JSON.stringify(options)}`,
+            );
+          }
+        });
+
+        it("should refuse includes, which let a rule set choose files", () => {
+          const includeDir = join(__tempDir, "safe-rules-includes");
+          mkdirSync(includeDir, { recursive: true });
+          writeFileSync(join(includeDir, "shared.yar"), `rule shared { condition: false }`);
+          const source = `include "shared.yar"\nrule host { condition: false }`;
+
+          strictEqual(
+            yarax.compile(source, { includeDirectories: [includeDir] }).ruleCount,
+            2,
+            "without the preset the include resolves",
+          );
+
+          try {
+            yarax.compile(source, { safeRules: true, includeDirectories: [includeDir] });
+            fail("safeRules must refuse includes even when they would resolve");
+          } catch (error) {
+            strictEqual(error.ruleCode, "E044", "includes are disabled, not missing");
+          }
+        });
+
+        it("should not skip invalid rules under the preset", () => {
+          const corpus =
+            `rule good { strings: $a = "abc" condition: $a }\n` +
+            `rule broken { condition: no_such_ident }`;
+
+          const tolerant = yarax.compile(corpus, { ignoreInvalidRules: true });
+          ok(tolerant.getIgnoredRules().length > 0, "tolerant mode really does drop a rule");
+          strictEqual(tolerant.ruleCount, 1);
+
+          throws(
+            () => yarax.compile(corpus, { safeRules: true, ignoreInvalidRules: true }),
+            /E009/,
+            "a corpus must not be silently trimmed",
+          );
+        });
+
+        it("should leave an ordinary rule set alone", () => {
+          const scanner = yarax.compile(`rule pem { strings: $a = "BEGIN CERTIFICATE" condition: $a }`, {
+            safeRules: true,
+          });
+
+          strictEqual(scanner.ruleCount, 1);
+          deepStrictEqual(scanner.getWarnings(), [], "the preset is not a warning generator");
+        });
+      });
+
       it("should support multiple include directories", () => {
         const includeDir1 = join(__tempDir, "includes1");
         const includeDir2 = join(__tempDir, "includes2");

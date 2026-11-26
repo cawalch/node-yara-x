@@ -11,7 +11,8 @@ use crate::binary::{extract_binary_scan_results, BinaryScanResult, BinaryScanTas
 use crate::compiler::{
   add_source_to_compiler_tolerant, apply_compiler_options, apply_stored_compiler_options,
   collect_ignored_rules, ensure_no_uncovered_errors, ignored_module_warnings,
-  replay_sources_to_wasm, stored_options_from, validate_sources_standalone, StoredCompilerOptions,
+  replay_sources_to_wasm, safe_rules_requested, stored_options_from, validate_sources_standalone,
+  StoredCompilerOptions,
 };
 use crate::error::{io_error_to_napi, scan_error_to_napi};
 use crate::types::{
@@ -188,7 +189,8 @@ impl YaraX {
     let ignore_invalid_rules = options
       .as_ref()
       .and_then(|opts| opts.ignore_invalid_rules)
-      .unwrap_or(false);
+      .unwrap_or(false)
+      && !safe_rules_requested(options.as_ref());
 
     add_source_to_compiler_tolerant(
       &mut compiler,

@@ -88,21 +88,37 @@ pub struct StoredCompilerOptions {
   pub enable_includes: Option<bool>,
 }
 
+/// Whether the caller asked for the fail-closed untrusted-rules preset.
+///
+/// Every point that resolves an option the preset covers reads this, so the
+/// preset cannot be defeated by an explicit `false` in the same object (#291).
+pub fn safe_rules_requested(options: Option<&CompilerOptions<'_>>) -> bool {
+  options.and_then(|opts| opts.safe_rules).unwrap_or(false)
+}
+
 impl From<&CompilerOptions<'_>> for StoredCompilerOptions {
   fn from(opts: &CompilerOptions<'_>) -> Self {
+    // The preset outranks the individual switches it covers, on purpose.
+    let safe = safe_rules_requested(Some(opts));
+
     Self {
       ignore_modules: opts.ignore_modules.clone().unwrap_or_default(),
       banned_modules: opts.banned_modules.clone().unwrap_or_default(),
       features: opts.features.clone().unwrap_or_default(),
       relaxed_re_syntax: opts.relaxed_re_syntax.unwrap_or(false),
       condition_optimization: opts.condition_optimization.unwrap_or(false),
-      error_on_slow_pattern: opts.error_on_slow_pattern.unwrap_or(false),
+      error_on_slow_pattern: opts.error_on_slow_pattern.unwrap_or(false) || safe,
       error_on_slow_loop: opts.error_on_slow_loop.unwrap_or(false),
       max_warnings: opts.max_warnings.map(|m| m as usize),
       disable_warnings: opts.disable_warnings.clone().unwrap_or_default(),
       enable_all_warnings: opts.enable_all_warnings,
       include_directories: opts.include_directories.clone().unwrap_or_default(),
-      enable_includes: opts.enable_includes,
+      // A rule set must not choose which files the compiler opens.
+      enable_includes: if safe {
+        Some(false)
+      } else {
+        opts.enable_includes
+      },
     }
   }
 }
@@ -519,7 +535,8 @@ pub fn compile_sources_to_wasm(
   let ignore_invalid_rules = options
     .as_ref()
     .and_then(|opts| opts.ignore_invalid_rules)
-    .unwrap_or(false);
+    .unwrap_or(false)
+    && !safe_rules_requested(options);
 
   add_sources_and_emit(
     compiler,

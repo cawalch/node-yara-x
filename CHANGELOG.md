@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- See docs/release-process.md for how this section is promoted. -->
 
 ### Added
+- **`safeRules` preset**: one option for a rule set you did not write. It turns on `errorOnSlowPattern`, forces `ignoreInvalidRules` off, and disables `include` (#291).
+  - Passing `false` for any of those alongside the preset does not re-enable it; a merged options object could otherwise undo the preset quietly.
+  - `errorOnSlowLoop` is not in the bundle: measured on `/a+b/` it leaves the pattern compiling. The preset is compile-time only, so a running scan still needs `setTimeout()` or `setMaxScanSize()`.
 - **`kind` on thrown errors**: every synchronous entry point stamps the class of failure (`compile`, `timeout`, `io`, `mmap`, `protobuf`, `unknown-module`) so callers branch without matching message text. `code`, `message`, and `ruleCode` keep their values (#282).
   - An async rejection carries no stamp: a task's compute phase has no JavaScript environment to decorate.
 - **`rulesFormatInfo()`**: reports the serialized-blob format version plus the YARA-X and package versions, so a blob cache can key on compatibility.
