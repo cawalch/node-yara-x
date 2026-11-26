@@ -93,20 +93,43 @@ export declare class YaraX {
    * A vector of `CompilerError` objects (empty when no errors occurred)
    */
   getCompilationErrors(): Array<CompilerError>
-  /** Sets the maximum number of matches per pattern. */
+  /**
+   * Sets the maximum number of matches per pattern.
+   *
+   * Applies to scans started after the call, and is safe to call while a
+   * scan is in flight.
+   */
   setMaxMatchesPerPattern(maxMatches: number): void
-  /** Sets whether to use memory-mapped files for scanning. */
+  /**
+   * Sets whether to use memory-mapped files for scanning.
+   *
+   * Applies to scans started after the call, and is safe to call while a
+   * scan is in flight.
+   */
   setUseMmap(useMmap: boolean): void
-  /** Sets whether to use fast scan mode (stops searching for a pattern as soon as the first match is found). */
+  /**
+   * Sets whether to use fast scan mode (stops searching for a pattern as soon as the first match is found).
+   *
+   * Applies to scans started after the call, and is safe to call while a
+   * scan is in flight.
+   */
   setFastScan(fastScan: boolean): void
   /**
    * Sets the scan timeout in milliseconds; `0` disables it.
    *
    * Best-effort: YARA-X checks the deadline between work units, so a scan can
    * overrun it. Use `setMaxScanSize()` for a hard bound.
+   *
+   * Applies to scans started after the call, and is safe to call while a
+   * scan is in flight.
    */
   setTimeout(timeoutMs: number): void
-  /** Sets the match context size. */
+  /**
+   * Sets the match context size.
+   *
+   * Applies to scans started after the call, and is safe to call while a
+   * scan is in flight.
+   */
   setMatchContextSize(size: number): void
   /**
    * Returns the slowest rules seen by this scanner, fastest to slowest
@@ -131,6 +154,9 @@ export declare class YaraX {
    *
    * Any data or file exceeding this size will only have its initial
    * bytes scanned up to this limit. Passing 0 or a negative number clears the limit.
+   *
+   * Applies to scans started after the call, and is safe to call while a
+   * scan is in flight.
    */
   setMaxScanSize(maxBytes: number): void
   /** Total number of compiled rules. */
