@@ -1,10 +1,11 @@
 import yarax from "../index.js";
 import { existsSync, mkdirSync, writeFileSync, rmSync, statSync, readFileSync } from "fs";
 import { join, dirname } from "path";
-import { strictEqual, ok, fail, throws, deepStrictEqual, notStrictEqual } from "assert";
+import { strictEqual, ok, fail, throws, deepStrictEqual, notStrictEqual, rejects } from "assert";
 import { describe, it, before, after } from "node:test";
 import { fileURLToPath } from "url";
 import { spawnSync } from "node:child_process";
+import { listenerCount } from "node:events";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -3678,5 +3679,182 @@ describe("Rule logging and profiling", () => {
 
     scanner.clearProfilingData();
     strictEqual(scanner.getSlowestRules(3).length, 0);
+  });
+});
+
+describe("AbortSignal cancellation", () => {
+  const rule = `
+    rule CancelCheck {
+      strings:
+        $p = "CANCEL_PAYLOAD"
+      condition:
+        $p
+    }
+  `;
+  const payload = Buffer.from("data before CANCEL_PAYLOAD after");
+
+  // Every async entry point, with an empty context in the slot before the signal:
+  // that is what proves the signal is read from the last position, and a signal that
+  // was ignored or read from the wrong slot settles instead of rejecting.
+  const context = {};
+  const asyncCalls = {
+    scanAsync: (s, file, dir, signal) => s.scanAsync(payload, context, signal),
+    scanFileAsync: (s, file, dir, signal) => s.scanFileAsync(file, context, signal),
+    isMatchAsync: (s, file, dir, signal) => s.isMatchAsync(payload, context, signal),
+    isFileMatchAsync: (s, file, dir, signal) => s.isFileMatchAsync(file, context, signal),
+    scanBinaryAsync: (s, file, dir, signal) => s.scanBinaryAsync(payload, context, signal),
+    scanFileBinaryAsync: (s, file, dir, signal) => s.scanFileBinaryAsync(file, context, signal),
+    scanFiles: (s, file, dir, signal) => s.scanFiles([file], null, context, signal),
+    scanDirectory: (s, file, dir, signal) => s.scanDirectory(dir, null, context, signal),
+  };
+
+  const scanDir = (tag) => {
+    const dir = join(__tempDir, `cancel-${tag}-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "in.bin"), "data CANCEL_PAYLOAD");
+    return dir;
+  };
+
+  const asAbort = (name) => (error) => {
+    strictEqual(error.name, "AbortError", `${name} must reject with the platform abort name`);
+    // `Cancelled` is the N-API status the adapter gives cancelled async work,
+    // so a cancellation is one branch for every way it can land.
+    strictEqual(error.code, "Cancelled", `${name} must carry the N-API cancelled status`);
+    return true;
+  };
+
+  it("rejects a call whose signal was already aborted, without scanning", async () => {
+    const scanner = yarax.compile(rule);
+    const file = createTempFile("file CANCEL_PAYLOAD tail", ".bin");
+    const dir = scanDir("aborted");
+    strictEqual(scanner.scanFile(file).length, 1, "the file must be one the rules match");
+
+    for (const [name, call] of Object.entries(asyncCalls)) {
+      const controller = new AbortController();
+      controller.abort();
+      // `aborted` has to be read before anything is registered: a signal that
+      // already fired never notifies again, so without this the scan would run
+      // and resolve.
+      await rejects(() => call(scanner, file, dir, controller.signal), asAbort(name));
+    }
+  });
+
+  it("scans normally when the signal never fires", async () => {
+    const scanner = yarax.compile(rule);
+    const file = createTempFile("file CANCEL_PAYLOAD tail", ".bin");
+    const controller = new AbortController();
+
+    strictEqual((await scanner.scanAsync(payload, null, controller.signal)).length, 1);
+    strictEqual(await scanner.isMatchAsync(payload, null, controller.signal), true);
+    strictEqual((await scanner.scanBinaryAsync(payload, null, controller.signal)).matchCount, 1);
+    strictEqual((await scanner.scanFileBinaryAsync(file, null, controller.signal)).matchCount, 1);
+    strictEqual(controller.signal.aborted, false, "the caller's signal must stay untouched");
+  });
+
+  it("takes its abort listener off the signal once the scan settles", async () => {
+    // A service holds one controller for its whole lifetime, so a listener left
+    // behind per call would grow the process by one entry per scan.
+    const scanner = yarax.compile(rule);
+    const file = createTempFile("file CANCEL_PAYLOAD tail", ".bin");
+    const dir = scanDir("listeners");
+    const controller = new AbortController();
+
+    for (const [name, call] of Object.entries(asyncCalls)) {
+      await call(scanner, file, dir, controller.signal);
+      strictEqual(
+        listenerCount(controller.signal, "abort"),
+        0,
+        `${name} left an abort listener on the signal`,
+      );
+      strictEqual(controller.signal.aborted, false, `${name} touched the caller's signal`);
+    }
+  });
+
+  it("cancels a scan that was still queued when the signal fired", () => {
+    // One libuv thread means one async slot, so the second scan cannot start
+    // until the first has finished: the abort lands while it is still waiting,
+    // which is the backlog a client disconnect is supposed to drain. The slow
+    // input is sized to take about a second — the test asserts the outcome, not
+    // the duration, so a faster machine cannot turn a rejection into a pass.
+    const indexPath = new URL("../index.js", import.meta.url).href;
+    const script = `
+      import { compile } from ${JSON.stringify(indexPath)};
+      const scanner = compile('rule Queue { strings: $a = /a+b/ condition: any of them }');
+      const slow = Buffer.alloc(8 * 1024, 0x61);
+      slow[slow.length - 1] = 0x62;
+
+      const running = scanner.scanAsync(slow);
+      const controller = new AbortController();
+      const queued = scanner.scanAsync(Buffer.from("data CANCEL_PAYLOAD"), null, controller.signal);
+      controller.abort();
+
+      queued.then(
+        () => console.log("QUEUED RESOLVED"),
+        (error) => console.log(\`QUEUED REJECTED \${error.name} \${error.code}\`),
+      );
+      console.log(\`RUNNING OK \${(await running).length}\`);
+    `;
+
+    const child = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
+      encoding: "utf8",
+      env: { ...process.env, UV_THREADPOOL_SIZE: "1" },
+      timeout: 120_000,
+    });
+
+    strictEqual(child.signal, null, `child was killed: ${child.stderr}`);
+    strictEqual(child.status, 0, child.stderr);
+    ok(
+      child.stdout.includes("QUEUED REJECTED AbortError Cancelled"),
+      `the queued scan was not cancelled:\n${child.stdout}`,
+    );
+    ok(child.stdout.includes("RUNNING OK 1"), `the running scan was disturbed:\n${child.stdout}`);
+  });
+
+  it("survives a signal that sabotages its own listener methods", async () => {
+    // A target that throws leaves an exception pending on the environment, and N-API
+    // keeps it until someone clears it: un-cleared it escapes as an uncaught exception
+    // and kills the process. A target that cannot be un-listened from leaves this call's
+    // listener registered forever, survivable only because the listener reaches the flag
+    // through a slot and a stamp — its slot is handed to another scan as the loop runs,
+    // so the write is refused. Both must leave later calls healthy.
+    const scanner = yarax.compile(rule);
+    const controllers = [];
+    for (let i = 0; i < 200; i++) {
+      const controller = new AbortController();
+      controller.signal.removeEventListener = () => {
+        throw new Error("refused");
+      };
+      controllers.push(controller); // a listener that cannot be removed needs a live target
+      strictEqual((await scanner.scanAsync(payload, null, controller.signal)).length, 1);
+      controller.abort();
+    }
+
+    // Aborting from inside `addEventListener` leaves a listener that can never fire, so
+    // `aborted` is re-read after attaching rather than trusted from the read made while
+    // the argument was converted.
+    const hostile = new AbortController();
+    hostile.signal.addEventListener = () => hostile.abort();
+    await rejects(
+      () => scanner.scanAsync(payload, null, hostile.signal),
+      asAbort("a signal aborted while its listener was attached"),
+    );
+
+    strictEqual(controllers.length, 200);
+    strictEqual(scanner.scan(payload).length, 1, "a later call must be unaffected");
+  });
+
+  it("throws on a signal argument that is not an AbortSignal", async () => {
+    const scanner = yarax.compile(rule);
+    // An object with no `aborted` accessor would never cancel anything, so it
+    // is refused at the call rather than silently accepted. Argument errors
+    // throw; it is cancellation that rejects.
+    throws(() => scanner.scanAsync(payload, null, {}), /is not an AbortSignal/);
+    throws(() => scanner.isMatchAsync(payload, null, { aborted: "yes" }), /is not an AbortSignal/);
+    // A target that can be listened to but never un-listened from is refused for
+    // the same reason: the cleanup it implies is not available.
+    throws(
+      () => scanner.isMatchAsync(payload, null, { aborted: false, addEventListener() {} }),
+      /is not an AbortSignal/,
+    );
   });
 });

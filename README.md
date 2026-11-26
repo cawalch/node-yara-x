@@ -87,6 +87,28 @@ console.log(`Found ${matches.length} matching rule(s).`);
 
 The async methods that take a buffer (`scanAsync()`, `isMatchAsync()`, `scanBinaryAsync()`) copy their input at dispatch, so changing the `Buffer` afterwards does not change the result. The synchronous variants read the buffer directly and stay zero-copy.
 
+## Cancel work you no longer want
+
+Every async scan method takes an `AbortSignal` as its last argument, so a client disconnect or a shutdown can stop work that has not started:
+
+```javascript
+import { compile } from "@litko/yara-x";
+
+const rules = compile(`rule Payload { strings: $p = "sensitive payload" condition: $p }`);
+const controller = new AbortController();
+const sweep = rules.scanDirectory("./incoming", { concurrency: 4 }, null, controller.signal);
+setTimeout(() => controller.abort(), 500);
+
+const result = await sweep;
+if (result.cancelled) console.log(`Stopped after ${result.scannedFiles} files; ${result.cancelledFiles} never started.`);
+```
+
+- Fired **before the call or while it is queued** — the promise rejects (it never throws from the call) with `name: "AbortError"` and `code: "Cancelled"`, and nothing is scanned.
+- Fired **part-way through a batch** — the promise resolves with the partial sweep, `cancelled: true`, and `cancelledFiles` counting the files that never started; directory traversal stops too.
+- Fired **while a single scan is already running** — nothing: a scan in flight cannot be interrupted, so `setTimeout()` and `setMaxScanSize()` are the bounds for that.
+
+While a scan is in flight the binding hangs one `abort` listener on your signal and takes it off the moment the promise settles, so `signal.onabort` and your own listeners stay untouched. The synchronous methods take no signal: they block the thread that would have to deliver it.
+
 ## Fast boolean matching
 
 When you only need to know whether a rule matched — filtering clean files in a high-throughput pipeline, for example — `isMatch()` and `isFileMatch()` skip allocating `RuleMatch`, `MatchData`, string buffers, and metadata objects:
@@ -563,6 +585,7 @@ cosign verify-blob --bundle yara-x.<target>.node.sigstore yara-x.<target>.node \
 | Inspect and store | `ruleCount`, `getRules()`, `getImports()`, `serialize()` |
 | Reports | `getWarnings()`, `getIgnoredRules()`, `getCompilationErrors()` |
 | Guard the scan | `setMaxMatchesPerPattern()`, `setMaxScanSize()`, `setTimeout()`, `setFastScan()`, `setUseMmap()`, `errorOnSlowPattern`, `safeRules` |
+| Cancel queued work | the `signal` argument on the async scan methods — see [Cancel work you no longer want](#cancel-work-you-no-longer-want) |
 | Log and profile | `setConsoleLog()`, `getSlowestRules()`, `clearProfilingData()` |
 | WebAssembly | `compileToWasm()`, `compileFileToWasm()`, `emitWasmFile()`, `emitWasmFileAsync()` |
 | Options | `CompilerOptions` (compile-time), `BatchScanOptions` (batch scans), per-scan `variables` argument |

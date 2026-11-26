@@ -3,12 +3,18 @@
 //! This module coordinates parallel file and directory scanning using Rayon,
 //! native recursive directory traversal, glob-based pattern filtering, and
 //! thread-local scanner reuse across Rayon worker threads.
+//!
+//! A batch is also the one scan that can be cancelled part-way through: the signal
+//! stops files from being *started*, and the sweep resolves with what it finished
+//! rather than throwing minutes of work away. See [`crate::cancel`].
 
+use crate::cancel::{CancelFlag, CancelState};
+use crate::error::stamped_abort;
 use crate::scanner::YaraX;
 use crate::tasks::{BaseYaraTask, TaskScanOptions};
 use crate::types::{RuleMatch, RuleMatchData, VariableMap};
 use globset::{Candidate, Glob, GlobSet, GlobSetBuilder};
-use napi::{Error, Result, Status, Task};
+use napi::{Env, Error, Result, Status, Task};
 use napi_derive::napi;
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -97,6 +103,13 @@ pub struct BatchScanResult<'a> {
   /// error's `filePath` is the directory that could not be read. The scan
   /// continues past both, so a partial sweep is reported rather than lost.
   pub errors: Vec<BatchFileError>,
+  /// Whether the signal fired during the sweep, so `results` is partial. A signal
+  /// that fired after the last file had started stopped nothing, and reports
+  /// `cancelledFiles` 0; a sweep cancelled before it started rejects instead.
+  pub cancelled: bool,
+  /// Files discovered but never started. A truncated traversal never found the rest
+  /// of the tree, so counters can fall short — `cancelled` says it was cut short.
+  pub cancelled_files: u32,
   /// Total scan duration in milliseconds.
   pub duration_ms: f64,
 }
@@ -110,6 +123,8 @@ pub struct BatchScanResultData {
   pub matched_files: u32,
   pub results: Vec<BatchFileMatchData>,
   pub errors: Vec<BatchFileError>,
+  pub cancelled: bool,
+  pub cancelled_files: u32,
   pub duration_ms: f64,
 }
 
@@ -185,6 +200,7 @@ pub fn collect_directory_files(
   min_file_size: Option<i64>,
   max_file_size: Option<i64>,
   filter: &PathFilter,
+  cancel: &CancelFlag,
 ) -> Result<(Vec<String>, Vec<BatchFileError>, u32)> {
   let root = Path::new(dir_path);
   if !root.exists() {
@@ -212,6 +228,12 @@ pub fn collect_directory_files(
   let mut traversal_errors = Vec::new();
   let mut filtered_files = 0u32;
   for entry in walker {
+    // Traversal of a large tree takes time too. Files past here were never
+    // discovered, which is why they are not in `cancelled_files`.
+    if cancel.is_cancelled() {
+      break;
+    }
+
     match entry {
       Ok(e) => {
         let p = e.into_path();
@@ -347,56 +369,78 @@ fn thread_pool(threads: usize) -> Result<Arc<rayon::ThreadPool>> {
   Ok(pool)
 }
 
+/// The files a sweep runs over, plus what discovery already reported: both are only
+/// carried through to the result, so they travel together.
+pub struct BatchInput {
+  pub file_paths: Vec<String>,
+  pub filtered_files: u32,
+  pub traversal_errors: Vec<BatchFileError>,
+}
+
 /// Core multi-threaded batch scanning engine.
 pub fn execute_batch_scan(
   rules: Arc<Rules>,
-  file_paths: Vec<String>,
-  filtered_files: u32,
-  traversal_errors: Vec<BatchFileError>,
+  input: BatchInput,
   scan_options: TaskScanOptions,
   variables: Option<VariableMap>,
   batch_options: BatchScanOptions,
+  cancel: CancelFlag,
 ) -> Result<BatchScanResultData> {
   let start_time = Instant::now();
+  let BatchInput {
+    file_paths,
+    filtered_files,
+    traversal_errors,
+  } = input;
   let total_files = file_paths.len() as u32;
 
   let base_task = BaseYaraTask::new(rules, variables, scan_options);
   let only_matches = batch_options.only_matches.unwrap_or(false);
   let include_clean_files = batch_options.include_clean_files.unwrap_or(false);
 
-  let scan_one = |file_path: String| -> std::result::Result<BatchFileMatchData, BatchFileError> {
-    if only_matches {
-      match base_task.is_file_match(&file_path) {
-        Ok(is_match) => Ok(BatchFileMatchData {
-          file_path,
-          is_match,
-          matches: Vec::new(),
-        }),
-        Err(err) => Err(BatchFileError {
-          file_path,
-          error: err.to_string(),
-        }),
+  // A file that has not started is the last thing a cancellation can stop: with
+  // `concurrency` workers, `scanned_files` can overshoot the abort by that many.
+  // Skipping is recorded separately from failing.
+  let cancelled_files = AtomicU32::new(0);
+  let scan_one =
+    |file_path: String| -> Option<std::result::Result<BatchFileMatchData, BatchFileError>> {
+      if cancel.is_cancelled() {
+        cancelled_files.fetch_add(1, Ordering::Relaxed);
+        return None;
       }
-    } else {
-      match base_task.scan_file_to_data(&file_path) {
-        Ok(matches) => {
-          let is_match = !matches.is_empty();
-          Ok(BatchFileMatchData {
+
+      Some(if only_matches {
+        match base_task.is_file_match(&file_path) {
+          Ok(is_match) => Ok(BatchFileMatchData {
             file_path,
             is_match,
-            matches,
-          })
+            matches: Vec::new(),
+          }),
+          Err(err) => Err(BatchFileError {
+            file_path,
+            error: err.to_string(),
+          }),
         }
-        Err(err) => Err(BatchFileError {
-          file_path,
-          error: err.to_string(),
-        }),
-      }
-    }
-  };
+      } else {
+        match base_task.scan_file_to_data(&file_path) {
+          Ok(matches) => {
+            let is_match = !matches.is_empty();
+            Ok(BatchFileMatchData {
+              file_path,
+              is_match,
+              matches,
+            })
+          }
+          Err(err) => Err(BatchFileError {
+            file_path,
+            error: err.to_string(),
+          }),
+        }
+      })
+    };
 
   let scan_all =
-    |paths: Vec<String>| -> Vec<std::result::Result<BatchFileMatchData, BatchFileError>> {
+    |paths: Vec<String>| -> Vec<Option<std::result::Result<BatchFileMatchData, BatchFileError>>> {
       paths.into_par_iter().map(scan_one).collect()
     };
 
@@ -422,7 +466,10 @@ pub fn execute_batch_scan(
 
   for item in raw_results {
     match item {
-      Ok(match_data) => {
+      None => {
+        // Counted in `cancelled_files`; there is no result to report.
+      }
+      Some(Ok(match_data)) => {
         scanned_files += 1;
         if match_data.is_match {
           matched_files += 1;
@@ -431,7 +478,7 @@ pub fn execute_batch_scan(
           results.push(match_data);
         }
       }
-      Err(err) => {
+      Some(Err(err)) => {
         errors.push(err);
       }
     }
@@ -446,6 +493,9 @@ pub fn execute_batch_scan(
     matched_files,
     results,
     errors,
+    // The flag says the signal fired; the counter says whether it stopped anything.
+    cancelled: cancel.is_cancelled(),
+    cancelled_files: cancelled_files.load(Ordering::Relaxed),
     duration_ms,
   })
 }
@@ -478,6 +528,8 @@ pub fn convert_batch_result<'a>(
     matched_files: output.matched_files,
     results: converted_results,
     errors: output.errors,
+    cancelled: output.cancelled,
+    cancelled_files: output.cancelled_files,
     duration_ms: output.duration_ms,
   })
 }
@@ -495,6 +547,7 @@ pub struct BatchScanTask {
   scan_options: TaskScanOptions,
   variables: Option<VariableMap>,
   batch_options: BatchScanOptions,
+  cancel: CancelState,
 }
 
 impl BatchScanTask {
@@ -504,6 +557,7 @@ impl BatchScanTask {
     scan_options: TaskScanOptions,
     variables: Option<VariableMap>,
     batch_options: BatchScanOptions,
+    cancel: CancelState,
   ) -> Self {
     Self {
       rules,
@@ -511,6 +565,7 @@ impl BatchScanTask {
       scan_options,
       variables,
       batch_options,
+      cancel,
     }
   }
 }
@@ -520,36 +575,58 @@ impl Task for BatchScanTask {
   type JsValue = BatchScanResult<'static>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    let (files, traversal_errors, filtered_files) = match &mut self.target {
-      BatchScanTarget::Files(paths) => (std::mem::take(paths), Vec::new(), 0),
+    // Cancelled before the first file: there is no partial sweep to report, so
+    // this rejects like any other cancelled call rather than resolving empty.
+    self.cancel.reject_if_cancelled()?;
+
+    let input = match &mut self.target {
+      BatchScanTarget::Files(paths) => BatchInput {
+        file_paths: std::mem::take(paths),
+        filtered_files: 0,
+        traversal_errors: Vec::new(),
+      },
       BatchScanTarget::Directory(dir_path) => {
         let filter = PathFilter::new(
           self.batch_options.include_patterns.as_deref(),
           self.batch_options.exclude_patterns.as_deref(),
         )?;
-        collect_directory_files(
+        let (file_paths, traversal_errors, filtered_files) = collect_directory_files(
           dir_path,
           self.batch_options.max_depth,
           self.batch_options.follow_symlinks,
           self.batch_options.min_file_size,
           self.batch_options.max_file_size,
           &filter,
-        )?
+          &self.cancel.flag,
+        )?;
+        BatchInput {
+          file_paths,
+          filtered_files,
+          traversal_errors,
+        }
       }
     };
 
     execute_batch_scan(
       self.rules.clone(),
-      files,
-      filtered_files,
-      traversal_errors,
+      input,
       self.scan_options.clone(),
       self.variables.clone(),
       self.batch_options.clone(),
+      self.cancel.flag,
     )
+  }
+
+  fn reject(&mut self, env: Env, err: Error) -> Result<Self::JsValue> {
+    Err(stamped_abort(&env, err))
   }
 
   fn resolve(&mut self, env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
     convert_batch_result(env, output)
+  }
+
+  fn finally(mut self, env: Env) -> Result<()> {
+    self.cancel.release(&env);
+    Ok(())
   }
 }

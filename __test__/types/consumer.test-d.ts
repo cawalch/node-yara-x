@@ -85,6 +85,19 @@ const badBatch = a.scanDirectory("/tmp", {}, { x: null });
 // bigint is a valid extern variable value on both paths.
 const bigintOk = a.scanAsync(Buffer.from("x"), { x: 9007199254740993n });
 
+// #285: the async scan methods take an `AbortSignal` last, and a cancelled
+// batch says so with the right field types rather than `any`.
+const abortedSignal = new AbortController().signal;
+const cancelledMatches: Promise<Array<RuleMatch>> = a.scanAsync(Buffer.from("x"), undefined, abortedSignal);
+const cancelledBinary: Promise<BinaryScanResult> = a.scanBinaryAsync(Buffer.from("x"), undefined, abortedSignal);
+const cancelledSweep: Promise<{ cancelled: boolean; skipped: number }> = a
+  .scanFiles(["/tmp/x"], {}, null, abortedSignal)
+  .then((r) => ({ cancelled: r.cancelled, skipped: r.cancelledFiles }));
+// The signal stays optional, so existing calls keep compiling.
+const stillOptional: Promise<Array<RuleMatch>> = a.scanAsync(Buffer.from("x"));
+// @ts-expect-error the last argument is an AbortSignal, not a bare object
+const badSignal = a.scanAsync(Buffer.from("x"), null, {});
+
 // #286: `emitWasmFileAsync()` resolves to void, not `unknown`.
 const wasmVoid: Promise<void> = a.emitWasmFileAsync("/tmp/none.wasm");
 // @ts-expect-error a void resolution is not a number
@@ -94,3 +107,4 @@ void [b, c, d, result, rawCompile, rawCreate, rawDeserialize, rawFromFile];
 void [asyncMatches, binary, match, s];
 void [ruleMeta, binaryMeta];
 void [badSync, badFileAsync, badBatch, bigintOk, wasmVoid, wasmNotUnknown];
+void [cancelledMatches, cancelledBinary, cancelledSweep, stillOptional, badSignal];
