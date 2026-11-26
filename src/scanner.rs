@@ -91,8 +91,9 @@ pub struct YaraX {
   /// Sink for messages emitted by rules through the `console` module. Held
   /// behind `Arc` because `ThreadsafeFunction` is not `Clone` and the scanner
   /// closure must own its handle for the `'static` scanner.
-  pub(crate) console_log:
-    Option<std::sync::Arc<ThreadsafeFunction<String, Unknown<'static>, String, Status, false>>>,
+  pub(crate) console_log: Option<
+    std::sync::Arc<ThreadsafeFunction<String, Unknown<'static>, String, Status, false, true>>,
+  >,
 }
 
 impl YaraX {
@@ -607,30 +608,17 @@ impl YaraX {
   /// Messages arrive on the Node.js event loop, so a synchronous scan returns
   /// before the callback runs. Pass nothing to discard rule output again.
   ///
-  /// The callback handle is un-referenced, so setting one does not keep the
-  /// Node.js process alive: a script that finishes scanning exits normally.
-  /// A consequence is that rule-log messages still queued when the process
-  /// exits may not be delivered.
+  /// The callback handle is created weak (un-referenced), so setting one does
+  /// not keep the Node.js process alive: a script that finishes scanning exits
+  /// normally. A consequence is that rule-log messages still queued when the
+  /// process exits may not be delivered.
   #[napi]
   pub fn set_console_log(
     &mut self,
-    env: Env,
-    callback: Option<ThreadsafeFunction<String, Unknown<'static>, String, Status, false>>,
-  ) -> Result<()> {
-    self.console_log = match callback {
-      Some(mut cb) => {
-        // The handle is created referred, which pins the event loop for as long
-        // as the scanner lives. Rule logging is diagnostic, so an un-referenced
-        // handle is the right tradeoff: a trailing message may be lost at exit,
-        // but the process can exit at all.
-        #[allow(deprecated)]
-        cb.unref(&env)?;
-        Some(std::sync::Arc::new(cb))
-      }
-      None => None,
-    };
+    callback: Option<ThreadsafeFunction<String, Unknown<'static>, String, Status, false, true>>,
+  ) {
+    self.console_log = callback.map(std::sync::Arc::new);
     self.invalidate_scanner_cache();
-    Ok(())
   }
 
   /// Sets the maximum number of bytes to scan.
