@@ -10,7 +10,7 @@ use crate::types::{
 };
 use crate::variables::{diagnostic_location, get_variable_value, VariableHandler};
 use napi::bindgen_prelude::Object;
-use napi::{Error, Result, Status};
+use napi::{Env, Error, Result, Status};
 use std::collections::HashMap;
 use std::path::Path;
 use yara_x::errors::CompileError;
@@ -176,13 +176,18 @@ pub fn apply_stored_compiler_options(
 /// A `None` namespace means the default namespace; the compiler switches to
 /// it explicitly so that a source without a namespace never inherits the
 /// namespace of a previously added source.
+///
+/// `env` is the JavaScript environment to decorate a thrown compilation error
+/// with; `None` (a background task, or a caller that discards the error) keeps
+/// the plain one.
 pub fn add_source_to_compiler(
   compiler: &mut Compiler<'_>,
   source: &str,
   namespace: Option<&str>,
   origin: Option<&str>,
+  env: Option<&Env>,
 ) -> Result<()> {
-  add_source_to_compiler_tolerant(compiler, source, namespace, origin, false)
+  add_source_to_compiler_tolerant(compiler, source, namespace, origin, false, env)
 }
 
 /// Adds a source to the compiler, optionally skipping rules that fail.
@@ -199,6 +204,7 @@ pub fn add_source_to_compiler_tolerant(
   namespace: Option<&str>,
   origin: Option<&str>,
   tolerate: bool,
+  env: Option<&Env>,
 ) -> Result<()> {
   // A `None` namespace means the default namespace; switch to it explicitly
   // so a source without a namespace never inherits a previously set one.
@@ -227,7 +233,7 @@ pub fn add_source_to_compiler_tolerant(
     compiler
       .add_source(source_code)
       .map(|_| ())
-      .map_err(|e| compile_error_to_napi(&e))
+      .map_err(|e| compile_error_to_napi(&e, env))
   }
 }
 
@@ -453,12 +459,15 @@ fn add_sources_and_emit(
   output_path: &str,
 ) -> Result<()> {
   for (index, rule_source) in sources.iter().enumerate() {
+    // Emission has no report channel and runs without a JavaScript
+    // environment, so the diagnostics are not decorated.
     add_source_to_compiler_tolerant(
       &mut compiler,
       &rule_source.source,
       rule_source.namespace.as_deref(),
       origins.get(index).and_then(Option::as_deref),
       ignore_invalid_rules,
+      None,
     )?;
   }
 

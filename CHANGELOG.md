@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Structured diagnostic locations**: `CompilerError` and `CompilerWarning` now populate `source`, `line`, and `column` instead of always returning `undefined`. File-based entry points report the rule file path.
 - **Metadata on the binary catalog**: `BinaryScanResult.catalog.rules[].meta` and `RuleInfo.meta` (from `getRules()`) carry rule metadata, and `toRuleMatches()` materializes the same `meta` object as `scan()`.
 - **`bigint` global variables**: exact signed 64-bit values can be passed through `defineVariables`, scan variables, and `defineVariable()`. Out-of-range BigInts throw instead of truncating.
+- **Fields on thrown compile errors**: a rejected rule set now carries `ruleCode` (the `E0nn` code) and, where the diagnostic has one, `source` / `line` / `column` on the thrown `Error` — the same names as the objects from `getCompilationErrors()` and `validate()`. `code` and `message` are unchanged, so existing handling still works. WASM emission (`emitWasmFile()`, `emitWasmFileAsync()`, `compileFileToWasm()`) has no report channel of its own and keeps throwing the plain error until the error-code work in #282 settles.
 
 ### Changed
 - **`yara-x` is pinned exactly** (`=1.23.0`) because its private serialization format version decides blob compatibility; blob format changes now require a deliberate dependency bump and release note.
