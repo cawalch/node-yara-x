@@ -607,7 +607,7 @@ impl Task for BatchScanTask {
       self.scan_options.clone(),
       self.variables.clone(),
       self.batch_options.clone(),
-      self.cancel.flag,
+      self.cancel.flag.clone(),
     )
   }
 

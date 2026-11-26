@@ -8,7 +8,7 @@ use crate::batch::{
   BatchScanResult, BatchScanTarget, BatchScanTask, PathFilter,
 };
 use crate::binary::{extract_binary_scan_results, BinaryScanResult, BinaryScanTask, RuleInfo};
-use crate::cancel::{dispatch_cancel, CancelFlag, CancelSignal};
+use crate::cancel::{dispatch_cancel, CancelFlag};
 use crate::compiler::{
   add_source_to_compiler_tolerant, apply_compiler_options, apply_stored_compiler_options,
   collect_ignored_rules, ensure_no_uncovered_errors, ignored_module_warnings,
@@ -24,6 +24,7 @@ use crate::variables::{
   convert_variables_to_map, get_compiler_errors, get_compiler_warnings,
   variable_value_from_unknown, VariableHandler,
 };
+use napi::bindgen_prelude::AbortSignal;
 use napi::bindgen_prelude::Unknown;
 use napi::bindgen_prelude::{AsyncTask, Buffer, JsObjectValue, Object};
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
@@ -1072,19 +1073,22 @@ impl YaraX {
     env: Env,
     data: Buffer,
     variables: Option<Object>,
-    cancel_signal: Option<CancelSignal>,
+    cancel_signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<crate::tasks::ScanTask>> {
     let vars_map = self.combine_variables(variables)?;
     let rules = self.current_rules(Some(&env))?;
-    let cancel = dispatch_cancel(&env, cancel_signal)?;
+    let cancel = dispatch_cancel(&cancel_signal)?;
 
-    Ok(AsyncTask::new(crate::tasks::ScanTask::new(
-      rules,
-      crate::tasks::ScanTarget::Buffer(data.to_vec()),
-      vars_map,
-      self.task_scan_options(false),
-      cancel,
-    )))
+    Ok(AsyncTask::with_optional_signal(
+      crate::tasks::ScanTask::new(
+        rules,
+        crate::tasks::ScanTarget::Buffer(data.to_vec()),
+        vars_map,
+        self.task_scan_options(false),
+        cancel,
+      ),
+      cancel_signal,
+    ))
   }
 
   /// Scans a file asynchronously using the compiled YARA rules.
@@ -1098,19 +1102,22 @@ impl YaraX {
     env: Env,
     file_path: String,
     variables: Option<Object>,
-    cancel_signal: Option<CancelSignal>,
+    cancel_signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<crate::tasks::ScanTask>> {
     let vars_map = self.combine_variables(variables)?;
     let rules = self.current_rules(Some(&env))?;
-    let cancel = dispatch_cancel(&env, cancel_signal)?;
+    let cancel = dispatch_cancel(&cancel_signal)?;
 
-    Ok(AsyncTask::new(crate::tasks::ScanTask::new(
-      rules,
-      crate::tasks::ScanTarget::File(file_path),
-      vars_map,
-      self.task_scan_options(true),
-      cancel,
-    )))
+    Ok(AsyncTask::with_optional_signal(
+      crate::tasks::ScanTask::new(
+        rules,
+        crate::tasks::ScanTarget::File(file_path),
+        vars_map,
+        self.task_scan_options(true),
+        cancel,
+      ),
+      cancel_signal,
+    ))
   }
 
   /// Checks whether the provided data matches any compiled YARA rule asynchronously.
@@ -1130,19 +1137,22 @@ impl YaraX {
     env: Env,
     data: Buffer,
     variables: Option<Object>,
-    cancel_signal: Option<CancelSignal>,
+    cancel_signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<crate::tasks::IsMatchTask>> {
     let vars_map = self.combine_variables(variables)?;
     let rules = self.current_rules(Some(&env))?;
-    let cancel = dispatch_cancel(&env, cancel_signal)?;
+    let cancel = dispatch_cancel(&cancel_signal)?;
 
-    Ok(AsyncTask::new(crate::tasks::IsMatchTask::new(
-      rules,
-      crate::tasks::ScanTarget::Buffer(data.to_vec()),
-      vars_map,
-      self.task_scan_options(false),
-      cancel,
-    )))
+    Ok(AsyncTask::with_optional_signal(
+      crate::tasks::IsMatchTask::new(
+        rules,
+        crate::tasks::ScanTarget::Buffer(data.to_vec()),
+        vars_map,
+        self.task_scan_options(false),
+        cancel,
+      ),
+      cancel_signal,
+    ))
   }
 
   /// Checks whether a file matches any compiled YARA rule asynchronously.
@@ -1159,19 +1169,22 @@ impl YaraX {
     env: Env,
     file_path: String,
     variables: Option<Object>,
-    cancel_signal: Option<CancelSignal>,
+    cancel_signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<crate::tasks::IsMatchTask>> {
     let vars_map = self.combine_variables(variables)?;
     let rules = self.current_rules(Some(&env))?;
-    let cancel = dispatch_cancel(&env, cancel_signal)?;
+    let cancel = dispatch_cancel(&cancel_signal)?;
 
-    Ok(AsyncTask::new(crate::tasks::IsMatchTask::new(
-      rules,
-      crate::tasks::ScanTarget::File(file_path),
-      vars_map,
-      self.task_scan_options(true),
-      cancel,
-    )))
+    Ok(AsyncTask::with_optional_signal(
+      crate::tasks::IsMatchTask::new(
+        rules,
+        crate::tasks::ScanTarget::File(file_path),
+        vars_map,
+        self.task_scan_options(true),
+        cancel,
+      ),
+      cancel_signal,
+    ))
   }
 
   /// Scans the provided data asynchronously returning a flat binary match buffer and catalog.
@@ -1188,19 +1201,22 @@ impl YaraX {
     env: Env,
     data: Buffer,
     variables: Option<Object>,
-    cancel_signal: Option<CancelSignal>,
+    cancel_signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<BinaryScanTask>> {
     let vars_map = self.combine_variables(variables)?;
     let rules = self.current_rules(Some(&env))?;
-    let cancel = dispatch_cancel(&env, cancel_signal)?;
+    let cancel = dispatch_cancel(&cancel_signal)?;
 
-    Ok(AsyncTask::new(BinaryScanTask::new(
-      rules,
-      crate::tasks::ScanTarget::Buffer(data.to_vec()),
-      vars_map,
-      self.task_scan_options(false),
-      cancel,
-    )))
+    Ok(AsyncTask::with_optional_signal(
+      BinaryScanTask::new(
+        rules,
+        crate::tasks::ScanTarget::Buffer(data.to_vec()),
+        vars_map,
+        self.task_scan_options(false),
+        cancel,
+      ),
+      cancel_signal,
+    ))
   }
 
   /// Scans a file asynchronously returning a flat binary match buffer and catalog.
@@ -1214,19 +1230,22 @@ impl YaraX {
     env: Env,
     file_path: String,
     variables: Option<Object>,
-    cancel_signal: Option<CancelSignal>,
+    cancel_signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<BinaryScanTask>> {
     let vars_map = self.combine_variables(variables)?;
     let rules = self.current_rules(Some(&env))?;
-    let cancel = dispatch_cancel(&env, cancel_signal)?;
+    let cancel = dispatch_cancel(&cancel_signal)?;
 
-    Ok(AsyncTask::new(BinaryScanTask::new(
-      rules,
-      crate::tasks::ScanTarget::File(file_path),
-      vars_map,
-      self.task_scan_options(true),
-      cancel,
-    )))
+    Ok(AsyncTask::with_optional_signal(
+      BinaryScanTask::new(
+        rules,
+        crate::tasks::ScanTarget::File(file_path),
+        vars_map,
+        self.task_scan_options(true),
+        cancel,
+      ),
+      cancel_signal,
+    ))
   }
 
   /// Helper to build TaskScanOptions for background tasks.
@@ -1445,22 +1464,25 @@ impl YaraX {
     file_paths: Vec<String>,
     options: Option<BatchScanOptions>,
     variables: Option<Object>,
-    cancel_signal: Option<CancelSignal>,
+    cancel_signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<BatchScanTask>> {
     let combined_vars = self.combine_variables(variables)?;
     let rules = self.current_rules(Some(&env))?;
     let scan_opts = self.task_scan_options(true);
     let batch_opts = options.unwrap_or_default();
-    let cancel = dispatch_cancel(&env, cancel_signal)?;
+    let cancel = dispatch_cancel(&cancel_signal)?;
 
-    Ok(AsyncTask::new(BatchScanTask::new(
-      rules,
-      BatchScanTarget::Files(file_paths),
-      scan_opts,
-      combined_vars,
-      batch_opts,
-      cancel,
-    )))
+    Ok(AsyncTask::with_optional_signal(
+      BatchScanTask::new(
+        rules,
+        BatchScanTarget::Files(file_paths),
+        scan_opts,
+        combined_vars,
+        batch_opts,
+        cancel,
+      ),
+      cancel_signal,
+    ))
   }
 
   /// Scans multiple files synchronously across a Rayon worker thread pool.
@@ -1511,22 +1533,25 @@ impl YaraX {
     dir_path: String,
     options: Option<BatchScanOptions>,
     variables: Option<Object>,
-    cancel_signal: Option<CancelSignal>,
+    cancel_signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<BatchScanTask>> {
     let combined_vars = self.combine_variables(variables)?;
     let rules = self.current_rules(Some(&env))?;
     let scan_opts = self.task_scan_options(true);
     let batch_opts = options.unwrap_or_default();
-    let cancel = dispatch_cancel(&env, cancel_signal)?;
+    let cancel = dispatch_cancel(&cancel_signal)?;
 
-    Ok(AsyncTask::new(BatchScanTask::new(
-      rules,
-      BatchScanTarget::Directory(dir_path),
-      scan_opts,
-      combined_vars,
-      batch_opts,
-      cancel,
-    )))
+    Ok(AsyncTask::with_optional_signal(
+      BatchScanTask::new(
+        rules,
+        BatchScanTarget::Directory(dir_path),
+        scan_opts,
+        combined_vars,
+        batch_opts,
+        cancel,
+      ),
+      cancel_signal,
+    ))
   }
 
   /// Recursively scans a directory synchronously across a Rayon worker thread pool.
