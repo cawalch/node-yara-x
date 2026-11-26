@@ -78,6 +78,10 @@ pub struct MatchData {
   /// results, and for `toRuleMatches()` when a source buffer is supplied).
   /// Unlike `data`, this round-trips binary patterns that match invalid
   /// UTF-8.
+  ///
+  /// Populating this field copies the matched bytes, so high-density scans
+  /// pay one allocation per match. Use `setMaxMatchesPerPattern()` or the
+  /// binary match API when the bytes are not needed.
   pub data_bytes: Option<Buffer>,
 }
 
@@ -153,8 +157,9 @@ impl From<MetaValue<'_>> for MetaValueData {
       MetaValue::Float(f) => Self::Float(f),
       MetaValue::String(s) => Self::String(s.to_string()),
       MetaValue::Bool(b) => Self::Bool(b),
-      // Metadata strings with invalid UTF-8 arrive as raw bytes. Decode them
-      // lossily instead of replacing the whole value with a placeholder.
+      // Some metadata values arrive as raw bytes: invalid UTF-8, and strings
+      // with NUL or escape bytes. Decode them lossily instead of replacing
+      // the whole value with a placeholder.
       MetaValue::Bytes(b) => Self::String(String::from_utf8_lossy(b).into_owned()),
     }
   }

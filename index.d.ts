@@ -39,7 +39,13 @@ export declare class BinaryMatchView {
   getRule(index: number): RuleInfo | null
   /** Gets the pattern identifier for the match record at `index`. */
   getPattern(index: number): string | null
-  /** Slices the matched byte slice directly out of the source buffer. */
+  /**
+   * Slices the matched byte slice directly out of the source buffer.
+   *
+   * Pass the same bytes that were scanned; the view does not retain the
+   * source. Async scans copy their input, so pass the original buffer
+   * unchanged.
+   */
   getSlice(index: number, source: Buffer): Buffer | null
   /**
    * Lazily materializes all binary match records into the standard `RuleMatch` object graph.
@@ -47,6 +53,11 @@ export declare class BinaryMatchView {
    * If `source` buffer is provided, the matched bytes are sliced into
    * `MatchData.data` (lossy UTF-8) and `MatchData.dataBytes` (exact bytes).
    * Otherwise, `MatchData.data` is an empty string and `dataBytes` is absent.
+   *
+   * Pass the same bytes that were scanned; the view does not retain the
+   * source. Async scans copy their input, so mutating the buffer between
+   * `scanBinaryAsync()` and this call yields slices that no longer match the
+   * scan.
    */
   toRuleMatches(source?: Buffer): Array<RuleMatch>
 }
@@ -488,7 +499,12 @@ export interface BannedModule {
 
 /** Error encountered while scanning an individual file in a batch. */
 export interface BatchFileError {
-  /** Path of the file that failed. */
+  /**
+   * Path of the file or directory that failed.
+   *
+   * Directory scans report traversal failures here, so this may name a
+   * directory rather than a file.
+   */
   filePath: string
   /** Error description. */
   error: string
@@ -840,6 +856,10 @@ export interface MatchData {
    * results, and for `toRuleMatches()` when a source buffer is supplied).
    * Unlike `data`, this round-trips binary patterns that match invalid
    * UTF-8.
+   *
+   * Populating this field copies the matched bytes, so high-density scans
+   * pay one allocation per match. Use `setMaxMatchesPerPattern()` or the
+   * binary match API when the bytes are not needed.
    */
   dataBytes?: Buffer
 }

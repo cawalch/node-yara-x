@@ -1239,7 +1239,7 @@ describe("yarax Tests", () => {
     );
   });
 
-  it("should preserve metadata strings containing invalid UTF-8", () => {
+  it("should not collapse escaped metadata strings to 'unknown'", () => {
     const rule = String.raw`
     rule test_metadata_bytes {
       meta:
@@ -1259,7 +1259,7 @@ describe("yarax Tests", () => {
 
     strictEqual(matches.length, 1);
     strictEqual(meta.author, "Alice");
-    notStrictEqual(meta.latin1, "unknown", "invalid UTF-8 must not become the literal 'unknown'");
+    notStrictEqual(meta.latin1, "unknown", "raw metadata bytes must not become the literal 'unknown'");
     ok(meta.latin1.startsWith("Ren"), `lossy metadata should keep its valid prefix: ${JSON.stringify(meta.latin1)}`);
     ok(meta.latin1.endsWith(" "));
     strictEqual(meta.with_nul, "a\u0000b", "a NUL byte stays part of the metadata string");
@@ -2699,7 +2699,7 @@ rule test_1 {
     });
   });
 
-  describe("fastScan and zero-copy async buffer handling", () => {
+  describe("fastScan and large async buffer handling", () => {
     it("should allow enabling fastScan mode to limit pattern matches", () => {
       const rule = `
         rule test_fast_scan {

@@ -197,6 +197,10 @@ impl BinaryMatchView {
   }
 
   /// Slices the matched byte slice directly out of the source buffer.
+  ///
+  /// Pass the same bytes that were scanned; the view does not retain the
+  /// source. Async scans copy their input, so pass the original buffer
+  /// unchanged.
   #[napi]
   pub fn get_slice(&self, index: u32, source: Buffer) -> Option<Buffer> {
     let offset = self.get_offset(index)? as usize;
@@ -213,6 +217,11 @@ impl BinaryMatchView {
   /// If `source` buffer is provided, the matched bytes are sliced into
   /// `MatchData.data` (lossy UTF-8) and `MatchData.dataBytes` (exact bytes).
   /// Otherwise, `MatchData.data` is an empty string and `dataBytes` is absent.
+  ///
+  /// Pass the same bytes that were scanned; the view does not retain the
+  /// source. Async scans copy their input, so mutating the buffer between
+  /// `scanBinaryAsync()` and this call yields slices that no longer match the
+  /// scan.
   #[napi(ts_args_type = "source?: Buffer")]
   pub fn to_rule_matches<'a>(
     &self,

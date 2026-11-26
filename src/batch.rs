@@ -64,7 +64,10 @@ pub struct BatchFileMatchData {
 #[napi(object)]
 #[derive(Clone)]
 pub struct BatchFileError {
-  /// Path of the file that failed.
+  /// Path of the file or directory that failed.
+  ///
+  /// Directory scans report traversal failures here, so this may name a
+  /// directory rather than a file.
   pub file_path: String,
   /// Error description.
   pub error: String,

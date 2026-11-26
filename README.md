@@ -535,7 +535,9 @@ match.matches[0].data;      // "\uFFFD\uFFFDA" (lossy)
 match.matches[0].dataBytes; // <Buffer 80 ff 41>
 ```
 
-`dataBytes` makes binary patterns round-trippable without re-slicing the input yourself, which matters for `scanFile()` results where you hold no buffer.
+`dataBytes` makes binary patterns round-trippable without re-slicing the input yourself, which matters for `scanFile()` results where you hold no buffer. It is copied per match, so scans that expect thousands of matches should consider `setMaxMatchesPerPattern()` or the binary match API.
+
+Metadata values are decoded the same way: values that YARA stores as raw bytes (invalid UTF-8, or strings containing NUL or escape bytes) become lossy strings rather than being dropped, and the original bytes are not exposed.
 
 ### XOR key matches
 
@@ -687,7 +689,7 @@ When pattern details, offsets, and metadata are not needed, `isMatch()` avoids a
 
 ### Asynchronous scanning throughput
 
-`scanAsync()` and `isMatchAsync()` reuse thread-local scanner instances across libuv worker threads, keeping per-task dispatch overhead minimal.
+`scanAsync()` and `isMatchAsync()` reuse thread-local scanner instances across libuv worker threads to keep per-task dispatch overhead low. Buffer inputs are copied once at dispatch (see [Scan asynchronously](#scan-asynchronously)); these numbers include that copy.
 
 Benchmark with 2,000 requests against a compiled pattern:
 
