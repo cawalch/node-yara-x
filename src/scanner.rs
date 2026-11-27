@@ -25,7 +25,7 @@ use crate::variables::{
   variable_value_from_unknown, VariableHandler,
 };
 use napi::bindgen_prelude::Unknown;
-use napi::bindgen_prelude::{AsyncTask, Buffer, JsObjectValue, Object};
+use napi::bindgen_prelude::{AsyncTask, Buffer, BufferSlice, JsObjectValue, Object};
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::{Env, Error, Result, Status};
 use napi_derive::napi;
@@ -858,7 +858,7 @@ impl YaraX {
   pub fn scan<'a>(
     &self,
     env: Env,
-    data: Buffer,
+    data: BufferSlice<'_>,
     variables: Option<Object>,
   ) -> Result<Vec<RuleMatch<'a>>> {
     self.with_sync_scanner(env, &variables, |scanner| {
@@ -896,7 +896,12 @@ impl YaraX {
   #[napi(
     ts_args_type = "data: Buffer, variables?: Record<string, string | number | boolean | bigint>"
   )]
-  pub fn is_match(&self, env: Env, data: Buffer, variables: Option<Object>) -> Result<bool> {
+  pub fn is_match(
+    &self,
+    env: Env,
+    data: BufferSlice<'_>,
+    variables: Option<Object>,
+  ) -> Result<bool> {
     self.with_sync_scanner(env, &variables, |scanner| {
       let results = scanner
         .scan(data.as_ref())
@@ -939,7 +944,7 @@ impl YaraX {
   pub fn scan_binary(
     &self,
     env: Env,
-    data: Buffer,
+    data: BufferSlice<'_>,
     variables: Option<Object>,
   ) -> Result<BinaryScanResult> {
     self.with_sync_scanner(env, &variables, |scanner| {
@@ -1070,17 +1075,24 @@ impl YaraX {
   pub fn scan_async(
     &self,
     env: Env,
-    data: Buffer,
+    data: BufferSlice<'_>,
     variables: Option<Object>,
     cancel_signal: Option<CancelSignal>,
   ) -> Result<AsyncTask<crate::tasks::ScanTask>> {
     let vars_map = self.combine_variables(variables)?;
     let rules = self.current_rules(Some(&env))?;
     let cancel = dispatch_cancel(&env, cancel_signal)?;
+    // Copy only what the worker can read: yara-x truncates at `max_scan_size`
+    // itself (`scanner/mod.rs:355`), so copying the prefix is byte-identical
+    // to copying everything and letting the scan side cut it.
+    let bytes = match self.max_scan_size.get() {
+      Some(max) if data.len() > max => &data[..max],
+      _ => data.as_ref(),
+    };
 
     Ok(AsyncTask::new(crate::tasks::ScanTask::new(
       rules,
-      crate::tasks::ScanTarget::Buffer(data.to_vec()),
+      crate::tasks::ScanTarget::Buffer(bytes.to_vec()),
       vars_map,
       self.task_scan_options(false),
       cancel,
@@ -1128,17 +1140,21 @@ impl YaraX {
   pub fn is_match_async(
     &self,
     env: Env,
-    data: Buffer,
+    data: BufferSlice<'_>,
     variables: Option<Object>,
     cancel_signal: Option<CancelSignal>,
   ) -> Result<AsyncTask<crate::tasks::IsMatchTask>> {
     let vars_map = self.combine_variables(variables)?;
     let rules = self.current_rules(Some(&env))?;
     let cancel = dispatch_cancel(&env, cancel_signal)?;
+    let bytes = match self.max_scan_size.get() {
+      Some(max) if data.len() > max => &data[..max],
+      _ => data.as_ref(),
+    };
 
     Ok(AsyncTask::new(crate::tasks::IsMatchTask::new(
       rules,
-      crate::tasks::ScanTarget::Buffer(data.to_vec()),
+      crate::tasks::ScanTarget::Buffer(bytes.to_vec()),
       vars_map,
       self.task_scan_options(false),
       cancel,
@@ -1186,17 +1202,21 @@ impl YaraX {
   pub fn scan_binary_async(
     &self,
     env: Env,
-    data: Buffer,
+    data: BufferSlice<'_>,
     variables: Option<Object>,
     cancel_signal: Option<CancelSignal>,
   ) -> Result<AsyncTask<BinaryScanTask>> {
     let vars_map = self.combine_variables(variables)?;
     let rules = self.current_rules(Some(&env))?;
     let cancel = dispatch_cancel(&env, cancel_signal)?;
+    let bytes = match self.max_scan_size.get() {
+      Some(max) if data.len() > max => &data[..max],
+      _ => data.as_ref(),
+    };
 
     Ok(AsyncTask::new(BinaryScanTask::new(
       rules,
-      crate::tasks::ScanTarget::Buffer(data.to_vec()),
+      crate::tasks::ScanTarget::Buffer(bytes.to_vec()),
       vars_map,
       self.task_scan_options(false),
       cancel,
