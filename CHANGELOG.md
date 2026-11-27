@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- See docs/release-process.md for how this section is promoted. -->
 
+## [0.14.0] - 2026-11-27
+
 ### Added
 - **`AbortSignal` on the async scan methods**: pass a signal as the last argument to `scanAsync()`, `scanFileAsync()`, `isMatchAsync()`, `isFileMatchAsync()`, `scanBinaryAsync()`, `scanFileBinaryAsync()`, `scanFiles()` and `scanDirectory()` to stop work you no longer want (#285).
   - A cancelled call rejects — it never throws from the call — with `name` `AbortError`, `kind` `cancelled`, and `code` `Cancelled`, whether the signal fired before the call or while the work sat queued. A signal that was already aborted at the call is refused without dispatching anything.
@@ -19,14 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Passing `false` for any of those alongside the preset does not re-enable it; a merged options object could otherwise undo the preset quietly.
   - `errorOnSlowLoop` is not in the bundle: measured on `/a+b/` it leaves the pattern compiling. The preset is compile-time only, so a running scan still needs `setTimeout()` or `setMaxScanSize()`.
 - **`kind` on thrown errors**: every synchronous entry point stamps the class of failure (`compile`, `timeout`, `io`, `mmap`, `protobuf`, `unknown-module`) so callers branch without matching message text. `code`, `message`, and `ruleCode` keep their values (#282).
-  - An async rejection carries no stamp: a task's compute phase has no JavaScript environment to decorate.
+  - An async rejection carries no stamp - a task's compute phase has no JavaScript environment to decorate - except a cancellation, which carries `kind` `cancelled` (see the `AbortSignal` entry above).
 - **`rulesFormatInfo()`**: reports the serialized-blob format version plus the YARA-X and package versions, so a blob cache can key on compatibility.
 - **Clearer blob mismatch errors**: `deserialize()` names all three versions when a blob came from an incompatible build, instead of a bare format number.
 - **Structured diagnostic locations**: `CompilerError` and `CompilerWarning` now populate `source`, `line`, and `column` instead of always returning `undefined`. File-based entry points report the rule file path.
 - **Metadata on the binary catalog**: `BinaryScanResult.catalog.rules[].meta` and `RuleInfo.meta` (from `getRules()`) carry rule metadata, and `toRuleMatches()` materializes the same `meta` object as `scan()`.
 - **`bigint` global variables**: exact signed 64-bit values can be passed through `defineVariables`, scan variables, and `defineVariable()`. Out-of-range BigInts throw instead of truncating.
 - **Fields on thrown compile errors**: a rejected rule set throws an `Error` carrying `ruleCode`, the `E0nn` code, plus `source` / `line` / `column` where the diagnostic has them. The names match the objects from `getCompilationErrors()` and `validate()`, and `code` and `message` are unchanged, so existing handling still works.
-  - WASM emission (`emitWasmFile()`, `emitWasmFileAsync()`, `compileFileToWasm()`) has no report channel of its own. It keeps throwing the plain error until the error-code work in #282 settles.
+  - WASM emission (`emitWasmFile()`, `emitWasmFileAsync()`, `compileFileToWasm()`) has no report channel of its own and keeps throwing the plain error.
 
 ### Changed
 - **Async buffer scans hand the worker one copy, of what it can read**: the six buffer-taking methods (`scan()`, `isMatch()`, `scanBinary()` and their async trio) take the buffer as a borrow instead of a pinned N-API reference, and the async trio stop copying at the `setMaxScanSize()` bound. The dispatch-time copy that made scans immune to mid-scan mutation (#267) stays.
