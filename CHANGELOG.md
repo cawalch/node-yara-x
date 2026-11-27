@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - WASM emission (`emitWasmFile()`, `emitWasmFileAsync()`, `compileFileToWasm()`) has no report channel of its own. It keeps throwing the plain error until the error-code work in #282 settles.
 
 ### Changed
+- **Async buffer scans hand the worker one copy, of what it can read**: the six buffer-taking methods (`scan()`, `isMatch()`, `scanBinary()` and their async trio) take the buffer as a borrow instead of a pinned N-API reference, and the async trio stop copying at the `setMaxScanSize()` bound. The dispatch-time copy that made scans immune to mid-scan mutation (#267) stays.
+  - Measured on macOS/arm64 against the published 0.13.0, same machine, three-way interleaved: 1 MiB `scanAsync()` 122 → 112 µs/call (−8%, copy included); ≤16 KiB at parity within ±1 µs; 4 MiB under a 512 KiB cap 121 → 69 µs/call. `scanFileAsync()` and batch sweeps unchanged.
+  - The TypeScript surface, `index.js` and `index.d.ts` are byte-identical; nothing new to pass and nothing to change at call sites.
 - **Incremental additions cost one compilation, not one per call**: `addRuleSource()`, `addRuleSources()`, `addRuleFile()` and `defineVariable()` record the change and rebuild the rule set once, when it is next read or scanned. Each new source is still checked on its own when it is added.
   - 120 one-rule sources: 5.67 s → ≈100 ms, and 100–110 ms across runs, release build on macOS/arm64. The cost no longer grows with what is already on the scanner.
   - `compile()` and `addRuleSources()` accept what they accepted before.
