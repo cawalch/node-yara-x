@@ -15,7 +15,7 @@ rayon = "1.12.0"
 serde = "1"
 serde_json = "1"
 walkdir = "2.5.0"
-yara-x = { version = "=1.23.0", default-features = false, features = [
+yara-x = { version = "=1.25.0", default-features = false, features = [
   "console-module", "pe-module", "elf-module", "macho-module", "math-module",
   "hash-module", "string-module", "time-module", "dotnet-module",
   # ~383 KB in total; `vt-module` is omitted because it costs ~1.2 MB alone.

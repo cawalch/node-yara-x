@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- See docs/release-process.md for how this section is promoted. -->
 
+### Changed
+- **YARA-X 1.25.0** (was 1.23.0) (#313). Two upstream releases land: 1.24.0 (2026-11-20) and 1.25.0 (2026-11-26).
+  - **Serialized blobs must be recompiled.** 1.25 replaced the blob format's serializer (`bincode` → `postcard`), so blobs stored with an earlier release will not `deserialize()` here — `rulesFormatInfo()` reports the mismatch up front. Blobs always required matching versions; this release changes the format, not just the version string.
+  - Rule behavior changed, per upstream fixes: `0 of them` and contiguous `0 of (...)` no longer match when some of the listed patterns do match (#848 semantics), and heavily masked or atom-heavy rules can now fail compilation with `E049` (`TooManyAtoms`). Upstream also lowered its parser nesting limits; measured through this binding a 120-level nested condition still compiles, so treat that as hardening, not a new rejection rule. Rule sets that compiled before may need editing.
+  - Security and stability fixes you get for free, several in this binding's usage patterns: memory corruption when one Scanner is used sequentially across OS threads (#907 — the batch thread pool), out-of-bounds matches and panics on truncated `base64wide` input, regex correctness fixes (`wide` patterns, newlines, alternation priority), `include` directives restricted against path traversal, parser backtracking fixes, Authenticode/DSA verification panics.
+  - `wasmtime` stays at 48.0.10 (no supply-chain delta), and the `rsa 0.10.0-rc.19` cargo-deny ignore was dropped because yara-x now uses rsa stable, which the advisory already lists as patched.
+
 ## [0.14.0] - 2026-11-27
 
 ### Added

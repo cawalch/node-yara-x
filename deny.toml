@@ -11,15 +11,10 @@
 [advisories]
 yanked = "deny"
 ignore = [
-  # rsa 0.10.0-rc.19 (pinned by yara-x 1.23). The advisory's patched set is
-  # ">= 0.10.0", which semver-excludes prereleases, but its own text names the
-  # fix: "The rsa v0.10 series includes a migration to crypto-bigint and
-  # constant-time mitigations... Upgrading to this release should resolve all
-  # known constant-time issues." rc.19 is that series - it depends on
-  # crypto-bigint and carries post-Marvin hardening (its key.rs tests a
-  # CVE-2026-21895 regression). Drop when yara-x moves to rsa >=0.10.0 stable.
-  # Revisit 2027-05-26.
-  "RUSTSEC-2023-0071",
+  # None. The former RUSTSEC-2023-0071 ignore covered rsa 0.10.0-rc.19 (pinned
+  # by yara-x 1.23); yara-x 1.25 moved to rsa 0.10.0 stable, which the
+  # advisory's patched set (">= 0.10.0") matches, so the ignore was dropped
+  # rather than left to rot. Re-add entries only with a dated comment.
 ]
 
 [licenses]
